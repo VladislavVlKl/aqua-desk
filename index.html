@@ -1,14 +1,180 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>My TWA</title>
-    <!-- Подключаем скрипт Telegram -->
+    <title>CRM Тренера</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        body { font-family: -apple-system, sans-serif; padding: 15px; background: var(--tg-theme-bg-color); color: var(--tg-theme-text-color); }
+        .card { background: var(--tg-theme-secondary-bg-color); padding: 15px; border-radius: 12px; margin-bottom: 15px; border: 1px solid rgba(0,0,0,0.1); }
+        select, input, button { width: 100%; padding: 12px; margin: 8px 0; border-radius: 10px; border: 1px solid #ccc; box-sizing: border-box; font-size: 16px; }
+        label { font-size: 14px; font-weight: bold; display: block; margin-top: 10px; }
+        button { background: var(--tg-theme-button-color); color: var(--tg-theme-button-text-color); border: none; font-weight: bold; cursor: pointer; }
+        button:active { opacity: 0.8; }
+        .admin-section { margin-top: 20px; padding-top: 20px; border-top: 2px dashed rgba(0,0,0,0.1); }
+        .hidden { display: none; }
+        .status { font-size: 11px; opacity: 0.5; text-align: center; margin-top: 20px; }
+        hr { border: 0; border-top: 1px solid rgba(0,0,0,0.1); margin: 15px 0; }
+    </style>
 </head>
 <body>
-    <h1>Приложение в разработке</h1>
-    <p>Это заготовка для будущего Telegram Web App.</p>
+    <div id="app">
+        <h3 id="welcome">Загрузка профиля...</h3>
+
+        <!-- ИНТЕРФЕЙС ТРЕНЕРА -->
+        <div id="coach-section" class="hidden">
+            <div class="card">
+                <label>👤 Выбор клиента:</label>
+                <select id="clientSelect">
+                    <option value="">-- Загрузка списка... --</option>
+                </select>
+                
+                <hr>
+                
+                <label>➕ Новый клиент:</label>
+                <input type="text" id="newClientName" placeholder="ФИО клиента">
+                <button onclick="addNewClient()" style="background: #2ecc71;">Создать и добавить</button>
+            </div>
+
+            <div class="card">
+                <label>💰 Категория оплаты:</label>
+                <select id="category">
+                    <option value="80">Категория 80</option>
+                    <option value="90">Категория 90</option>
+                    <option value="100">Категория 100</option>
+                </select>
+
+                <label>⏱ Время (минут):</label>
+                <input type="number" id="duration" value="45">
+
+                <button id="saveBtn" onclick="saveWorkout()">💾 СОХРАНИТЬ ТРЕНИРОВКУ</button>
+            </div>
+        </div>
+
+        <!-- ИНТЕРФЕЙС АДМИНИСТРАТОРА -->
+        <div id="admin-section" class="hidden admin-section">
+            <button style="background: #f39c12;" onclick="alert('Модуль отчетов в разработке. Данные уже собираются в Supabase!')">📊 ПАНЕЛЬ АДМИНИСТРАТОРА</button>
+        </div>
+        
+        <p class="status" id="userStatus"></p>
+    </div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+
+        // Подключение к твоей базе
+        const SUPABASE_URL = 'https://nkwfvuhtpaoxsaczwsrg.supabase.co';
+        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5rd2Z2dWh0cGFveHNhY3p3c3JnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgxMzUwMzIsImV4cCI6MjA5MzcxMTAzMn0.a2rKoLNBB4OGpuENu1XUhsfbc-8JmPbxEkvLrXqUM3A';
+        const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        const MY_ID = 118803972; // Твой подтвержденный ID
+
+        async function init() {
+            const user = tg.initDataUnsafe?.user;
+            
+            if (!user) {
+                document.getElementById('welcome').innerText = "Доступ через Telegram...";
+                // Для тестов на ПК можно раскомментировать строку ниже:
+                // setupInterface({id: MY_ID, first_name: "Admin-Test"}); 
+                return;
+            }
+
+            setupInterface(user);
+        }
+
+        function setupInterface(user) {
+            document.getElementById('welcome').innerText = `Привет, ${user.first_name}!`;
+            document.getElementById('userStatus').innerText = `Telegram ID: ${user.id}`;
+
+            // Проверка на админа
+            if (user.id === MY_ID) {
+                document.getElementById('admin-section').classList.remove('hidden');
+            }
+
+            // Открываем функционал тренера
+            document.getElementById('coach-section').classList.remove('hidden');
+            loadClients(user.id);
+        }
+
+        async function loadClients(coachId) {
+            const { data, error } = await supabaseClient
+                .from('clients')
+                .select('*')
+                .eq('coach_id', coachId)
+                .order('name');
+            
+            const select = document.getElementById('clientSelect');
+            select.innerHTML = '<option value="">-- Выберите клиента --</option>';
+            
+            if (data && data.length > 0) {
+                data.forEach(c => {
+                    select.innerHTML += `<option value="${c.id}">${c.name}</option>`;
+                });
+            } else {
+                select.innerHTML = '<option value="">Список пуст</option>';
+            }
+        }
+
+        async function addNewClient() {
+            const user = tg.initDataUnsafe?.user || {id: MY_ID};
+            const nameInput = document.getElementById('newClientName');
+            const name = nameInput.value.trim();
+
+            if (!name) return alert('Введите имя клиента');
+
+            const { error } = await supabaseClient
+                .from('clients')
+                .insert([{ name: name, coach_id: user.id }]);
+
+            if (error) {
+                alert('Ошибка: ' + error.message);
+            } else {
+                nameInput.value = '';
+                alert('Клиент добавлен в ваш список');
+                loadClients(user.id);
+            }
+        }
+
+        async function saveWorkout() {
+            const user = tg.initDataUnsafe?.user || {id: MY_ID};
+            const clientId = document.getElementById('clientSelect').value;
+            const category = document.getElementById('category').value;
+            const duration = document.getElementById('duration').value;
+            const btn = document.getElementById('saveBtn');
+
+            if (!clientId) return alert('Выберите клиента из списка!');
+
+            btn.disabled = true;
+            btn.innerText = 'Сохранение...';
+
+            const { error } = await supabaseClient
+                .from('workouts')
+                .insert([{
+                    coach_id: user.id,
+                    client_id: clientId,
+                    category: category,
+                    duration: parseInt(duration)
+                }]);
+
+            if (error) {
+                alert('Ошибка базы: ' + error.message);
+                btn.disabled = false;
+                btn.innerText = '💾 СОХРАНИТЬ ТРЕНИРОВКУ';
+            } else {
+                tg.showPopup({
+                    title: 'Готово!',
+                    message: 'Тренировка успешно учтена в базе.',
+                    buttons: [{type: 'ok'}]
+                }, () => {
+                    tg.close();
+                });
+            }
+        }
+
+        init();
+    </script>
 </body>
 </html>
