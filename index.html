@@ -3,170 +3,158 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CRM Тренера</title>
+    <title>Fitness CRM</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
-        :root { --main-color: var(--tg-theme-button-color, #248bed); }
-        body { font-family: -apple-system, system-ui, sans-serif; padding: 15px; background: var(--tg-theme-bg-color); color: var(--tg-theme-text-color); margin: 0; }
-        .card { background: var(--tg-theme-secondary-bg-color); padding: 15px; border-radius: 15px; margin-bottom: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
-        .btn { width: 100%; padding: 12px; border-radius: 10px; border: none; font-weight: bold; cursor: pointer; transition: 0.2s; font-size: 16px; }
-        .btn-main { background: var(--main-color); color: white; }
-        .btn-green { background: #2ecc71; color: white; margin-top: 10px; }
-        .btn-outline { background: transparent; border: 1px solid var(--main-color); color: var(--main-color); margin-top: 10px; }
-        select, input { width: 100%; padding: 12px; margin: 8px 0; border-radius: 10px; border: 1px solid rgba(0,0,0,0.1); background: var(--tg-theme-bg-color); color: var(--tg-theme-text-color); font-size: 16px; box-sizing: border-box; }
-        label { font-size: 13px; opacity: 0.7; margin-left: 5px; }
+        :root { --main-bg: var(--tg-theme-bg-color, #ffffff); --sec-bg: var(--tg-theme-secondary-bg-color, #f0f0f0); --text: var(--tg-theme-text-color, #000000); --hint: var(--tg-theme-hint-color, #999); --btn: var(--tg-theme-button-color, #248bed); --btn-text: var(--tg-theme-button-text-color, #ffffff); }
+        body { font-family: -apple-system, system-ui, sans-serif; background: var(--main-bg); color: var(--text); margin: 0; padding: 15px; }
+        .card { background: var(--sec-bg); padding: 15px; border-radius: 12px; margin-bottom: 15px; border: 1px solid rgba(0,0,0,0.05); }
+        h3 { margin-top: 0; text-align: center; }
+        label { display: block; font-size: 12px; color: var(--hint); margin: 10px 0 5px 5px; }
+        select, input { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid rgba(0,0,0,0.1); background: var(--main-bg); color: var(--text); font-size: 16px; box-sizing: border-box; }
+        button { width: 100%; padding: 15px; border-radius: 12px; border: none; background: var(--btn); color: var(--btn-text); font-weight: bold; font-size: 16px; margin-top: 10px; cursor: pointer; }
+        .btn-ghost { background: transparent; color: var(--btn); border: 1px solid var(--btn); margin-top: 5px; }
         .hidden { display: none; }
-        .debt-alert { background: rgba(231, 76, 60, 0.1); border: 1px solid #e74c3c; padding: 10px; border-radius: 10px; margin-top: 10px; }
-        .tab-menu { display: flex; gap: 10px; margin-bottom: 15px; }
-        .tab-btn { flex: 1; padding: 8px; font-size: 12px; }
-        .header { text-align: center; margin-bottom: 20px; }
+        .debt-box { background: rgba(231, 76, 60, 0.1); border: 1px solid #e74c3c; padding: 10px; border-radius: 10px; margin-top: 10px; }
+        .tabs { display: flex; gap: 10px; margin-bottom: 20px; }
+        .tab-btn { flex: 1; padding: 10px; font-size: 12px; border-radius: 8px; border: 1px solid var(--btn); background: transparent; color: var(--btn); }
+        .tab-active { background: var(--btn); color: var(--btn-text); }
     </style>
 </head>
 <body>
 
-    <div class="header">
-        <h3 id="welcome">Загрузка...</h3>
-        <div id="adminBadge" class="hidden" style="color: #f39c12; font-size: 12px;">★ Режим Администратора</div>
+    <div class="tabs">
+        <button id="t1" class="tab-btn tab-active" onclick="switchTab('record')">Запись</button>
+        <button id="t2" class="tab-btn" onclick="switchTab('stats')">Отчеты</button>
+        <button id="tAdmin" class="tab-btn hidden" onclick="switchTab('admin')">Админ</button>
     </div>
 
-    <div class="tab-menu">
-        <button class="btn tab-btn btn-main" onclick="showScreen('screen-add')">Записать ПТ</button>
-        <button class="btn tab-btn btn-outline" onclick="showScreen('screen-stats')">Мои отчеты</button>
-        <button id="adminTab" class="btn tab-btn btn-outline hidden" onclick="showScreen('screen-admin')">Админка</button>
-    </div>
-
-    <div id="screen-add" class="screen">
+    <div id="record-screen">
         <div class="card">
             <label>Клиент</label>
-            <select id="clientSelect" onchange="checkClientStatus()">
-                <option value="">-- Выберите из списка --</option>
-                <option value="new">+ ДОБАВИТЬ НОВОГО</option>
+            <select id="clientSelect" onchange="toggleClientForm()">
+                <option value="">-- Выберите --</option>
+                <option value="new">+ Добавить нового клиента</option>
             </select>
 
-            <div id="newClientFields" class="hidden">
-                <input type="text" id="newClientName" placeholder="ФИО клиента">
-                <label>Категория оплаты</label>
-                <select id="newClientCat">
+            <div id="newClientForm" class="hidden">
+                <input type="text" id="newName" placeholder="ФИО клиента">
+                <label>Категория (закрепится за ним)</label>
+                <select id="newCat">
                     <option value="1 кт">1 кт (85 000)</option>
                     <option value="2 кт">2 кт (110 000)</option>
                     <option value="3 кт">3 кт (135 000)</option>
                 </select>
-                <button class="btn btn-green" onclick="handleAddNewClient()">Создать клиента</button>
+                <button class="btn-ghost" onclick="saveNewClient()">Закрепить клиента</button>
             </div>
         </div>
 
-        <div id="workoutFields" class="hidden">
+        <div id="workoutForm" class="hidden">
             <div class="card">
-                <label>Тип операции</label>
-                <select id="wType" onchange="checkWType()">
+                <label>Тип проведения</label>
+                <select id="wType" onchange="toggleDebtDate()">
                     <option value="Обычная">Обычная (Провел и оплатили)</option>
-                    <option value="В долг">В долг (Провел, оплаты нет)</option>
-                    <option value="Получил долг">Получил долг (Оплата за старую дату)</option>
+                    <option value="В долг">В долг (Провел, денег НЕТ)</option>
+                    <option value="Получил долг">Оплата долга (Деньги за старую дату)</option>
                 </select>
 
-                <div id="debtDateBox" class="hidden debt-alert">
-                    <label>Когда была тренировка?</label>
-                    <input type="date" id="debtSourceDate">
+                <div id="debtBox" class="hidden debt-box">
+                    <label>Дата, когда была тренировка:</label>
+                    <input type="date" id="debtDate">
                 </div>
 
                 <label>Количество ПТ</label>
-                <input type="number" id="qty" value="1" min="1" max="5">
+                <input type="number" id="qty" value="1" min="1">
 
-                <button class="btn btn-main" style="margin-top: 15px;" onclick="handleSaveWorkout()">СОХРАНИТЬ ЗАПИСЬ</button>
+                <button onclick="saveWorkout()">СОХРАНИТЬ В БАЗУ</button>
             </div>
         </div>
     </div>
 
-    <div id="screen-stats" class="screen hidden">
+    <div id="stats-screen" class="hidden">
         <div class="card">
-            <h4>Моя статистика</h4>
-            <p>Здесь будет шахматка тренировок (в разработке).</p>
+            <h3>Твоя статистика</h3>
+            <div id="statsContent">Загрузка данных...</div>
         </div>
     </div>
 
-    <div id="screen-admin" class="screen hidden">
+    <div id="admin-screen" class="hidden">
         <div class="card">
-            <h4>Панель управления</h4>
-            <button class="btn btn-outline" onclick="alert('Выгрузка в Excel...')">Отчет по филиалу</button>
-            <button class="btn btn-outline" style="margin-top:10px" onclick="alert('Список тренеров...')">Управление персоналом</button>
+            <h3>Панель управления</h3>
+            <button class="btn-ghost" onclick="alert('Отчет готовится...')">Скачать отчет (Excel)</button>
         </div>
     </div>
 
     <script>
         const tg = window.Telegram.WebApp;
-        tg.expand();
-
         const SUPABASE_URL = 'https://nkwfvuhtpaoxsaczwsrg.supabase.co';
-        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'; // Замени на свой
-        const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5rd2Z2dWh0cGFveHNhY3p3c3JnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgxMzUwMzIsImV4cCI6MjA5MzcxMTAzMn0.a2rKoLNBB4OGpuENu1XUhsfbc-8JmPbxEkvLrXqUM3A'; // <--- ВСТАВИТЬ СЮДА ANON KEY
+        const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-        const ADMIN_ID = 118803972;
-        let currentCoachClients = [];
+        const ADMIN_ID = 118803972; 
+        let coachClients = [];
 
         async function init() {
-            const user = tg.initDataUnsafe?.user || { id: 118803972, first_name: "Влад" };
-            document.getElementById('welcome').innerText = `Привет, ${user.first_name}!`;
-
-            if (user.id === ADMIN_ID) {
-                document.getElementById('adminTab').classList.remove('hidden');
-                document.getElementById('adminBadge').classList.remove('hidden');
-            }
-
+            const user = tg.initDataUnsafe.user || { id: ADMIN_ID };
+            if (user.id === ADMIN_ID) document.getElementById('tAdmin').classList.remove('hidden');
             loadClients(user.id);
+            tg.expand();
         }
 
-        function showScreen(screenId) {
-            document.querySelectorAll('.screen').forEach(s => s.classList.add('hidden'));
-            document.getElementById(screenId).classList.remove('hidden');
+        function switchTab(screen) {
+            document.getElementById('record-screen').classList.toggle('hidden', screen !== 'record');
+            document.getElementById('stats-screen').classList.toggle('hidden', screen !== 'stats');
+            document.getElementById('admin-screen').classList.toggle('hidden', screen !== 'admin');
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('tab-active'));
+            if(screen === 'record') document.getElementById('t1').classList.add('tab-active');
+            if(screen === 'stats') document.getElementById('t2').classList.add('tab-active');
+            if(screen === 'admin') document.getElementById('tAdmin').classList.add('tab-active');
         }
 
         async function loadClients(coachId) {
-            const { data } = await supabaseClient.from('clients').select('*').eq('coach_id', coachId);
-            currentCoachClients = data || [];
-            const select = document.getElementById('clientSelect');
-            select.innerHTML = '<option value="">-- Выберите из списка --</option><option value="new">+ ДОБАВИТЬ НОВОГО</option>';
-            currentCoachClients.forEach(c => {
-                select.innerHTML += `<option value="${c.id}">${c.name} (${c.category})</option>`;
+            const { data } = await sb.from('clients').select('*').eq('coach_id', coachId);
+            coachClients = data || [];
+            const sel = document.getElementById('clientSelect');
+            sel.innerHTML = '<option value="">-- Выберите --</option><option value="new">+ Добавить нового</option>';
+            coachClients.forEach(c => {
+                sel.innerHTML += `<option value="${c.id}">${c.name} (${c.category})</option>`;
             });
         }
 
-        function checkClientStatus() {
-            const val = document.getElementById('clientSelect').value;
-            document.getElementById('newClientFields').classList.toggle('hidden', val !== 'new');
-            document.getElementById('workoutFields').classList.toggle('hidden', val === 'new' || val === '');
+        function toggleClientForm() {
+            const isNew = document.getElementById('clientSelect').value === 'new';
+            document.getElementById('newClientForm').classList.toggle('hidden', !isNew);
+            document.getElementById('workoutForm').classList.toggle('hidden', isNew || !document.getElementById('clientSelect').value);
         }
 
-        function checkWType() {
-            const type = document.getElementById('wType').value;
-            document.getElementById('debtDateBox').classList.toggle('hidden', type !== 'Получил долг');
+        function toggleDebtDate() {
+            const isDebt = document.getElementById('wType').value === 'Получил долг';
+            document.getElementById('debtBox').classList.toggle('hidden', !isDebt);
         }
 
-        async function handleAddNewClient() {
-            const user = tg.initDataUnsafe?.user || { id: ADMIN_ID };
-            const name = document.getElementById('newClientName').value;
-            const cat = document.getElementById('newClientCat').value;
+        async function saveNewClient() {
+            const user = tg.initDataUnsafe.user || { id: ADMIN_ID };
+            const name = document.getElementById('newName').value;
+            const cat = document.getElementById('newCat').value;
+            if(!name) return alert("Введите имя");
 
-            if (!name) return alert("Введите имя");
-
-            const { error } = await supabaseClient.from('clients').insert([{ coach_id: user.id, name, category: cat }]);
-            if (!error) {
-                document.getElementById('newClientName').value = '';
-                loadClients(user.id);
-                alert("Клиент добавлен!");
-            }
+            await sb.from('clients').insert([{ coach_id: user.id, name: name, category: cat }]);
+            document.getElementById('newName').value = '';
+            loadClients(user.id);
+            alert("Клиент сохранен!");
         }
 
-        async function handleSaveWorkout() {
-            const user = tg.initDataUnsafe?.user || { id: ADMIN_ID };
+        async function saveWorkout() {
+            const user = tg.initDataUnsafe.user || { id: ADMIN_ID };
             const clientId = document.getElementById('clientSelect').value;
             const type = document.getElementById('wType').value;
             const qty = document.getElementById('qty').value;
-            const debtDate = document.getElementById('debtSourceDate').value;
+            const debtDate = document.getElementById('debtDate').value;
             
-            const client = currentCoachClients.find(c => c.id === clientId);
+            const client = coachClients.find(c => c.id === clientId);
 
-            const { error } = await supabaseClient.from('workouts').insert([{
+            const { error } = await sb.from('workouts').insert([{
                 coach_id: user.id,
                 client_id: clientId,
                 workout_type: type,
@@ -175,10 +163,10 @@
                 debt_source_date: type === 'Получил долг' ? debtDate : null
             }]);
 
-            if (!error) {
-                tg.showPopup({ message: "Запись успешно добавлена!" }, () => tg.close());
+            if(!error) {
+                tg.showPopup({ message: "Запись добавлена!" }, () => tg.close());
             } else {
-                alert("Ошибка: " + error.message);
+                alert(error.message);
             }
         }
 
