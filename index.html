@@ -3,174 +3,104 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fitness CRM</title>
+    <title>Вход в систему</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
-        :root { --main-bg: var(--tg-theme-bg-color, #ffffff); --sec-bg: var(--tg-theme-secondary-bg-color, #f0f0f0); --text: var(--tg-theme-text-color, #000000); --hint: var(--tg-theme-hint-color, #999); --btn: var(--tg-theme-button-color, #248bed); --btn-text: var(--tg-theme-button-text-color, #ffffff); }
-        body { font-family: -apple-system, system-ui, sans-serif; background: var(--main-bg); color: var(--text); margin: 0; padding: 15px; }
-        .card { background: var(--sec-bg); padding: 15px; border-radius: 12px; margin-bottom: 15px; border: 1px solid rgba(0,0,0,0.05); }
-        h3 { margin-top: 0; text-align: center; }
-        label { display: block; font-size: 12px; color: var(--hint); margin: 10px 0 5px 5px; }
-        select, input { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid rgba(0,0,0,0.1); background: var(--main-bg); color: var(--text); font-size: 16px; box-sizing: border-box; }
-        button { width: 100%; padding: 15px; border-radius: 12px; border: none; background: var(--btn); color: var(--btn-text); font-weight: bold; font-size: 16px; margin-top: 10px; cursor: pointer; }
-        .btn-ghost { background: transparent; color: var(--btn); border: 1px solid var(--btn); margin-top: 5px; }
-        .hidden { display: none; }
-        .debt-box { background: rgba(231, 76, 60, 0.1); border: 1px solid #e74c3c; padding: 10px; border-radius: 10px; margin-top: 10px; }
-        .tabs { display: flex; gap: 10px; margin-bottom: 20px; }
-        .tab-btn { flex: 1; padding: 10px; font-size: 12px; border-radius: 8px; border: 1px solid var(--btn); background: transparent; color: var(--btn); }
-        .tab-active { background: var(--btn); color: var(--btn-text); }
+        :root {
+            --bg: var(--tg-theme-bg-color, #ffffff);
+            --text: var(--tg-theme-text-color, #000000);
+            --hint: var(--tg-theme-hint-color, #999999);
+            --btn: var(--tg-theme-button-color, #2481cc);
+            --btn-text: var(--tg-theme-button-text-color, #ffffff);
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            text-align: center;
+        }
+        .card { padding: 20px; width: 80%; }
+        .loader { color: var(--hint); font-size: 14px; }
+        .error { color: #e53935; }
+        .welcome-msg { font-size: 20px; font-weight: bold; margin-bottom: 10px; }
+        .role-tag { font-size: 12px; opacity: 0.6; text-transform: uppercase; letter-spacing: 1px; }
+        .main-button {
+            margin-top: 25px;
+            padding: 12px 24px;
+            background-color: var(--btn);
+            color: var(--btn-text);
+            border: none;
+            border-radius: 10px;
+            font-weight: 600;
+            display: none; /* Покажется только после проверки */
+            width: 100%;
+        }
     </style>
 </head>
 <body>
 
-    <div class="tabs">
-        <button id="t1" class="tab-btn tab-active" onclick="switchTab('record')">Запись</button>
-        <button id="t2" class="tab-btn" onclick="switchTab('stats')">Отчеты</button>
-        <button id="tAdmin" class="tab-btn hidden" onclick="switchTab('admin')">Админ</button>
+<div class="card">
+    <div id="status" class="loader">Инициализация...</div>
+    <div id="content" style="display: none;">
+        <div class="role-tag" id="user-role"></div>
+        <div class="welcome-msg" id="user-name"></div>
+        <button id="main-btn" class="main-button">Начать работу</button>
     </div>
+</div>
 
-    <div id="record-screen">
-        <div class="card">
-            <label>Клиент</label>
-            <select id="clientSelect" onchange="toggleClientForm()">
-                <option value="">-- Выберите --</option>
-                <option value="new">+ Добавить нового клиента</option>
-            </select>
+<script>
+    const tg = window.Telegram.WebApp;
+    tg.expand();
 
-            <div id="newClientForm" class="hidden">
-                <input type="text" id="newName" placeholder="ФИО клиента">
-                <label>Категория (закрепится за ним)</label>
-                <select id="newCat">
-                    <option value="1 кт">1 кт (85 000)</option>
-                    <option value="2 кт">2 кт (110 000)</option>
-                    <option value="3 кт">3 кт (135 000)</option>
-                </select>
-                <button class="btn-ghost" onclick="saveNewClient()">Закрепить клиента</button>
-            </div>
-        </div>
+    // Ваши данные Supabase
+    const SUPABASE_URL = 'https://nkwfvuhtpaoxsaczwsrg.supabase.co';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5rd2Z2dWh0cGFveHNhY3p3c3JnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgxMzUwMzIsImV4cCI6MjA5MzcxMTAzMn0.a2rKoLNBB4OGpuENu1XUhsfbc-8JmPbxEkvLrXqUM3A';
+    
+    const supabase = supabasejs.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-        <div id="workoutForm" class="hidden">
-            <div class="card">
-                <label>Тип проведения</label>
-                <select id="wType" onchange="toggleDebtDate()">
-                    <option value="Обычная">Обычная (Провел и оплатили)</option>
-                    <option value="В долг">В долг (Провел, денег НЕТ)</option>
-                    <option value="Получил долг">Оплата долга (Деньги за старую дату)</option>
-                </select>
+    async function authorize() {
+        const status = document.getElementById('status');
+        const content = document.getElementById('content');
+        
+        // 1. Проверяем, запущен ли код в Telegram
+        const userId = tg.initDataUnsafe.user?.id;
 
-                <div id="debtBox" class="hidden debt-box">
-                    <label>Дата, когда была тренировка:</label>
-                    <input type="date" id="debtDate">
-                </div>
-
-                <label>Количество ПТ</label>
-                <input type="number" id="qty" value="1" min="1">
-
-                <button onclick="saveWorkout()">СОХРАНИТЬ В БАЗУ</button>
-            </div>
-        </div>
-    </div>
-
-    <div id="stats-screen" class="hidden">
-        <div class="card">
-            <h3>Твоя статистика</h3>
-            <div id="statsContent">Загрузка данных...</div>
-        </div>
-    </div>
-
-    <div id="admin-screen" class="hidden">
-        <div class="card">
-            <h3>Панель управления</h3>
-            <button class="btn-ghost" onclick="alert('Отчет готовится...')">Скачать отчет (Excel)</button>
-        </div>
-    </div>
-
-    <script>
-        const tg = window.Telegram.WebApp;
-        const SUPABASE_URL = 'https://nkwfvuhtpaoxsaczwsrg.supabase.co';
-        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5rd2Z2dWh0cGFveHNhY3p3c3JnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgxMzUwMzIsImV4cCI6MjA5MzcxMTAzMn0.a2rKoLNBB4OGpuENu1XUhsfbc-8JmPbxEkvLrXqUM3A'; // <--- ВСТАВИТЬ СЮДА ANON KEY
-        const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-
-        const ADMIN_ID = 118803972; 
-        let coachClients = [];
-
-        async function init() {
-            const user = tg.initDataUnsafe.user || { id: ADMIN_ID };
-            if (user.id === ADMIN_ID) document.getElementById('tAdmin').classList.remove('hidden');
-            loadClients(user.id);
-            tg.expand();
+        if (!userId) {
+            status.innerHTML = '<span class="error">Пожалуйста, откройте приложение из Telegram</span>';
+            return;
         }
 
-        function switchTab(screen) {
-            document.getElementById('record-screen').classList.toggle('hidden', screen !== 'record');
-            document.getElementById('stats-screen').classList.toggle('hidden', screen !== 'stats');
-            document.getElementById('admin-screen').classList.toggle('hidden', screen !== 'admin');
-            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('tab-active'));
-            if(screen === 'record') document.getElementById('t1').classList.add('tab-active');
-            if(screen === 'stats') document.getElementById('t2').classList.add('tab-active');
-            if(screen === 'admin') document.getElementById('tAdmin').classList.add('tab-active');
-        }
+        try {
+            // 2. Ищем пользователя в таблице profiles
+            const { data: profile, error } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('id', userId)
+                .single();
 
-        async function loadClients(coachId) {
-            const { data } = await sb.from('clients').select('*').eq('coach_id', coachId);
-            coachClients = data || [];
-            const sel = document.getElementById('clientSelect');
-            sel.innerHTML = '<option value="">-- Выберите --</option><option value="new">+ Добавить нового</option>';
-            coachClients.forEach(c => {
-                sel.innerHTML += `<option value="${c.id}">${c.name} (${c.category})</option>`;
-            });
-        }
-
-        function toggleClientForm() {
-            const isNew = document.getElementById('clientSelect').value === 'new';
-            document.getElementById('newClientForm').classList.toggle('hidden', !isNew);
-            document.getElementById('workoutForm').classList.toggle('hidden', isNew || !document.getElementById('clientSelect').value);
-        }
-
-        function toggleDebtDate() {
-            const isDebt = document.getElementById('wType').value === 'Получил долг';
-            document.getElementById('debtBox').classList.toggle('hidden', !isDebt);
-        }
-
-        async function saveNewClient() {
-            const user = tg.initDataUnsafe.user || { id: ADMIN_ID };
-            const name = document.getElementById('newName').value;
-            const cat = document.getElementById('newCat').value;
-            if(!name) return alert("Введите имя");
-
-            await sb.from('clients').insert([{ coach_id: user.id, name: name, category: cat }]);
-            document.getElementById('newName').value = '';
-            loadClients(user.id);
-            alert("Клиент сохранен!");
-        }
-
-        async function saveWorkout() {
-            const user = tg.initDataUnsafe.user || { id: ADMIN_ID };
-            const clientId = document.getElementById('clientSelect').value;
-            const type = document.getElementById('wType').value;
-            const qty = document.getElementById('qty').value;
-            const debtDate = document.getElementById('debtDate').value;
-            
-            const client = coachClients.find(c => c.id === clientId);
-
-            const { error } = await sb.from('workouts').insert([{
-                coach_id: user.id,
-                client_id: clientId,
-                workout_type: type,
-                qty: parseInt(qty),
-                category: client.category,
-                debt_source_date: type === 'Получил долг' ? debtDate : null
-            }]);
-
-            if(!error) {
-                tg.showPopup({ message: "Запись добавлена!" }, () => tg.close());
+            if (error || !profile) {
+                status.innerHTML = '<span class="error">Доступ закрыт.<br>Ваш ID (' + userId + ') не найден в системе.</span>';
             } else {
-                alert(error.message);
+                // 3. Если нашли — показываем интерфейс
+                status.style.display = 'none';
+                content.style.display = 'block';
+                document.getElementById('user-role').innerText = profile.role === 'admin' ? 'Администратор' : 'Тренер';
+                document.getElementById('user-name').innerText = 'Привет, ' + (profile.full_name || 'друг') + '!';
+                document.getElementById('main-btn').style.display = 'block';
             }
+        } catch (e) {
+            status.innerText = 'Ошибка связи с базой данных';
         }
+    }
 
-        init();
-    </script>
+    authorize();
+</script>
+
 </body>
 </html>
