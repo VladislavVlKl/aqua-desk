@@ -454,5 +454,193 @@ function calcSalary({workouts=[], duties=[], trainerGroups=[], groupSessions=[],
   const bonus   = adjustment?.bonus   || 0;
   const penalty = adjustment?.penalty || 0;
   const total   = ptSum + dropInSum + dutySum + childSum + adultSum + bonus - penalty;
-  return {cat, hours, ptSum, dropInSum, dutySum, childSum, adultSum, bonus, penalty, total};
+  return {cat, hours, ptSum, dropInSum, dutySum, childSum, adultSum, bonus, penalty, total// =============================================
+// db_additions.js — Добавить в конец db.js
+// (вставить ПЕРЕД последней закрывающей скобкой `};` объекта DB)
+// =============================================
+
+  // ─── SUBSCRIPTIONS ───────────────────────────
+
+  /** Активный абонемент клиента */
+  async getActiveSubscription(clientId) {
+    const {data,error} = await sb().from('subscriptions')
+      .select('*, training_goals(*)')
+      .eq('client_id', clientId).eq('is_active', true)
+      .order('created_at', {ascending:false}).limit(1).maybeSingle();
+    if (error) throw error; return data;
+  },
+
+  /** Все абонементы клиента (история) */
+  async getSubscriptionHistory(clientId) {
+    const {data,error} = await sb().from('subscriptions')
+      .select('*, training_goals(*)')
+      .eq('client_id', clientId)
+      .order('created_at', {ascending:false});
+    if (error) throw error; return data||[];
+  },
+
+  /** Создать абонемент */
+  async createSubscription(clientId, trainerId, startDate, initialBalance) {
+    // Закрыть предыдущий активный
+    await sb().from('subscriptions')
+      .update({is_active:false}).eq('client_id',clientId).eq('is_active',true);
+    const {data,error} = await sb().from('subscriptions')
+      .insert({client_id:clientId, trainer_id:trainerId,
+               start_date:startDate, initial_balance:initialBalance, is_active:true})
+      .select().single();
+    if (error) throw error; return data;
+  },
+
+  /** Закрыть абонемент с примечанием */
+  async closeSubscription(subId, closingNote, endDate) {
+    const {data,error} = await sb().from('subscriptions')
+      .update({is_active:false, end_date:endDate, closing_note:closingNote||null})
+      .eq('id',subId).select().single();
+    if (error) throw error; return data;
+  },
+
+  // ─── TRAINING GOALS ──────────────────────────
+
+  async addGoal(subscriptionId, clientId, goalText) {
+    const {data,error} = await sb().from('training_goals')
+      .insert({subscription_id:subscriptionId, client_id:clientId, goal_text:goalText})
+      .select().single();
+    if (error) throw error; return data;
+  },
+
+  async deleteGoal(goalId) {
+    const {error} = await sb().from('training_goals').delete().eq('id',goalId);
+    if (error) throw error;
+  },
+
+  // ─── SESSION NOTES ───────────────────────────
+
+  /** Конспект по workout_id */
+  async getNoteByWorkout(workoutId) {
+    const {data,error} = await sb().from('session_notes')
+      .select('*').eq('workout_id',workoutId).maybeSingle();
+    if (error) throw error; return data;
+  },
+
+  /** Конспекты клиента по абонементу */
+  async getNotesForSubscription(subscriptionId) {
+    const {data,error} = await sb().from('session_notes')
+      .select('*, workouts(workout_date)')
+      .eq('subscription_id',subscriptionId)
+      .order('session_number', {ascending:true});
+    if (error) throw error; return data||[];
+  },
+
+  /** Сохранить / обновить конспект */
+  async upsertNote(workoutId, clientId, trainerId, subscriptionId, accomplishments, nextTask, sessionNumber) {
+    const deadline = new Date(Date.now() + 48*3600000).toISOString();
+    const {data,error} = await sb().from('session_notes')
+      .upsert({
+        workout_id:workoutId, client_id:clientId, trainer_id:trainerId,
+        subscription_id:subscriptionId,
+        accomplishments:accomplishments||null,
+        next_task:nextTask||null,
+        session_number:sessionNumber||null,
+        deadline, updated_at:new Date().toISOString(),
+      }, {onConflict:'workout_id'})
+      .select().single();
+    if (error) throw error; return data;
+  },
+
+  /**
+   * Проверить: есть ли у тренера тренировки этого клиента
+   * без конспекта, старше 48 часов?
+   * Возвращает массив просроченных тренировок.
+   */
+  async getOverdueNotes(clientId, trainerId) {
+    const cutoff = new Date(Date.now() - 48*3600000).toISOString();
+    const {data:workouts} = await sb().from('workouts')
+      .select('id,workout_date').eq('client_id',clientId).eq('trainer_id',trainerId)
+      .eq('is_drop_in',false).eq('is_debt',false)
+      .lt('workout_date', cutoff).order('workout_date',{ascending:false});
+    if (!workouts?.length) return [];
+    const ids = workouts.map(w=>w.id);
+    const {data:notes} = await sb().from('session_notes')
+      .select('workout_id').in('workout_id',ids).not('accomplishments','is',null);
+    const noted = new Set((notes||[]).map(n=>n.workout_id));
+    return workouts.filter(w=>!noted.has(w.id));
+  },
+
+  /** Профиль клиента — полная история */
+  async getClientProfile(clientId, viewerRole, viewerBranches) {
+    const {data:client,error} = await sb().from('clients')
+      .select('*, profiles!trainer_id(fio,branches)').eq('id',clientId).single();
+    if (error) throw error;
+
+    // Доступ: тренер — только свои (проверяется снаружи)
+    // Старший тренер — только если тренер клиента в его филиале
+    if (viewerRole==='senior_trainer') {
+      const trainerBranches = client.profiles?.branches||[];
+      const hasAccess = trainerBranches.some(b=>viewerBranches.includes(b));
+      if (!hasAccess) throw new Error('Нет доступа');
+    }
+
+    const subs = await sb().from('subscriptions')
+      .select('*, training_goals(*)').eq('client_id',clientId)
+      .order('created_at',{ascending:false});
+
+    const workouts = await sb().from('workouts')
+      .select('*, session_notes(*)').eq('client_id',clientId)
+      .order('workout_date',{ascending:false}).limit(50);
+
+    return { client, subscriptions: subs.data||[], workouts: workouts.data||[] };
+  },
+
+  // ─── EVENTS ──────────────────────────────────
+
+  /** Предстоящие события (следующие 30 дней) */
+  async getUpcomingEvents(branch) {
+    const now = new Date().toISOString();
+    const in30 = new Date(Date.now()+30*86400000).toISOString();
+    let q = sb().from('events')
+      .select('*, event_participants(trainer_id), profiles!created_by(fio)')
+      .gte('end_time',now).lte('start_time',in30)
+      .order('start_time');
+    // Фильтр: события для этого филиала или для всех
+    if (branch) {
+      q = q.or(`branch.is.null,branch.eq.${branch}`);
+    }
+    const {data,error} = await q;
+    if (error) throw error; return data||[];
+  },
+
+  /** Проверить: есть ли блокирующие события в указанный период */
+  async getBlockingEvents(branch, startTime, endTime) {
+    const {data,error} = await sb().from('events')
+      .select('id,title,start_time,end_time')
+      .eq('blocks_pool',true)
+      .or(`branch.is.null,branch.eq.${branch}`)
+      .lt('start_time',endTime).gt('end_time',startTime);
+    if (error) throw error; return data||[];
+  },
+
+  async createEvent(fields) {
+    const {data,error} = await sb().from('events').insert(fields)
+      .select('*, profiles!created_by(fio)').single();
+    if (error) throw error; return data;
+  },
+
+  async deleteEvent(id) {
+    const {error} = await sb().from('events').delete().eq('id',id);
+    if (error) throw error;
+  },
+
+  async joinEvent(eventId, trainerId) {
+    const {error} = await sb().from('event_participants')
+      .insert({event_id:eventId, trainer_id:trainerId});
+    if (error && !error.message.includes('unique')) throw error;
+  },
+
+  async leaveEvent(eventId, trainerId) {
+    const {error} = await sb().from('event_participants')
+      .delete().eq('event_id',eventId).eq('trainer_id',trainerId);
+    if (error) throw error;
+  },
+
+// ─── Конец добавлений ─────────────────────────};
 }
