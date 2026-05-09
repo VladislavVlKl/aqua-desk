@@ -311,3 +311,101 @@ select option{background:#1a1a2e;}
 .control-item:last-child{border-bottom:none;}
 .ci-main{font-size:13px;font-weight:500;}
 .ci-sub{font-size:12px;color:var(--hint);margin-top:2px;}
+
+/* ── Добавить в конец style.css ── */
+
+/* ── КЛИЕНТЫ: список в вкладке Списание ── */
+.client-row {
+  display:flex;align-items:center;gap:10px;
+  background:var(--card);border:1px solid var(--border);
+  border-radius:var(--rs);padding:10px 14px;margin-bottom:8px;cursor:pointer;
+}
+.client-row:active { background:rgba(124,58,237,.1); }
+.cr-name { font-weight:600;font-size:14px;flex:1; }
+.cr-meta { font-size:12px;color:var(--hint); }
+.cr-arrow { color:var(--hint);font-size:18px;flex-shrink:0; }
+
+/* ── ПРОФИЛЬ КЛИЕНТА ── */
+.client-header {
+  display:flex;align-items:center;gap:14px;
+  background:var(--card);border:1px solid var(--border);
+  border-radius:var(--r);padding:16px;margin-bottom:16px;
+}
+.client-avatar {
+  width:52px;height:52px;border-radius:50%;background:var(--accent);
+  display:flex;align-items:center;justify-content:center;
+  font-size:22px;font-weight:700;color:#fff;flex-shrink:0;
+}
+.client-name { font-size:17px;font-weight:700;margin-bottom:4px; }
+.client-meta { font-size:12px;color:var(--hint); }
+
+/* ── АБОНЕМЕНТ ── */
+.sub-card {
+  background:var(--card);border:1px solid var(--border);
+  border-radius:var(--r);padding:14px;margin-bottom:12px;
+}
+.active-sub { border-color:rgba(124,58,237,.3);background:rgba(124,58,237,.05); }
+.past-sub   { cursor:pointer; }
+.past-sub:active { background:rgba(255,255,255,.07); }
+.new-sub-card { text-align:center;padding:20px; }
+.sub-card-header {
+  display:flex;justify-content:space-between;align-items:center;
+  font-size:14px;font-weight:600;margin-bottom:10px;
+}
+
+/* ── ЦЕЛИ ── */
+.goals-section { margin-top:8px; }
+.goals-header { display:flex;justify-content:space-between;align-items:center;margin-bottom:8px; }
+.goals-title { font-size:14px;font-weight:600; }
+.goal-item {
+  display:flex;justify-content:space-between;align-items:flex-start;
+  background:rgba(124,58,237,.08);border-left:3px solid var(--accent);
+  border-radius:4px;padding:8px 10px;margin-bottom:6px;font-size:13px;gap:8px;
+}
+
+/* ── КОНСПЕКТЫ ── */
+.session-item {
+  background:var(--card);border:1px solid var(--border);
+  border-radius:var(--rs);padding:10px 12px;margin-bottom:8px;
+}
+.overdue-session { border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.04); }
+.si-header { display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px; }
+.si-num  { font-weight:700;font-size:13px;color:var(--hint); }
+.si-date { font-size:13px; }
+.si-cat  { font-size:11px;padding:2px 7px;border-radius:20px;font-weight:700; }
+.note-block { background:rgba(16,185,129,.07);border-radius:6px;padding:8px 10px;font-size:13px; }
+.note-label { color:var(--text);line-height:1.4; }
+.note-next  { color:var(--hint);margin-top:4px;font-size:12px; }
+.overdue-badge { font-size:11px;color:var(--danger);font-weight:700; }
+
+/* Блок просроченного конспекта в вкладке Списание */
+.overdue-block {
+  background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);
+  border-radius:var(--rs);padding:12px 14px;font-size:13px;
+  color:var(--danger);margin-bottom:12px;
+}
+
+/* ── СОБЫТИЯ ── */
+.event-card {
+  background:var(--card);border:1px solid var(--border);
+  border-radius:var(--r);padding:14px;margin-bottom:12px;
+}
+.event-blocking { border-color:rgba(239,68,68,.3);background:rgba(239,68,68,.04); }
+.event-type-badge {
+  font-size:12px;font-weight:600;color:var(--hint);margin-bottom:6px;
+}
+.event-title { font-size:16px;font-weight:700;margin-bottom:6px; }
+.event-meta { font-size:13px;color:var(--hint);margin-bottom:3px; }
+.event-desc { font-size:13px;margin:8px 0;line-height:1.5; }
+.event-block-warn {
+  font-size:12px;color:var(--danger);font-weight:600;
+  margin:6px 0;padding:4px 8px;background:rgba(239,68,68,.1);border-radius:6px;
+}
+.event-footer {
+  display:flex;justify-content:space-between;align-items:center;
+  margin-top:10px;padding-top:10px;border-top:1px solid var(--border);
+}
+
+/* ── NAV OVERFLOW (для 6 вкладок) ── */
+.bottom-nav { overflow-x:auto;-webkit-overflow-scrolling:touch; }
+.nav-btn { min-width:52px;flex-shrink:0; }
