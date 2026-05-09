@@ -1,5 +1,5 @@
 // =============================================
-// Слой базы данных v2
+// База данных v3
 // =============================================
 
 let _sb = null;
@@ -10,439 +10,449 @@ function sb() {
 
 const DB = {
 
-  // ==================== AUTH ====================
-
-  async getProfileByTgId(tgId) {
-    const { data, error } = await sb().from('profiles').select('*').eq('tg_id', tgId).maybeSingle();
-    if (error) throw error;
-    return data;
+  // ─── AUTH ───────────────────────────────────
+  async getProfileByTgId(id) {
+    const {data,error} = await sb().from('profiles').select('*').eq('tg_id',id).maybeSingle();
+    if (error) throw error; return data;
   },
-
   async getUnclaimedProfileByFio(fio) {
-    const { data, error } = await sb().from('profiles').select('*')
-      .ilike('fio', fio.trim()).is('tg_id', null).maybeSingle();
-    if (error) throw error;
-    return data;
+    const {data,error} = await sb().from('profiles').select('*')
+      .ilike('fio',fio.trim()).is('tg_id',null).maybeSingle();
+    if (error) throw error; return data;
   },
-
   async claimProfile(profileId, tgId, pincode) {
-    const { data, error } = await sb().from('profiles')
-      .update({ tg_id: tgId, pincode })
-      .eq('id', profileId).select().single();
-    if (error) throw error;
-    return data;
+    const {data,error} = await sb().from('profiles')
+      .update({tg_id:tgId,pincode}).eq('id',profileId).select().single();
+    if (error) throw error; return data;
   },
 
-  // ==================== PROFILES ====================
-
+  // ─── PROFILES ────────────────────────────────
   async getAllProfiles() {
-    const { data, error } = await sb().from('profiles').select('*').order('fio');
-    if (error) throw error;
-    return data || [];
+    const {data,error} = await sb().from('profiles').select('*').order('fio');
+    if (error) throw error; return data||[];
   },
-
   async getProfilesByRole(role) {
-    const { data, error } = await sb().from('profiles').select('*')
-      .eq('role', role).order('fio');
-    if (error) throw error;
-    return data || [];
+    const {data,error} = await sb().from('profiles').select('*').eq('role',role).order('fio');
+    if (error) throw error; return data||[];
   },
-
-  async addTrainer(fio, branches, role = 'trainer') {
-    const { data, error } = await sb().from('profiles')
-      .insert({ fio: fio.trim(), branches, role }).select().single();
-    if (error) throw error;
-    return data;
+  async addTrainer(fio, branches, role='trainer') {
+    const {data,error} = await sb().from('profiles')
+      .insert({fio:fio.trim(),branches,role}).select().single();
+    if (error) throw error; return data;
   },
-
   async updateProfile(id, fields) {
-    const { data, error } = await sb().from('profiles')
-      .update(fields).eq('id', id).select().single();
-    if (error) throw error;
-    return data;
+    const {data,error} = await sb().from('profiles')
+      .update(fields).eq('id',id).select().single();
+    if (error) throw error; return data;
   },
 
-  // ==================== BRANCHES ====================
-
+  // ─── BRANCHES ────────────────────────────────
   async getBranches() {
-    const { data, error } = await sb().from('branches').select('*').order('name');
-    if (error) throw error;
-    return data || [];
+    const {data,error} = await sb().from('branches').select('*').order('name');
+    if (error) throw error; return data||[];
   },
-
   async addBranch(name) {
-    const { data, error } = await sb().from('branches')
-      .insert({ name: name.trim() }).select().single();
-    if (error) throw error;
-    return data;
+    const {data,error} = await sb().from('branches')
+      .insert({name:name.trim()}).select().single();
+    if (error) throw error; return data;
   },
-
   async deleteBranch(id) {
-    const { error } = await sb().from('branches').delete().eq('id', id);
+    const {error} = await sb().from('branches').delete().eq('id',id);
     if (error) throw error;
   },
-
-  // ==================== CLIENTS ====================
-
-  async getClients(trainerId) {
-    const { data, error } = await sb().from('clients').select('*')
-      .eq('trainer_id', trainerId)
-      .order('last_used', { ascending: false, nullsFirst: false });
-    if (error) throw error;
-    return data || [];
-  },
-
-  async getAllClientsInBranch(branch) {
-    // Для старшего тренера: клиенты всех тренеров филиала
-    const { data: trainers } = await sb().from('profiles').select('id')
-      .contains('branches', [branch]);
-    const ids = (trainers || []).map(t => t.id);
-    if (!ids.length) return [];
-    const { data, error } = await sb().from('clients').select('*, profiles!trainer_id(fio)')
-      .in('trainer_id', ids).order('fio');
-    if (error) throw error;
-    return data || [];
-  },
-
-  async addClient(fio, category, trainerId) {
-    const { data, error } = await sb().from('clients')
-      .insert({ fio: fio.trim(), category, trainer_id: trainerId, balance: 0 })
-      .select().single();
-    if (error) throw error;
-    return data;
-  },
-
-  async addBalance(clientId, amount) {
-    const { data: cl } = await sb().from('clients').select('balance').eq('id', clientId).single();
-    const { data, error } = await sb().from('clients')
-      .update({ balance: (cl?.balance || 0) + amount })
-      .eq('id', clientId).select().single();
-    if (error) throw error;
-    return data;
-  },
-
-  // ==================== WORKOUTS ====================
-
-  /** Списание ПТ (одна или несколько). is_debt = не уменьшает баланс */
-  async logWorkouts(rows) {
-    const { data, error } = await sb().from('workouts').insert(rows).select();
-    if (error) throw error;
-
-    // Если не долг — уменьшаем баланс
-    const nonDebt = rows.filter(r => !r.is_debt);
-    if (nonDebt.length > 0) {
-      const clientId = nonDebt[0].client_id;
-      const { data: cl } = await sb().from('clients').select('balance').eq('id', clientId).single();
-      await sb().from('clients').update({
-        balance: Math.max(0, (cl?.balance || 0) - nonDebt.length),
-        last_used: new Date().toISOString(),
-      }).eq('id', clientId);
-    } else {
-      // Обновляем last_used даже для долга
-      await sb().from('clients').update({ last_used: new Date().toISOString() })
-        .eq('id', rows[0].client_id);
-    }
-
-    return data;
-  },
-
-  /** Подтвердить долговую ПТ — снять с баланса */
-  async confirmDebt(workoutId, clientId) {
-    const { error: e1 } = await sb().from('workouts')
-      .update({ debt_confirmed_at: new Date().toISOString() }).eq('id', workoutId);
+  async renameBranch(oldName, newName) {
+    // 1. Обновляем справочник
+    const {error:e1} = await sb().from('branches')
+      .update({name:newName.trim()}).eq('name',oldName);
     if (e1) throw e1;
-
-    const { data: cl } = await sb().from('clients').select('balance').eq('id', clientId).single();
-    await sb().from('clients').update({ balance: Math.max(0, (cl?.balance || 0) - 1) })
-      .eq('id', clientId);
+    // 2. Вызываем SQL-функцию для обновления всех таблиц
+    const {error:e2} = await sb().rpc('rename_branch',{old_name:oldName,new_name:newName.trim()});
+    if (e2) throw e2;
   },
 
+  // ─── CLIENTS ─────────────────────────────────
+  async getClients(trainerId) {
+    const {data,error} = await sb().from('clients').select('*')
+      .eq('trainer_id',trainerId)
+      .order('last_used',{ascending:false,nullsFirst:false});
+    if (error) throw error; return data||[];
+  },
+  async getAllClientsInBranch(branch) {
+    const {data:t} = await sb().from('profiles').select('id').contains('branches',[branch]);
+    const ids = (t||[]).map(x=>x.id);
+    if (!ids.length) return [];
+    const {data,error} = await sb().from('clients')
+      .select('*, profiles!trainer_id(fio)').in('trainer_id',ids).order('fio');
+    if (error) throw error; return data||[];
+  },
+  async addClient(fio, category, trainerId, age, subStart, subEnd) {
+    const {data,error} = await sb().from('clients').insert({
+      fio:fio.trim(), category, trainer_id:trainerId, balance:0,
+      age: age||null,
+      subscription_start: subStart||null,
+      subscription_end:   subEnd||null,
+    }).select().single();
+    if (error) throw error; return data;
+  },
+  async updateClient(id, fields) {
+    const {data,error} = await sb().from('clients')
+      .update(fields).eq('id',id).select().single();
+    if (error) throw error; return data;
+  },
+  async addBalance(clientId, amount) {
+    const {data:cl} = await sb().from('clients').select('balance').eq('id',clientId).single();
+    const {data,error} = await sb().from('clients')
+      .update({balance:(cl?.balance||0)+amount}).eq('id',clientId).select().single();
+    if (error) throw error; return data;
+  },
+  /** Клиенты с истекающим абонементом (≤ SUBSCRIPTION_WARN_DAYS дней) */
+  async getExpiringClients(trainerId) {
+    const today   = todayStr();
+    const warnDay = new Date(); warnDay.setDate(warnDay.getDate()+SUBSCRIPTION_WARN_DAYS);
+    const warnStr = warnDay.toISOString().slice(0,10);
+    const {data,error} = await sb().from('clients')
+      .select('*').eq('trainer_id',trainerId)
+      .not('subscription_end','is',null)
+      .lte('subscription_end',warnStr)
+      .gte('subscription_end',today)
+      .order('subscription_end');
+    if (error) throw error; return data||[];
+  },
+
+  // ─── WORKOUTS ────────────────────────────────
+  async logWorkouts(rows) {
+    const {data,error} = await sb().from('workouts').insert(rows).select();
+    if (error) throw error;
+
+    const nonDebtNonDropin = rows.filter(r=>!r.is_debt&&!r.is_drop_in);
+    if (nonDebtNonDropin.length) {
+      const cid = nonDebtNonDropin[0].client_id;
+      const {data:cl} = await sb().from('clients').select('balance').eq('id',cid).single();
+      await sb().from('clients').update({
+        balance: Math.max(0,(cl?.balance||0)-nonDebtNonDropin.length),
+        last_used: new Date().toISOString(),
+      }).eq('id',cid);
+    } else {
+      await sb().from('clients')
+        .update({last_used:new Date().toISOString()}).eq('id',rows[0].client_id);
+    }
+    // Отметить drop_in_used у ребёнка
+    const dropInRow = rows.find(r=>r.is_drop_in);
+    if (dropInRow) {
+      const {data:cl} = await sb().from('clients').select('age').eq('id',dropInRow.client_id).single();
+      if (cl && isChild(cl.age)) {
+        await sb().from('clients').update({drop_in_used:true}).eq('id',dropInRow.client_id);
+      }
+    }
+    return data;
+  },
+  async confirmDebt(workoutId, clientId) {
+    const {error:e1} = await sb().from('workouts')
+      .update({debt_confirmed_at:new Date().toISOString()}).eq('id',workoutId);
+    if (e1) throw e1;
+    const {data:cl} = await sb().from('clients').select('balance').eq('id',clientId).single();
+    await sb().from('clients')
+      .update({balance:Math.max(0,(cl?.balance||0)-1)}).eq('id',clientId);
+  },
   async getWorkouts(trainerId, year, month) {
-    const from = new Date(year, month - 1, 1).toISOString();
-    const to   = new Date(year, month,     1).toISOString();
-    const { data, error } = await sb().from('workouts')
-      .select('*, clients(fio)').eq('trainer_id', trainerId)
-      .gte('created_at', from).lt('created_at', to)
-      .order('created_at', { ascending: false });
-    if (error) throw error;
-    return data || [];
+    const from = new Date(year,month-1,1).toISOString();
+    const to   = new Date(year,month,  1).toISOString();
+    const {data,error} = await sb().from('workouts')
+      .select('*, clients(fio,age)').eq('trainer_id',trainerId)
+      .gte('workout_date',from).lt('workout_date',to)
+      .order('workout_date',{ascending:false});
+    if (error) throw error; return data||[];
   },
-
-  async getWorkoutsByBranch(branch, year, month) {
-    const from = new Date(year, month - 1, 1).toISOString();
-    const to   = new Date(year, month,     1).toISOString();
-    const { data, error } = await sb().from('workouts')
-      .select('*, clients(fio), profiles!trainer_id(fio)')
-      .eq('branch', branch).gte('workout_date', from).lt('workout_date', to)
-      .order('workout_date', { ascending: false });
-    if (error) throw error;
-    return data || [];
-  },
-
   async deleteWorkout(id) {
-    const { error } = await sb().from('workouts').delete().eq('id', id);
+    const {error} = await sb().from('workouts').delete().eq('id',id);
     if (error) throw error;
   },
 
-  // ==================== DUTIES ====================
-
+  // ─── DUTIES ──────────────────────────────────
   async getActiveDuty(trainerId) {
-    const { data, error } = await sb().from('duties')
-      .select('*').eq('trainer_id', trainerId).is('end_time', null).maybeSingle();
-    if (error) throw error;
-    return data;
+    const {data,error} = await sb().from('duties').select('*')
+      .eq('trainer_id',trainerId).is('end_time',null).maybeSingle();
+    if (error) throw error; return data;
   },
-
   async startDuty(trainerId, branch) {
-    const { data, error } = await sb().from('duties')
-      .insert({ trainer_id: trainerId, branch }).select().single();
-    if (error) throw error;
-    return data;
+    const {data,error} = await sb().from('duties')
+      .insert({trainer_id:trainerId,branch}).select().single();
+    if (error) throw error; return data;
   },
-
   async endDuty(dutyId) {
-    const { data, error } = await sb().from('duties')
-      .update({ end_time: new Date().toISOString() }).eq('id', dutyId).select().single();
-    if (error) throw error;
-    return data;
+    const {data,error} = await sb().from('duties')
+      .update({end_time:new Date().toISOString()}).eq('id',dutyId).select().single();
+    if (error) throw error; return data;
   },
-
   async getDuties(trainerId, year, month) {
-    const from = new Date(year, month - 1, 1).toISOString();
-    const to   = new Date(year, month,     1).toISOString();
-    const { data, error } = await sb().from('duties').select('*')
-      .eq('trainer_id', trainerId).gte('start_time', from).lt('start_time', to)
-      .not('end_time', 'is', null).order('start_time', { ascending: false });
-    if (error) throw error;
-    return data || [];
+    const from = new Date(year,month-1,1).toISOString();
+    const to   = new Date(year,month,  1).toISOString();
+    const {data,error} = await sb().from('duties').select('*')
+      .eq('trainer_id',trainerId).gte('start_time',from).lt('start_time',to)
+      .not('end_time','is',null).order('start_time',{ascending:false});
+    if (error) throw error; return data||[];
   },
 
-  // ==================== GROUP TYPES ====================
-
+  // ─── GROUP TYPES ─────────────────────────────
   async getGroupTypes() {
-    const { data, error } = await sb().from('group_types').select('*').order('name');
-    if (error) throw error;
-    return data || [];
+    const {data,error} = await sb().from('group_types').select('*').order('name');
+    if (error) throw error; return data||[];
   },
-
   async addGroupType(fields) {
-    const { data, error } = await sb().from('group_types').insert(fields).select().single();
-    if (error) throw error;
-    return data;
+    const {data,error} = await sb().from('group_types').insert(fields).select().single();
+    if (error) throw error; return data;
   },
 
-  async updateGroupType(id, fields) {
-    const { data, error } = await sb().from('group_types')
-      .update(fields).eq('id', id).select().single();
-    if (error) throw error;
-    return data;
-  },
-
-  // ==================== TRAINER GROUPS ====================
-
+  // ─── TRAINER GROUPS ──────────────────────────
   async getTrainerGroups(trainerId) {
-    const { data, error } = await sb().from('trainer_groups')
-      .select('*, group_types(*)').eq('trainer_id', trainerId)
-      .is('subscription_end', null).order('subscription_start', { ascending: false });
-    if (error) throw error;
-    return data || [];
+    const {data,error} = await sb().from('trainer_groups')
+      .select('*, group_types(*)').eq('trainer_id',trainerId)
+      .is('subscription_end',null).order('subscription_start',{ascending:false});
+    if (error) throw error; return data||[];
   },
-
   async addTrainerGroup(trainerId, groupTypeId, branch, startDate) {
-    const { data, error } = await sb().from('trainer_groups')
-      .insert({ trainer_id: trainerId, group_type_id: groupTypeId, branch, subscription_start: startDate })
+    const {data,error} = await sb().from('trainer_groups')
+      .insert({trainer_id:trainerId,group_type_id:groupTypeId,branch,subscription_start:startDate})
       .select('*, group_types(*)').single();
-    if (error) throw error;
-    return data;
+    if (error) throw error; return data;
   },
 
-  async endTrainerGroup(id, endDate) {
-    const { data, error } = await sb().from('trainer_groups')
-      .update({ subscription_end: endDate }).eq('id', id).select().single();
-    if (error) throw error;
-    return data;
-  },
-
-  // ==================== GROUP SESSIONS ====================
-
+  // ─── GROUP SESSIONS ──────────────────────────
   async logGroupSession(trainerId, groupTypeId, branch, date, headcount) {
-    const { data, error } = await sb().from('group_sessions')
-      .insert({ trainer_id: trainerId, group_type_id: groupTypeId, branch, session_date: date, headcount })
+    const {data,error} = await sb().from('group_sessions')
+      .insert({trainer_id:trainerId,group_type_id:groupTypeId,branch,session_date:date,headcount})
       .select().single();
-    if (error) throw error;
-    return data;
+    if (error) throw error; return data;
   },
-
   async getGroupSessions(trainerId, year, month) {
     const from = `${year}-${String(month).padStart(2,'0')}-01`;
-    const to   = new Date(year, month, 1).toISOString().slice(0,10);
-    const { data, error } = await sb().from('group_sessions')
+    const to   = new Date(year,month,1).toISOString().slice(0,10);
+    const {data,error} = await sb().from('group_sessions')
       .select('*, group_types(name,type,billing_model)')
-      .eq('trainer_id', trainerId).gte('session_date', from).lt('session_date', to)
-      .order('session_date', { ascending: false });
-    if (error) throw error;
-    return data || [];
+      .eq('trainer_id',trainerId).gte('session_date',from).lt('session_date',to)
+      .order('session_date',{ascending:false});
+    if (error) throw error; return data||[];
   },
 
-  // ==================== SCHEDULE SLOTS ====================
-
+  // ─── SCHEDULE SLOTS ──────────────────────────
   async getSlots(trainerId) {
-    const { data, error } = await sb().from('schedule_slots')
-      .select('*, clients(fio), group_types(name,type)')
-      .eq('trainer_id', trainerId).eq('active', true)
+    const {data,error} = await sb().from('schedule_slots')
+      .select('*, clients(fio,category), group_types(name,type)')
+      .eq('trainer_id',trainerId).eq('active',true)
       .order('day_of_week').order('start_time');
-    if (error) throw error;
-    return data || [];
+    if (error) throw error; return data||[];
   },
-
   async getAllActiveSlots() {
-    // Для публичного расписания — только PT и group
-    const { data, error } = await sb().from('schedule_slots')
+    const {data,error} = await sb().from('schedule_slots')
       .select('*, profiles!trainer_id(fio), clients(fio), group_types(name)')
-      .eq('active', true).in('slot_type', ['pt', 'group'])
+      .eq('active',true).in('slot_type',['pt','group'])
       .order('day_of_week').order('start_time');
-    if (error) throw error;
-    return data || [];
+    if (error) throw error; return data||[];
   },
-
   async addSlot(fields) {
-    const { data, error } = await sb().from('schedule_slots')
-      .insert(fields).select('*, clients(fio), group_types(name,type)').single();
-    if (error) throw error;
-    return data;
+    const {data,error} = await sb().from('schedule_slots')
+      .insert(fields).select('*, clients(fio,category), group_types(name,type)').single();
+    if (error) throw error; return data;
   },
-
   async deactivateSlot(id) {
-    const { error } = await sb().from('schedule_slots')
-      .update({ active: false }).eq('id', id);
+    const {error} = await sb().from('schedule_slots').update({active:false}).eq('id',id);
     if (error) throw error;
   },
 
-  // ==================== SCHEDULE CONFIRMATIONS ====================
-
-  /** Получить все слоты на сегодня + статус подтверждения */
+  // ─── TODAY / CONFIRMATIONS ───────────────────
   async getTodaySlots(trainerId, dateStr) {
-    const dow = (new Date(dateStr).getDay() + 6) % 7; // JS Sun=0 → Mon=0
+    // Fix: use T12:00:00 to avoid UTC/local timezone mismatch
+    const dow = (new Date(dateStr+'T12:00:00').getDay()+6) % 7;
 
-    const { data: slots, error: e1 } = await sb().from('schedule_slots')
-      .select('*, clients(fio,balance), group_types(name,type,billing_model)')
-      .eq('trainer_id', trainerId).eq('day_of_week', dow).eq('active', true)
+    const {data:slots,error:e1} = await sb().from('schedule_slots')
+      .select('*, clients(fio,balance,category,age,drop_in_used), group_types(name,type,billing_model)')
+      .eq('trainer_id',trainerId).eq('day_of_week',dow).eq('active',true)
       .order('start_time');
     if (e1) throw e1;
     if (!slots?.length) return [];
 
-    const slotIds = slots.map(s => s.id);
-
-    const { data: confs } = await sb().from('schedule_confirmations')
-      .select('*').in('slot_id', slotIds).eq('session_date', dateStr);
+    const slotIds = slots.map(s=>s.id);
+    const {data:confs} = await sb().from('schedule_confirmations')
+      .select('*').in('slot_id',slotIds).eq('session_date',dateStr);
 
     const confMap = {};
-    (confs || []).forEach(c => { confMap[c.slot_id] = c; });
-
-    return slots.map(s => ({ ...s, confirmation: confMap[s.id] || null }));
+    (confs||[]).forEach(c=>{ confMap[c.slot_id]=c; });
+    return slots.map(s=>({...s, confirmation: confMap[s.id]||null}));
   },
-
   async upsertConfirmation(slotId, date, fields) {
-    const { data, error } = await sb().from('schedule_confirmations')
-      .upsert({ slot_id: slotId, session_date: date, ...fields, updated_at: new Date().toISOString() },
-              { onConflict: 'slot_id,session_date' })
+    const {data,error} = await sb().from('schedule_confirmations')
+      .upsert({slot_id:slotId,session_date:date,...fields,updated_at:new Date().toISOString()},
+              {onConflict:'slot_id,session_date'})
       .select().single();
-    if (error) throw error;
-    return data;
+    if (error) throw error; return data;
   },
 
-  /** Незакрытые ПТ-слоты за сегодня (для напоминания) */
-  async getPendingToday(trainerId, dateStr) {
-    const dow = (new Date(dateStr).getDay() + 6) % 7;
-    const { data: slots } = await sb().from('schedule_slots')
-      .select('id,slot_type,start_time,clients(fio)').eq('trainer_id', trainerId)
-      .eq('day_of_week', dow).eq('active', true).in('slot_type', ['pt', 'group']);
-    if (!slots?.length) return [];
-
-    const slotIds = slots.map(s => s.id);
-    const { data: confs } = await sb().from('schedule_confirmations')
-      .select('slot_id,status').in('slot_id', slotIds).eq('session_date', dateStr);
-    const confirmedIds = new Set((confs || []).map(c => c.slot_id));
-    return slots.filter(s => !confirmedIds.has(s.id));
+  // ─── MONTH ADJUSTMENTS (премия/штраф) ────────
+  async getAdjustment(trainerId, year, month) {
+    const {data,error} = await sb().from('month_adjustments').select('*')
+      .eq('trainer_id',trainerId).eq('year',year).eq('month',month).maybeSingle();
+    if (error) throw error; return data;
+  },
+  async upsertAdjustment(trainerId, year, month, bonus, penalty, notes) {
+    const {data,error} = await sb().from('month_adjustments')
+      .upsert({trainer_id:trainerId,year,month,bonus,penalty,notes},
+              {onConflict:'trainer_id,year,month'})
+      .select().single();
+    if (error) throw error; return data;
   },
 
-  async getAllTrainersWithTgId() {
-    const { data, error } = await sb().from('profiles')
-      .select('id,fio,tg_id').not('tg_id', 'is', null)
-      .in('role', ['trainer', 'senior_trainer']);
-    if (error) throw error;
-    return data || [];
-  },
+  // ─── REPORTS ─────────────────────────────────
+  async getSummary(year, month, branch=null) {
+    const from    = new Date(year,month-1,1).toISOString();
+    const to      = new Date(year,month,  1).toISOString();
+    const fromDay = `${year}-${String(month).padStart(2,'0')}-01`;
+    const toDay   = new Date(year,month,1).toISOString().slice(0,10);
 
-  // ==================== REPORTS ====================
+    let wq = sb().from('workouts')
+      .select('trainer_id,category_at_moment,branch,is_debt,debt_confirmed_at,is_drop_in')
+      .gte('workout_date',from).lt('workout_date',to);
+    if (branch) wq = wq.eq('branch',branch);
 
-  async getSummary(year, month, branch = null) {
-    const from = new Date(year, month - 1, 1).toISOString();
-    const to   = new Date(year, month, 1).toISOString();
-
-    let wq = sb().from('workouts').select('trainer_id,category_at_moment,branch,is_debt')
-      .gte('workout_date', from).lt('workout_date', to);
-    if (branch) wq = wq.eq('branch', branch);
-
-    let dq = sb().from('duties').select('trainer_id,branch,start_time,end_time')
-      .gte('start_time', from).lt('start_time', to).not('end_time', 'is', null);
-    if (branch) dq = dq.eq('branch', branch);
-
-    const fromDate = `${year}-${String(month).padStart(2,'0')}-01`;
-    const toDate   = new Date(year, month, 1).toISOString().slice(0,10);
+    let dq = sb().from('duties')
+      .select('trainer_id,branch,start_time,end_time')
+      .gte('start_time',from).lt('start_time',to).not('end_time','is',null);
+    if (branch) dq = dq.eq('branch',branch);
 
     let tgq = sb().from('trainer_groups')
-      .select('trainer_id,group_type_id,group_types(name,type,billing_model,price_per_month,trainer_percentage)')
-      .lte('subscription_start', toDate)
-      .or(`subscription_end.is.null,subscription_end.gte.${fromDate}`);
-    if (branch) tgq = tgq.eq('branch', branch);
+      .select('trainer_id,group_types(name,type,billing_model,price_per_month,trainer_percentage)')
+      .lte('subscription_start',toDay)
+      .or(`subscription_end.is.null,subscription_end.gte.${fromDay}`);
+    if (branch) tgq = tgq.eq('branch',branch);
 
-    let gsq = sb().from('group_sessions').select('trainer_id,group_type_id,headcount,group_types(billing_model)')
-      .gte('session_date', fromDate).lt('session_date', toDate);
-    if (branch) gsq = gsq.eq('branch', branch);
+    let gsq = sb().from('group_sessions')
+      .select('trainer_id,group_type_id,headcount,group_types(billing_model)')
+      .gte('session_date',fromDay).lt('session_date',toDay);
+    if (branch) gsq = gsq.eq('branch',branch);
 
     let pq = sb().from('profiles').select('id,fio,branches,role')
-      .in('role', ['trainer', 'senior_trainer']);
-    if (branch) pq = pq.contains('branches', [branch]);
+      .in('role',['trainer','senior_trainer']);
+    if (branch) pq = pq.contains('branches',[branch]);
 
-    const [w, d, tg, gs, p] = await Promise.all([wq, dq, tgq, gsq, pq]);
+    // Корректировки (премии/штрафы)
+    let aq = sb().from('month_adjustments').select('*').eq('year',year).eq('month',month);
+
+    const [w,d,tg,gs,p,adj] = await Promise.all([wq,dq,tgq,gsq,pq,aq]);
     return {
-      workouts:      w.data  || [],
-      duties:        d.data  || [],
-      trainerGroups: tg.data || [],
-      groupSessions: gs.data || [],
-      profiles:      p.data  || [],
+      workouts:      w.data  ||[],
+      duties:        d.data  ||[],
+      trainerGroups: tg.data ||[],
+      groupSessions: gs.data ||[],
+      profiles:      p.data  ||[],
+      adjustments:   adj.data||[],
     };
   },
 
   async getTrainerDetail(trainerId, year, month) {
-    const from    = new Date(year, month - 1, 1).toISOString();
-    const to      = new Date(year, month,     1).toISOString();
+    const from    = new Date(year,month-1,1).toISOString();
+    const to      = new Date(year,month,  1).toISOString();
     const fromDay = `${year}-${String(month).padStart(2,'0')}-01`;
-    const toDay   = new Date(year, month, 1).toISOString().slice(0,10);
+    const toDay   = new Date(year,month,1).toISOString().slice(0,10);
 
-    const [w, d, tg, gs] = await Promise.all([
-      sb().from('workouts').select('*, clients(fio)').eq('trainer_id', trainerId)
-        .gte('workout_date', from).lt('workout_date', to)
-        .order('workout_date', { ascending: false }),
-      sb().from('duties').select('*').eq('trainer_id', trainerId)
-        .gte('start_time', from).lt('start_time', to)
-        .not('end_time', 'is', null).order('start_time', { ascending: false }),
-      sb().from('trainer_groups')
-        .select('*, group_types(*)')
-        .eq('trainer_id', trainerId)
-        .lte('subscription_start', toDay)
+    const [w,d,tg,gs,adj] = await Promise.all([
+      sb().from('workouts').select('*, clients(fio,age)')
+        .eq('trainer_id',trainerId).gte('workout_date',from).lt('workout_date',to)
+        .order('workout_date',{ascending:false}),
+      sb().from('duties').select('*').eq('trainer_id',trainerId)
+        .gte('start_time',from).lt('start_time',to)
+        .not('end_time','is',null).order('start_time',{ascending:false}),
+      sb().from('trainer_groups').select('*, group_types(*)')
+        .eq('trainer_id',trainerId).lte('subscription_start',toDay)
         .or(`subscription_end.is.null,subscription_end.gte.${fromDay}`),
       sb().from('group_sessions').select('*, group_types(*)')
-        .eq('trainer_id', trainerId).gte('session_date', fromDay).lt('session_date', toDay)
-        .order('session_date', { ascending: false }),
+        .eq('trainer_id',trainerId).gte('session_date',fromDay).lt('session_date',toDay)
+        .order('session_date',{ascending:false}),
+      sb().from('month_adjustments').select('*')
+        .eq('trainer_id',trainerId).eq('year',year).eq('month',month).maybeSingle(),
+    ]);
+    return {
+      workouts:      w.data   ||[],
+      duties:        d.data   ||[],
+      trainerGroups: tg.data  ||[],
+      groupSessions: gs.data  ||[],
+      adjustment:    adj.data ||null,
+    };
+  },
+
+  // ─── КОНТРОЛЬ (КООРДИНАТОР) ──────────────────
+  async getControlData() {
+    const today   = todayStr();
+    const warnDay = new Date(); warnDay.setDate(warnDay.getDate()+SUBSCRIPTION_WARN_DAYS);
+    const warnStr = warnDay.toISOString().slice(0,10);
+
+    // Три дня назад
+    const threeDaysAgo = new Date(); threeDaysAgo.setDate(threeDaysAgo.getDate()-3);
+
+    const [expiring, oldDebt, childDropin, batchWO, inactive] = await Promise.all([
+
+      // 1. Абонементы истекают в ближайшие 7 дней
+      sb().from('clients').select('*, profiles!trainer_id(fio)')
+        .not('subscription_end','is',null)
+        .gte('subscription_end',today).lte('subscription_end',warnStr),
+
+      // 2. Долг не подтверждён > 3 дней
+      sb().from('workouts').select('*, clients(fio), profiles!trainer_id(fio)')
+        .eq('is_debt',true).is('debt_confirmed_at',null)
+        .lt('created_at',threeDaysAgo.toISOString()),
+
+      // 3. Дети с > 1 разовым
+      sb().from('clients').select('*, profiles!trainer_id(fio)')
+        .eq('drop_in_used',true)
+        .lte('age',CHILD_MAX_AGE),
+
+      // 4. Пакетные списания > 3 ПТ в одном notes-блоке (за один раз)
+      sb().from('workouts').select('trainer_id, notes, workout_date, profiles!trainer_id(fio)')
+        .not('notes','is',null)
+        .gte('workout_date', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()),
+
+      // 5. Тренеры без активности в текущем месяце
+      sb().from('profiles').select('id,fio,branches').in('role',['trainer','senior_trainer']),
     ]);
 
+    // Группируем пакетные (одинаковый notes = один batch, считаем кол-во)
+    const notesCount = {};
+    (batchWO.data||[]).forEach(w => {
+      if (!w.notes) return;
+      const key = `${w.trainer_id}::${w.notes}`;
+      notesCount[key] = notesCount[key] || {count:0, rec:w};
+      notesCount[key].count++;
+    });
+    const suspiciousBatch = Object.values(notesCount).filter(x=>x.count>3);
+
     return {
-      workouts:      w.data  || [],
-      duties:        d.data  || [],
-      trainerGroups: tg.data || [],
-      groupSessions: gs.data || [],
+      expiringClients: expiring.data ||[],
+      oldDebt:         oldDebt.data  ||[],
+      childDropinAbuse: childDropin.data||[],
+      suspiciousBatch,
+      inactiveTrainers: inactive.data||[],  // фильтрация в app.js
     };
   },
 };
+
+// Расчёт ЗП за период
+function calcSalary({workouts=[], duties=[], trainerGroups=[], groupSessions=[], adjustment=null}) {
+  const cat = {1:0, 2:0, 3:0, debt:0, dropIn:0};
+  workouts.forEach(w => {
+    if (w.is_drop_in)                            cat.dropIn++;
+    else if (w.is_debt && !w.debt_confirmed_at)  cat.debt++;
+    else                                         cat[w.category_at_moment]++;
+  });
+  const ptSum     = cat[1]*RATES.pt[1] + cat[2]*RATES.pt[2] + cat[3]*RATES.pt[3];
+  const dropInSum = cat.dropIn * RATES.drop_in_trainer;
+  const hours     = duties.reduce((s,d) => s + (new Date(d.end_time)-new Date(d.start_time))/3600000, 0);
+  const dutySum   = Math.round(hours * RATES.duty_per_hour);
+  const childSum  = trainerGroups
+    .filter(tg => tg.group_types?.type==='children')
+    .reduce((s,tg) => s + Math.round((tg.group_types.price_per_month||0)*RATES.group_children_pct), 0);
+  const adultSum  = groupSessions
+    .filter(gs => gs.group_types?.billing_model==='headcount')
+    .reduce((s,gs) => s + getAdultGroupRate(gs.headcount), 0);
+  const bonus   = adjustment?.bonus   || 0;
+  const penalty = adjustment?.penalty || 0;
+  const total   = ptSum + dropInSum + dutySum + childSum + adultSum + bonus - penalty;
+  return {cat, hours, ptSum, dropInSum, dutySum, childSum, adultSum, bonus, penalty, total};
+}
