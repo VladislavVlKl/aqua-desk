@@ -59,3 +59,16 @@ function daysUntil(dateStr) {
   if (!dateStr) return null;
   return Math.ceil((new Date(dateStr) - new Date(todayStr())) / 86400000);
 }
+
+// ─── Добавить в config.js ───────────────────
+// (вставить в конец файла)
+
+const NOTE_DEADLINE_HOURS = 48;
+const SCHEDULE_URL = 'https://vladislavvlkl.github.io/Aqua-optimization/schedule.html';
+
+const EVENT_TYPES = {
+  competition:   '🏆 Соревнование',
+  qualification: '📚 Квалификация',
+  repair:        '🔧 Ремонт',
+  other:         '📌 Другое',
+};
