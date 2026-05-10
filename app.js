@@ -57,10 +57,9 @@ function setupBack(cb) {
      :  Telegram.WebApp.BackButton.hide();
 }
 function openSchedule() {
-  const url = 'https://vladislavvlkl.github.io/Aqua-optimization/schedule.html';
   window.Telegram?.WebApp?.openLink
-    ? Telegram.WebApp.openLink(url, {try_instant_view:false})
-    : window.open(url,'_blank');
+    ? Telegram.WebApp.openLink(SCHEDULE_URL, {try_instant_view:false})
+    : window.open(SCHEDULE_URL,'_blank');
 }
 
 // ── ИНИЦИАЛИЗАЦИЯ ─────────────────────────────
@@ -1077,7 +1076,7 @@ async function doExportTrainer(trainerId,fioEnc,year,month) {
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <p style="margin-bottom:16px;line-height:1.6">Для скачивания откройте приложение в браузере (Safari/Chrome), войдите с тем же PIN и нажмите «Скачать Excel».</p>
     <button class="btn btn-primary btn-full"
-      onclick="window.Telegram.WebApp.openLink('https://vladislavvlkl.github.io/Aqua-optimization/',{try_instant_view:false});this.closest('.modal-overlay').remove()">
+      onclick="window.Telegram.WebApp.openLink(''+APP_URL+'',{try_instant_view:false});this.closest('.modal-overlay').remove()">
       Открыть в браузере</button>
   </div>`;
   document.body.appendChild(m);
@@ -1093,7 +1092,7 @@ async function doExportSummary(year,month,branch) {
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <p style="margin-bottom:16px;line-height:1.6">Откройте в браузере для скачивания.</p>
     <button class="btn btn-primary btn-full"
-      onclick="window.Telegram.WebApp.openLink('https://vladislavvlkl.github.io/Aqua-optimization/',{try_instant_view:false});this.closest('.modal-overlay').remove()">
+      onclick="window.Telegram.WebApp.openLink(''+APP_URL+'',{try_instant_view:false});this.closest('.modal-overlay').remove()">
       Открыть в браузере</button>
   </div>`;
   document.body.appendChild(m);
@@ -1175,6 +1174,7 @@ function renderAdminApp() {
   <div id="tab-content" class="tab-content"></div>
   <nav class="bottom-nav">
     <button class="nav-btn" onclick="adminTab('summary')"><span>📊</span>Сводка</button>
+    <button class="nav-btn" onclick="adminTab('analytics')"><span>📈</span>Аналитика</button>
     <button class="nav-btn" onclick="adminTab('staff')"><span>👥</span>Персонал</button>
     <button class="nav-btn" onclick="adminTab('branches')"><span>🏢</span>Филиалы</button>
     <button class="nav-btn" onclick="adminTab('groups')"><span>🏊</span>Группы</button>
@@ -1184,13 +1184,102 @@ function renderAdminApp() {
   adminTab('summary');
 }
 function adminTab(tab) {
-  $$('.nav-btn').forEach((b,i)=>b.classList.toggle('active',['summary','staff','branches','groups','events','control'][i]===tab));
-  if (tab==='summary')  renderAdminSummary();
-  if (tab==='staff')    renderAdminStaff();
-  if (tab==='branches') renderAdminBranches();
-  if (tab==='groups')   renderAdminGroups();
-  if (tab==='events')   renderEventsTab();
-  if (tab==='control')  renderAdminControl();
+  $$('.nav-btn').forEach((b,i)=>b.classList.toggle('active',['summary','analytics','staff','branches','groups','events','control'][i]===tab));
+  if (tab==='summary')   renderAdminSummary();
+  if (tab==='analytics') renderAdminAnalytics();
+  if (tab==='staff')     renderAdminStaff();
+  if (tab==='branches')  renderAdminBranches();
+  if (tab==='groups')    renderAdminGroups();
+  if (tab==='events')    renderEventsTab();
+  if (tab==='control')   renderAdminControl();
+}
+
+// ─ ADMIN: АНАЛИТИКА ──────────────────────────
+async function renderAdminAnalytics() {
+  let year=new Date().getFullYear(), month=new Date().getMonth()+1;
+  const branches=await DB.getBranches();
+
+  $('#tab-content').innerHTML=`<div class="tab-pad">
+    <div class="section-header"><h3>Аналитика</h3>
+      <div class="month-nav">
+        <button id="prev-an">‹</button>
+        <span id="an-month">${fmtMY(year,month)}</span>
+        <button id="next-an">›</button>
+      </div>
+    </div>
+    <div class="form-group"><select id="an-branch">
+      <option value="">Все филиалы</option>
+      ${branches.map(b=>`<option>${b.name}</option>`).join('')}
+    </select></div>
+    <div id="an-body"><div class="center-screen"><div class="spinner"></div></div></div>
+  </div>`;
+
+  const getBr=()=>document.getElementById('an-branch')?.value||null;
+  const load=()=>loadAnalytics(year,month,getBr());
+  document.getElementById('prev-an')?.addEventListener('click',()=>{if(month===1){year--;month=12;}else month--;document.getElementById('an-month').textContent=fmtMY(year,month);load();});
+  document.getElementById('next-an')?.addEventListener('click',()=>{if(month===12){year++;month=1;}else month++;document.getElementById('an-month').textContent=fmtMY(year,month);load();});
+  document.getElementById('an-branch')?.addEventListener('change',load);
+  await load();
+}
+
+async function loadAnalytics(year, month, branch) {
+  const body=document.getElementById('an-body'); if (!body) return;
+  body.innerHTML=`<div class="center-screen"><div class="spinner"></div></div>`;
+  try {
+    const d=await DB.getAnalytics(year,month,branch||null);
+    const py=d.prevMonth.year, pm=d.prevMonth.month;
+
+    const metricCard=(icon,label,curr,prev,higherIsBetter=true,unit='')=>{
+      const p=pct(curr,prev);
+      const cls=pctClass(curr,prev,higherIsBetter);
+      return `<div class="an-card">
+        <div class="an-icon">${icon}</div>
+        <div class="an-val">${curr}${unit}</div>
+        <div class="an-label">${label}</div>
+        <div class="an-delta ${cls}">${p} vs ${fmtMY(py,pm)}</div>
+      </div>`;
+    };
+
+    const net=d.currNewClients-d.currChurn;
+    const netCls=net>0?'up':net<0?'down':'neutral';
+
+    body.innerHTML=`
+      <!-- Клиенты -->
+      <h4>👤 Клиенты</h4>
+      <div class="an-grid">
+        ${metricCard('👥','Активных клиентов',d.currActiveClients,0,'','')}
+        ${metricCard('➕','Новых абонементов',d.currNewClients,d.prevNewClients,true)}
+        ${metricCard('➖','Закрытых абонементов',d.currChurn,d.prevChurn,false)}
+      </div>
+      <div class="an-net-row">
+        <span>Баланс (приток − отток):</span>
+        <span class="an-net ${netCls}">${net>0?'+':''}${net} клиентов</span>
+      </div>
+
+      <!-- Тренировки -->
+      <h4 style="margin-top:20px">📋 Тренировки</h4>
+      <div class="an-grid">
+        ${metricCard('🏊','Обычных ПТ',d.currPT,d.prevPT,true)}
+        ${metricCard('🎟','Разовых',d.currDropIn,d.prevDropIn,true)}
+        ${metricCard('⏱','Деж. часов',d.currDutyHours.toFixed(1),d.prevDutyHours.toFixed(1),true,'ч')}
+      </div>
+
+      <!-- Рейтинг тренеров -->
+      ${d.ranking.length?`
+        <h4 style="margin-top:20px">🏆 Рейтинг тренеров по ПТ</h4>
+        <div class="an-ranking">
+          ${d.ranking.map((r,i)=>`
+            <div class="an-rank-row">
+              <span class="an-rank-num">${i+1}</span>
+              <span class="an-rank-fio">${r.fio}</span>
+              <div class="an-rank-bar-wrap">
+                <div class="an-rank-bar" style="width:${Math.round(r.count/d.ranking[0].count*100)}%"></div>
+              </div>
+              <span class="an-rank-count">${r.count}</span>
+            </div>`).join('')}
+        </div>`:''}
+    `;
+  } catch(e) { body.innerHTML='<p class="hint">Ошибка загрузки</p>'; console.error(e); }
 }
 
 // ─ ADMIN: СВОДКА
