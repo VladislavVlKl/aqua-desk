@@ -2,9 +2,7 @@ name: Daily Trainer Reminder
 
 on:
   schedule:
-    # 22:00 Ташкент = 17:00 UTC (UTC+5)
     - cron: '0 17 * * *'
-  # Ручной запуск для теста — кнопка Run workflow в GitHub
   workflow_dispatch:
 
 jobs:
@@ -17,77 +15,69 @@ jobs:
           SUPABASE_URL:      ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
-          node << 'EOF'
-          const SUPABASE_URL      = process.env.SUPABASE_URL;
-          const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
-          const BOT_TOKEN         = process.env.BOT_TOKEN;
+          node - << 'SCRIPT'
+          const BASE = process.env.SUPABASE_URL + '/rest/v1';
+          const KEY  = process.env.SUPABASE_ANON_KEY;
+          const BOT  = process.env.BOT_TOKEN;
+          const H    = { 'apikey': KEY, 'Authorization': 'Bearer ' + KEY };
 
-          async function supabase(path, params='') {
-            const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}${params}`, {
-              headers: {
-                'apikey': SUPABASE_ANON_KEY,
-                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-              }
-            });
-            return r.json();
+          async function get(path) {
+            const r = await fetch(BASE + path, { headers: H });
+            const d = await r.json();
+            if (!r.ok) { console.error('API error:', path, JSON.stringify(d)); return []; }
+            return Array.isArray(d) ? d : [];
           }
 
-          async function sendTg(chatId, text) {
-            await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+          async function tg(chatId, text) {
+            const r = await fetch('https://api.telegram.org/bot' + BOT + '/sendMessage', {
               method: 'POST',
-              headers: {'Content-Type': 'application/json'},
+              headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' }),
             });
+            const d = await r.json();
+            if (!d.ok) console.error('TG error', chatId, d.description);
+            return d.ok;
           }
 
           async function main() {
             const now   = new Date();
-            // Пн=0 … Вс=6 (наш формат)
             const dow   = (now.getDay() + 6) % 7;
             const today = now.toISOString().slice(0, 10);
+            console.log('Running for date:', today, 'dow:', dow);
 
-            // Все тренеры с tg_id
-            const trainers = await supabase(
-              'profiles',
-              '?select=id,fio,tg_id&role=in.(trainer,senior_trainer)&tg_id=not.is.null'
-            );
+            const trainers = await get('/profiles?select=id,fio,tg_id&role=in.(trainer,senior_trainer)&tg_id=not.is.null');
+            console.log('Trainers with tg_id:', trainers.length);
 
             let sent = 0;
-            for (const trainer of (trainers || [])) {
-              // Слоты на сегодня (только PT и группы)
-              const slots = await supabase(
-                'schedule_slots',
-                `?select=id,slot_type,start_time,client_id,clients(fio),group_types(name)&trainer_id=eq.${trainer.id}&day_of_week=eq.${dow}&active=eq.true&slot_type=in.(pt,group)`
+            for (const tr of trainers) {
+              const slots = await get(
+                '/schedule_slots?select=id,slot_type,start_time' +
+                '&trainer_id=eq.' + tr.id +
+                '&day_of_week=eq.' + dow +
+                '&active=eq.true' +
+                '&slot_type=in.(pt,group)'
               );
-              if (!slots?.length) continue;
+              if (!slots.length) continue;
 
-              // Подтверждения за сегодня
-              const slotIds = slots.map(s => `"${s.id}"`).join(',');
-              const confs   = await supabase(
-                'schedule_confirmations',
-                `?select=slot_id&slot_id=in.(${slotIds})&session_date=eq.${today}`
-              );
-              const confirmedSet = new Set((confs || []).map(c => c.slot_id));
-              const pending = slots.filter(s => !confirmedSet.has(s.id));
+              const ids   = slots.map(s => s.id).join(',');
+              const confs = await get('/schedule_confirmations?select=slot_id&slot_id=in.(' + ids + ')&session_date=eq.' + today);
+              const done  = new Set(confs.map(c => c.slot_id));
+              const pend  = slots.filter(s => !done.has(s.id));
+              if (!pend.length) continue;
 
-              if (!pending.length) continue;
+              const lines = pend.map(s =>
+                '\u2022 ' + s.start_time.slice(0,5) + ' \u2014 ' +
+                (s.slot_type === 'pt' ? '\u041f\u0435\u0440\u0441\u043e\u043d\u0430\u043b\u044c\u043d\u0430\u044f \u0442\u0440\u0435\u043d\u0438\u0440\u043e\u0432\u043a\u0430' : '\u0413\u0440\u0443\u043f\u043f\u043e\u0432\u043e\u0435 \u0437\u0430\u043d\u044f\u0442\u0438\u0435')
+              ).join('\n');
 
-              const lines = pending.map(s => {
-                const name = s.slot_type === 'pt'
-                  ? (s.clients?.fio || 'ПТ')
-                  : (s.group_types?.name || 'Группа');
-                return `• ${s.start_time.slice(0, 5)} — ${name}`;
-              }).join('\n');
+              const msg =
+                '\u26a0\ufe0f <b>\u041d\u0435\u0437\u0430\u043a\u0440\u044b\u0442\u044b\u0435 \u0437\u0430\u043d\u044f\u0442\u0438\u044f \u0437\u0430 \u0441\u0435\u0433\u043e\u0434\u043d\u044f</b>\n\n' +
+                lines + '\n\n' +
+                '\u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u0435 \u0438\u043b\u0438 \u043e\u0442\u043c\u0435\u043d\u0438\u0442\u0435 \u0432 AquaDesk.';
 
-              const text =
-                `⚠️ <b>Незакрытые занятия за сегодня</b>\n\n${lines}\n\n` +
-                `Подтвердите или отмените каждое в приложении.`;
-
-              await sendTg(trainer.tg_id, text);
-              sent++;
+              if (await tg(tr.tg_id, msg)) { console.log('Sent:', tr.fio); sent++; }
             }
-            console.log(`Reminders sent: ${sent}`);
+            console.log('Done. Sent:', sent);
           }
-
           main().catch(e => { console.error(e); process.exit(1); });
-          EOF
+          SCRIPT
