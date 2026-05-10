@@ -1,5 +1,5 @@
 // =============================================
-// Конфигурация — v3
+// Конфигурация — v5 (AquaDesk)
 // =============================================
 
 const CONFIG = {
@@ -7,12 +7,18 @@ const CONFIG = {
   SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5rd2Z2dWh0cGFveHNhY3p3c3JnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgxMzUwMzIsImV4cCI6MjA5MzcxMTAzMn0.a2rKoLNBB4OGpuENu1XUhsfbc-8JmPbxEkvLrXqUM3A',
 };
 
+// Динамический URL — не ломается при переименовании репозитория
+const BASE_URL     = new URL('./', window.location.href).href;
+const SCHEDULE_URL = BASE_URL + 'schedule.html';
+const APP_URL      = BASE_URL;
+
+// ─── СТАВКИ ОПЛАТЫ ───────────────────────────
 const RATES = {
   pt: { 1: 85000, 2: 110000, 3: 135000 },
-  duty_per_hour:            14000,
-  drop_in_trainer:          85000,   // тренеру за разовое
-  drop_in_price:           200000,   // цена для клиента
-  group_children_pct:        0.40,
+  duty_per_hour:        14000,
+  drop_in_trainer:      85000,
+  drop_in_price:       200000,
+  group_children_pct:    0.40,
   group_adult: [
     { max: 3, rate: 110000 },
     { max: 6, rate: 120000 },
@@ -20,11 +26,14 @@ const RATES = {
   ],
 };
 
-const CHILD_MAX_AGE       = 17;    // включительно
-const EDIT_WINDOW_MIN     = 30;
-const MAX_BACKDATE_HOURS  = 24;
-const SUBSCRIPTION_WARN_DAYS = 7;  // за сколько дней предупреждать об окончании
+// ─── КОНСТАНТЫ ───────────────────────────────
+const CHILD_MAX_AGE          = 17;
+const EDIT_WINDOW_MIN        = 30;
+const MAX_BACKDATE_HOURS     = 24;
+const SUBSCRIPTION_WARN_DAYS = 7;
+const NOTE_DEADLINE_HOURS    = 48;
 
+// ─── СПРАВОЧНИКИ ─────────────────────────────
 const DAYS_SHORT = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
 const DAYS_FULL  = ['Понедельник','Вторник','Среда','Четверг','Пятница','Суббота','Воскресенье'];
 
@@ -38,6 +47,14 @@ const SLOT_COLORS = {
   group: { bg:'rgba(16,185,129,0.2)', color:'#10b981', label:'Группа'    },
 };
 
+const EVENT_TYPES = {
+  competition:   '🏆 Соревнование',
+  qualification: '📚 Квалификация',
+  repair:        '🔧 Ремонт',
+  other:         '📌 Другое',
+};
+
+// ─── ФУНКЦИИ-ХЕЛПЕРЫ ─────────────────────────
 function getAdultGroupRate(headcount) {
   for (const tier of RATES.group_adult)
     if (headcount <= tier.max) return tier.rate;
@@ -48,27 +65,25 @@ function isChild(age) {
   return typeof age === 'number' && age <= CHILD_MAX_AGE;
 }
 
-/** Локальная дата YYYY-MM-DD (не UTC) */
 function todayStr() {
   const d = new Date();
-  return [d.getFullYear(), String(d.getMonth()+1).padStart(2,'0'), String(d.getDate()).padStart(2,'0')].join('-');
+  return [d.getFullYear(), String(d.getMonth()+1).padStart(2,'0'),
+          String(d.getDate()).padStart(2,'0')].join('-');
 }
 
-/** Дней до даты */
 function daysUntil(dateStr) {
   if (!dateStr) return null;
   return Math.ceil((new Date(dateStr) - new Date(todayStr())) / 86400000);
 }
 
-// ─── Добавить в config.js ───────────────────
-// (вставить в конец файла)
+function pct(curr, prev) {
+  if (!prev) return curr > 0 ? '+100%' : '0%';
+  const p = Math.round((curr - prev) / prev * 100);
+  return (p >= 0 ? '+' : '') + p + '%';
+}
 
-const NOTE_DEADLINE_HOURS = 48;
-const SCHEDULE_URL = 'https://vladislavvlkl.github.io/Aqua-optimization/schedule.html';
-
-const EVENT_TYPES = {
-  competition:   '🏆 Соревнование',
-  qualification: '📚 Квалификация',
-  repair:        '🔧 Ремонт',
-  other:         '📌 Другое',
-};
+function pctClass(curr, prev, higherIsBetter = true) {
+  if (curr === prev) return 'neutral';
+  const better = higherIsBetter ? curr > prev : curr < prev;
+  return better ? 'up' : 'down';
+}
