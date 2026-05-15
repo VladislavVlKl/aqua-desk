@@ -55,3 +55,17 @@
 .an-rank-bar-wrap { width: 80px; height: 6px; background: var(--border); border-radius: 3px; flex-shrink: 0; }
 .an-rank-bar  { height: 100%; background: var(--accent); border-radius: 3px; transition: width .3s; }
 .an-rank-count { font-size: 13px; font-weight: 700; color: var(--accent); width: 28px; text-align: right; flex-shrink: 0; }
+
+/* ── Главная: блоки ── */
+.home-block {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 14px;
+}
+.home-block-title {
+  font-size: 15px; font-weight: 700;
+  margin-bottom: 14px; color: var(--text);
+}
+.warn-dot { font-size: 12px; margin-left: 4px; }
+.exp-dot  { font-size: 12px; margin-left: 4px; }
