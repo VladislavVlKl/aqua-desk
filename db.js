@@ -643,6 +643,90 @@ const DB = {
       .select('*').order('created_at',{ascending:false}).limit(limit);
     if (error) throw error; return data||[];
   },
+
+  // ─── ЗАМЕНЫ И ПЕРЕДАЧА ───────────────────────
+
+  /** Создать ПТ-замену (ЗП тренеру Б, ждёт подтверждения) */
+  async logSubstituteWorkout(rows, substituteForId, toBTrainerId) {
+    const subRows = rows.map(r => ({
+      ...r,
+      trainer_id:           toBTrainerId,
+      substitute_for:       substituteForId,
+      pending_confirmation: true,
+    }));
+    const {data,error} = await sb().from('workouts').insert(subRows).select();
+    if (error) throw error;
+    return data;
+  },
+
+  /** Тренировки ожидающие подтверждения у тренера */
+  async getPendingConfirmations(trainerId) {
+    const {data,error} = await sb().from('workouts')
+      .select('*, clients(fio), profiles!substitute_for(fio)')
+      .eq('trainer_id', trainerId)
+      .eq('pending_confirmation', true)
+      .order('workout_date',{ascending:false});
+    if (error) throw error; return data||[];
+  },
+
+  /** Подтвердить/отклонить замену */
+  async resolveSubstitute(workoutId, clientId, confirmed) {
+    if (confirmed) {
+      // Подтвердить — снять с баланса клиента
+      const {error} = await sb().from('workouts')
+        .update({pending_confirmation:false}).eq('id',workoutId);
+      if (error) throw error;
+      const {data:cl} = await sb().from('clients').select('balance').eq('id',clientId).single();
+      await sb().from('clients')
+        .update({balance:Math.max(0,(cl?.balance||0)-1),last_used:new Date().toISOString()})
+        .eq('id',clientId);
+    } else {
+      // Отклонить — удалить запись
+      const {error} = await sb().from('workouts').delete().eq('id',workoutId);
+      if (error) throw error;
+    }
+  },
+
+  /** Инициировать передачу клиента */
+  async initiateTransfer(clientId, fromId, toId, initiatedBy, note='') {
+    const {data,error} = await sb().from('client_transfers')
+      .insert({client_id:clientId,from_trainer_id:fromId,to_trainer_id:toId,
+               initiated_by:initiatedBy,status:'pending',note:note||null})
+      .select().single();
+    if (error) throw error; return data;
+  },
+
+  /** Входящие запросы на передачу (для тренера Б) */
+  async getIncomingTransfers(trainerId) {
+    const {data,error} = await sb().from('client_transfers')
+      .select('*, clients(fio,category,balance), profiles!from_trainer_id(fio)')
+      .eq('to_trainer_id',trainerId).eq('status','pending')
+      .order('created_at',{ascending:false});
+    if (error) throw error; return data||[];
+  },
+
+  /** Подтвердить/отклонить передачу */
+  async resolveTransfer(transferId, clientId, toTrainerId, confirmed) {
+    const status = confirmed ? 'confirmed' : 'rejected';
+    const {error:e1} = await sb().from('client_transfers')
+      .update({status,resolved_at:new Date().toISOString()}).eq('id',transferId);
+    if (e1) throw e1;
+    if (confirmed) {
+      const {error:e2} = await sb().from('clients')
+        .update({trainer_id:toTrainerId}).eq('id',clientId);
+      if (e2) throw e2;
+    }
+  },
+
+  /** Административная передача без подтверждения */
+  async adminTransfer(clientId, toTrainerId, adminId, note='') {
+    await sb().from('client_transfers')
+      .insert({client_id:clientId,from_trainer_id:0,to_trainer_id:toTrainerId,
+               initiated_by:adminId,status:'admin',note:note||null});
+    const {error} = await sb().from('clients')
+      .update({trainer_id:toTrainerId}).eq('id',clientId);
+    if (error) throw error;
+  },
 };
 
 // ─── РАСЧЁТ ЗП ───────────────────────────────
