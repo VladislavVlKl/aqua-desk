@@ -616,6 +616,33 @@ const DB = {
       inactiveTrainers: inactive.data  ||[],
     };
   },
+
+  // ─── УВЕДОМЛЕНИЯ ─────────────────────────────
+  async getNotificationRules() {
+    const {data,error} = await sb().from('notification_rules').select('*').order('id');
+    if (error) throw error; return data||[];
+  },
+  async toggleRule(id, active) {
+    const {error} = await sb().from('notification_rules').update({active}).eq('id',id);
+    if (error) throw error;
+  },
+  async queueBroadcast(profiles, message, scheduledFor, createdBy) {
+    const rows = profiles.map(p=>({
+      recipient_tg_id: p.tg_id,
+      recipient_name:  p.fio,
+      message,
+      scheduled_for:   scheduledFor||new Date().toISOString(),
+      created_by:      createdBy,
+      status:          'pending',
+    }));
+    const {error} = await sb().from('notifications_queue').insert(rows);
+    if (error) throw error; return rows.length;
+  },
+  async getRecentNotifications(limit=30) {
+    const {data,error} = await sb().from('notifications_queue')
+      .select('*').order('created_at',{ascending:false}).limit(limit);
+    if (error) throw error; return data||[];
+  },
 };
 
 // ─── РАСЧЁТ ЗП ───────────────────────────────
