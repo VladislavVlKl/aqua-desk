@@ -151,6 +151,7 @@ function pinKey(k) {
 async function renderTrainerApp() {
   setupBack(null);
   renderTrainerShell('home');
+  setTimeout(checkNoteBadge, 1500);
 }
 
 function renderTrainerShell(tab) {
@@ -159,14 +160,15 @@ function renderTrainerShell(tab) {
     <div class="app-header">
       <div><div class="app-title">🏋️ AquaDesk</div>
         <div class="app-sub">${STATE.profile.fio}</div></div>
-      <div style="display:flex;gap:6px;align-items:center">
-        <button class="btn-icon" onclick="openSchedule()">📅</button>
-        <button class="btn-icon" onclick="renderHelpModal()">?</button>
-      </div>
+    <div style="display:flex;gap:6px;align-items:center">
+      <button class="btn-icon" id="note-badge" onclick="switchTab('clients')" style="display:none">📝</button>
+      <button class="btn-icon" onclick="openSchedule()">📅</button>
+      <button class="btn-icon" onclick="renderHelpModal()">?</button>
     </div>
-    <div id="tab-content" class="tab-content"></div>
-    <nav class="bottom-nav">
-      <button class="nav-btn" onclick="switchTab('home')"><span>🏠</span>Главная</button>
+  </div>
+  <div id="tab-content" class="tab-content"></div>
+  <nav class="bottom-nav">
+    <button class="nav-btn" onclick="switchTab('home')"><span>🏠</span>Главная</button>
       <button class="nav-btn" onclick="switchTab('clients')"><span>👥</span>Клиенты</button>
       <button class="nav-btn" onclick="switchTab('today')"><span>✅</span>Сегодня</button>
       <button class="nav-btn" onclick="switchTab('schedule')"><span>📅</span>Расписание</button>
@@ -186,6 +188,23 @@ function switchTab(tab) {
   if (tab==='schedule') renderScheduleTab();
   if (tab==='report')   renderReportTab();
   if (tab==='events')   renderEventsTab();
+}
+
+// Проверяем наличие незакрытых конспектов и показываем бейдж
+async function checkNoteBadge() {
+  try {
+    const clients = await DB.getClients(STATE.profile.id);
+    let pending = 0;
+    for (const c of clients.slice(0,15)) {
+      const overdue = await DB.getOverdueNotes(c.id, STATE.profile.id);
+      pending += overdue.length;
+    }
+    const badge = document.getElementById('note-badge');
+    if (badge) {
+      badge.style.display = pending > 0 ? '' : 'none';
+      badge.textContent   = pending > 0 ? `📝 ${pending}` : '📝';
+    }
+  } catch(e) { /* тихо */ }
 }
 
 // ── ТАБ: ГЛАВНАЯ (Списание + Дежурство) ──────
@@ -961,7 +980,12 @@ async function doDeleteWorkout(id) {
 
 // ── ПРОФИЛЬ КЛИЕНТА ───────────────────────────
 async function renderClientProfile(clientId, backTab='home') {
-  setupBack(()=>{ switchTab(backTab); setupBack(null); });
+  const isAdmin = STATE.profile.role === 'admin';
+  setupBack(()=>{
+    if (backTab === 'admin-clients') { renderAdminApp(); adminTab('clients'); }
+    else switchTab(backTab);
+    setupBack(null);
+  });
   $('#tab-content').innerHTML=`<div class="center-screen"><div class="spinner"></div></div>`;
   try {
     const {client,subscriptions,workouts}=await DB.getClientProfile(
@@ -1273,7 +1297,8 @@ function renderAdminApp() {
   <nav class="bottom-nav">
     <button class="nav-btn" onclick="adminTab('summary')"><span>📊</span>Сводка</button>
     <button class="nav-btn" onclick="adminTab('analytics')"><span>📈</span>Аналитика</button>
-    <button class="nav-btn" onclick="adminTab('staff')"><span>👥</span>Персонал</button>
+    <button class="nav-btn" onclick="adminTab('clients')"><span>👥</span>Клиенты</button>
+    <button class="nav-btn" onclick="adminTab('staff')"><span>🧑‍💼</span>Персонал</button>
     <button class="nav-btn" onclick="adminTab('branches')"><span>🏢</span>Филиалы</button>
     <button class="nav-btn" onclick="adminTab('groups')"><span>🏊</span>Группы</button>
     <button class="nav-btn" onclick="adminTab('notifications')"><span>🔔</span>Уведомл.</button>
@@ -1284,9 +1309,10 @@ function renderAdminApp() {
 }
 function adminTab(tab) {
   $$('.nav-btn').forEach((b,i)=>b.classList.toggle('active',
-    ['summary','analytics','staff','branches','groups','notifications','events','control'][i]===tab));
+    ['summary','analytics','clients','staff','branches','groups','notifications','events','control'][i]===tab));
   if (tab==='summary')       renderAdminSummary();
   if (tab==='analytics')     renderAdminAnalytics();
+  if (tab==='clients')       renderAdminClients();
   if (tab==='staff')         renderAdminStaff();
   if (tab==='branches')      renderAdminBranches();
   if (tab==='groups')        renderAdminGroups();
@@ -1381,6 +1407,72 @@ async function loadAnalytics(year, month, branch) {
         </div>`:''}
     `;
   } catch(e) { body.innerHTML='<p class="hint">Ошибка загрузки</p>'; console.error(e); }
+}
+
+// ─ ADMIN: КЛИЕНТЫ (все) ──────────────────────
+async function renderAdminClients() {
+  $('#tab-content').innerHTML = `<div class="center-screen"><div class="spinner"></div></div>`;
+  const branches = await DB.getBranches();
+  const profiles = await DB.getAllProfiles();
+  const trainers = profiles.filter(p => ['trainer','senior_trainer'].includes(p.role));
+
+  // Загружаем всех клиентов
+  let allClients = [];
+  for (const t of trainers) {
+    const c = await DB.getClients(t.id);
+    c.forEach(cl => { cl._trainerFio = t.fio; cl._trainerBranches = t.branches||[]; });
+    allClients = allClients.concat(c);
+  }
+
+  $('#tab-content').innerHTML = `<div class="tab-pad">
+    <div class="section-header"><h3>Все клиенты</h3>
+      <span class="hint">${allClients.length} чел.</span>
+    </div>
+    <div class="form-group" style="display:flex;gap:8px">
+      <select id="cl-branch" onchange="filterAdminClients()" style="flex:1">
+        <option value="">Все филиалы</option>
+        ${branches.map(b=>`<option>${b.name}</option>`).join('')}
+      </select>
+      <select id="cl-trainer" onchange="filterAdminClients()" style="flex:1">
+        <option value="">Все тренеры</option>
+        ${trainers.map(t=>`<option value="${t.id}">${t.fio}</option>`).join('')}
+      </select>
+    </div>
+    <input id="cl-search" type="text" placeholder="🔍 Поиск по имени..."
+      oninput="filterAdminClients()" style="margin-bottom:12px">
+    <div id="cl-list">
+      ${renderClientList(allClients)}
+    </div>
+  </div>`;
+
+  window._allAdminClients = allClients;
+}
+
+function renderClientList(clients) {
+  if (!clients.length) return '<p class="hint">Нет клиентов</p>';
+  return clients.map(c => `
+    <div class="client-row" onclick="renderClientProfile('${c.id}','admin-clients')">
+      <div>
+        <div class="cr-name">${c.fio}${c.age?' <span class="hint">('+c.age+' лет)</span>':''}</div>
+        <div class="cr-meta">
+          ${c._trainerFio} · кат.${c.category} · баланс: ${c.balance}
+          ${c.subscription_end?' · до '+c.subscription_end:''}
+        </div>
+      </div>
+      <span class="cr-arrow">›</span>
+    </div>`).join('');
+}
+
+function filterAdminClients() {
+  const branch  = document.getElementById('cl-branch')?.value||'';
+  const trainer = document.getElementById('cl-trainer')?.value||'';
+  const search  = document.getElementById('cl-search')?.value.toLowerCase()||'';
+  let filtered  = window._allAdminClients||[];
+  if (branch)  filtered = filtered.filter(c => (c._trainerBranches||[]).includes(branch));
+  if (trainer) filtered = filtered.filter(c => String(c.trainer_id) === trainer);
+  if (search)  filtered = filtered.filter(c => c.fio.toLowerCase().includes(search));
+  const list = document.getElementById('cl-list');
+  if (list) list.innerHTML = renderClientList(filtered);
 }
 
 // ─ ADMIN: СВОДКА
