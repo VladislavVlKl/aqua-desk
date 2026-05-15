@@ -1,6 +1,4 @@
-// process-queue.js — Обработка очереди ручных уведомлений
-// Запускается каждые 15 минут через GitHub Actions
-
+// process-queue.js — Обработка очереди уведомлений
 const BASE = process.env.SUPABASE_URL + '/rest/v1';
 const KEY  = process.env.SUPABASE_ANON_KEY;
 const BOT  = process.env.BOT_TOKEN;
@@ -10,16 +8,16 @@ async function get(path) {
   try {
     const r = await fetch(BASE + path, { headers: H });
     const t = await r.text();
-    let d; try { d = JSON.parse(t); } catch { return []; }
-    if (!r.ok) { console.error('API error:', JSON.stringify(d).slice(0,200)); return []; }
+    let d; try { d = JSON.parse(t); } catch { console.error('Not JSON:', t.slice(0,200)); return []; }
+    if (!r.ok) { console.error('API error:', JSON.stringify(d)); return []; }
     return Array.isArray(d) ? d : [];
-  } catch(e) { return []; }
+  } catch(e) { console.error('Fetch:', e.message); return []; }
 }
 
 async function patch(path, body) {
   try {
     await fetch(BASE + path, { method: 'PATCH', headers: H, body: JSON.stringify(body) });
-  } catch(e) { console.error('PATCH error:', e.message); }
+  } catch(e) { console.error('PATCH:', e.message); }
 }
 
 async function tg(chatId, text) {
@@ -34,10 +32,10 @@ async function tg(chatId, text) {
 }
 
 async function main() {
-  const now = new Date().toISOString();
-  console.log('=== Process Queue ===', now);
+  // Используем encodeURIComponent чтобы правильно закодировать символы в дате
+  const now = encodeURIComponent(new Date().toISOString());
+  console.log('=== Process Queue ===', decodeURIComponent(now));
 
-  // Берём все pending уведомления которые уже должны были уйти
   const pending = await get(
     '/notifications_queue?select=*' +
     '&status=eq.pending' +
@@ -48,7 +46,6 @@ async function main() {
   console.log('Pending notifications:', pending.length);
 
   let sent = 0, failed = 0;
-
   for (const n of pending) {
     const ok = await tg(n.recipient_tg_id, n.message);
     await patch(
@@ -57,8 +54,8 @@ async function main() {
         ? { status: 'sent',   sent_at: new Date().toISOString() }
         : { status: 'failed', error_text: 'Telegram delivery failed' }
     );
-    if (ok) { sent++; console.log('Sent to:', n.recipient_name || n.recipient_tg_id); }
-    else     { failed++; console.log('Failed:', n.recipient_name || n.recipient_tg_id); }
+    if (ok) { sent++; console.log('Sent to:', n.recipient_name); }
+    else   { failed++; console.log('Failed:', n.recipient_name); }
   }
 
   console.log('Done. Sent:', sent, '| Failed:', failed);
