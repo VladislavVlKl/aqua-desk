@@ -341,68 +341,6 @@ async function renderWorkoutsTab() {
   // Алиас — открывает главную
   renderHomeTab();
 }
-  $('#tab-content').innerHTML=`<div class="center-screen"><div class="spinner"></div></div>`;
-  const clients  = await DB.getClients(STATE.profile.id);
-  const branches = STATE.profile.branches||[];
-  const expiring = clients.filter(c => {
-    const d=daysUntil(c.subscription_end);
-    return d!==null&&d<=SUBSCRIPTION_WARN_DAYS&&d>=0;
-  });
-
-  $('#tab-content').innerHTML=`<div class="tab-pad">
-    <div class="section-header">
-      <h3>Списать тренировку</h3>
-      <button class="btn btn-sm" onclick="renderAddClientModal()">+ Клиент</button>
-    </div>
-    ${expiring.length?`<div class="warn-banner">
-      ⚠️ Абонемент истекает: ${expiring.map(c=>`<b>${c.fio.split(' ')[0]}</b> (${daysUntil(c.subscription_end)} дн.)`).join(', ')}
-    </div>`:''}
-    ${branchSelect('sel-branch',branches)}
-    <div class="form-group"><label>Клиент</label>
-      <select id="wk-client" onchange="onClientChange(this)">
-        <option value="">— выберите —</option>
-        ${clients.map(c=>{
-          const days=daysUntil(c.subscription_end);
-          const warn=days!==null&&days<=SUBSCRIPTION_WARN_DAYS&&days>=0?' ⚠️':'';
-          return `<option value="${c.id}" data-cat="${c.category}" data-bal="${c.balance}"
-            data-age="${c.age||''}" data-di="${c.drop_in_used}">
-            ${c.fio}${warn} (кат.${c.category}, баланс: ${c.balance})</option>`;
-        }).join('')}
-      </select>
-    </div>
-    <div class="form-group"><label>Тип тренировки</label>
-      <select id="wk-type" onchange="onWkTypeChange(this)">
-        <option value="regular">Обычная ПТ</option>
-        <option value="dropin">Разовое посещение (${fmt(RATES.drop_in_price)} сум)</option>
-        <option value="debt">В долг</option>
-      </select>
-    </div>
-    <div id="wk-regular-opts">
-      <div class="form-group"><label>Количество ПТ</label>
-        <select id="wk-count" onchange="renderDateFields()">
-          ${[1,2,3,4,5].map(n=>`<option>${n}</option>`).join('')}
-        </select>
-      </div>
-    </div>
-    <div id="wk-dates"></div>
-    <div id="wk-notes-wrap" style="display:none" class="form-group">
-      <label>Примечание <span class="required">*</span></label>
-      <textarea id="wk-notes" rows="2" placeholder="Причина пакетного списания"></textarea>
-    </div>
-    <div id="overdue-warning"></div>
-    <button class="btn btn-primary btn-full" onclick="doLogWorkout()">Списать</button>
-    <div style="margin-top:20px">
-      <h4>Мои клиенты</h4>
-      ${clients.map(c=>`<div class="client-row" onclick="renderClientProfile('${c.id}')">
-        <div><div class="cr-name">${c.fio}</div>
-          <div class="cr-meta">кат.${c.category} · баланс: ${c.balance}${c.age?' · '+c.age+' лет':''}</div>
-        </div>
-        <span class="cr-arrow">›</span>
-      </div>`).join('')}
-    </div>
-  </div>`;
-  renderDateFields();
-}
 
 function onWkTypeChange(sel) {
   const reg=document.getElementById('wk-regular-opts');
