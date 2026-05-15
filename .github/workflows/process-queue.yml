@@ -10,6 +10,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install Supabase SDK
+        run: npm install @supabase/supabase-js
+
       - name: Process queue
         env:
           BOT_TOKEN:         ${{ secrets.BOT_TOKEN }}
