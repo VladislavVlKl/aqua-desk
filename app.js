@@ -264,6 +264,27 @@ async function renderHomeTab() {
         <textarea id="wk-notes" rows="2" placeholder="Причина пакетного списания"></textarea>
       </div>
       <div id="overdue-warning"></div>
+
+      <!-- Замена: запись на другого тренера -->
+      <div class="debt-toggle" style="margin-bottom:0">
+        <label class="toggle-row">
+          <input type="checkbox" id="wk-substitute" onchange="toggleSubstitute(this)">
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+          <span>Записать на другого тренера (замена)</span>
+        </label>
+      </div>
+      <div id="wk-substitute-wrap" style="display:none;margin-top:10px">
+        <div class="form-group"><label>ФИО тренера Б <span class="required">*</span></label>
+          <input id="wk-sub-fio" type="text" placeholder="Иванов Иван Иванович"
+            list="trainers-datalist" autocomplete="off">
+          <datalist id="trainers-datalist">
+            ${(await DB.getAllProfiles()).filter(p=>p.role!=='admin'&&p.id!==STATE.profile.id)
+              .map(p=>`<option value="${p.fio}">`).join('')}
+          </datalist>
+        </div>
+        <p class="hint">Тренер получит уведомление для подтверждения. ЗП пойдёт ему.</p>
+      </div>
+
       <button class="btn btn-primary btn-full" onclick="doLogWorkout()">Списать</button>
     </div>
 
@@ -390,6 +411,11 @@ function renderDateFields() {
         max="${new Date().toISOString().slice(0,16)}">
     </div>`).join('');
 }
+function toggleSubstitute(cb) {
+  const wrap = document.getElementById('wk-substitute-wrap');
+  if (wrap) wrap.style.display = cb.checked ? '' : 'none';
+}
+
 async function doLogWorkout() {
   const clientSel=$('#wk-client');
   const clientId=clientSel?.value;
@@ -433,16 +459,37 @@ async function doLogWorkout() {
     const blocking=await DB.getBlockingEvents(branch,dt.toISOString(),new Date(dt.getTime()+3600000).toISOString());
     if (blocking.length>0&&!confirm(`⚠️ В это время: «${blocking[0].title}»\nВсё равно записать?`)) return;
   }
+
+  // Замена на другого тренера
+  const isSubstitute = document.getElementById('wk-substitute')?.checked||false;
+  let subTrainerId = null;
+  if (isSubstitute) {
+    const subFio = document.getElementById('wk-sub-fio')?.value.trim();
+    if (!subFio) return toast('Введите ФИО тренера для замены','error');
+    const allP = await DB.getAllProfiles();
+    const found = allP.find(p=>p.fio.toLowerCase()===subFio.toLowerCase());
+    if (!found) return toast(`Тренер «${subFio}» не найден`,'error');
+    subTrainerId = found.id;
+  }
+
   const rows=dates.map(d=>({
-    trainer_id:STATE.profile.id,client_id:clientId,
+    trainer_id: isSubstitute ? subTrainerId : STATE.profile.id,
+    client_id:clientId,
     category_at_moment:category,branch,
     workout_date:new Date(d).toISOString(),
     notes:notes||null,is_debt:isDebt,is_drop_in:isDropIn,
   }));
   try {
-    const result=await DB.logWorkouts(rows);
-    toast(isDebt?'✅ В долг':isDropIn?'✅ Разовое':`✅ ${count} ПТ`,'success');
-    if (!isDropIn&&!isDebt&&result?.[0]) {
+    let result;
+    if (isSubstitute) {
+      result = await DB.logSubstituteWorkout(rows, STATE.profile.id, subTrainerId);
+      toast('✅ Замена записана — тренер получит уведомление для подтверждения','success');
+      renderHomeTab(); return;
+    } else {
+      result = await DB.logWorkouts(rows);
+      toast(isDebt?'✅ В долг':isDropIn?'✅ Разовое':`✅ ${count} ПТ`,'success');
+    }
+    if (!isDropIn&&!isDebt&&!isSubstitute&&result?.[0]) {
       const wid=result[0].id;
       const m=el('div','modal-overlay');
       m.innerHTML=`<div class="modal">
@@ -935,7 +982,44 @@ async function loadTrainerReport(year,month) {
     ]);
     const adjustment=await DB.getAdjustment(STATE.profile.id,year,month);
     const sal=calcSalary({workouts,duties,trainerGroups,groupSessions,adjustment});
+
+    // Ожидающие подтверждения (замены)
+    const pending = await DB.getPendingConfirmations(STATE.profile.id);
+    // Входящие запросы на передачу
+    const transfers = await DB.getIncomingTransfers(STATE.profile.id);
+
     body.innerHTML=`
+      ${pending.length?`<div class="warn-banner" style="background:rgba(124,58,237,.1);border-color:rgba(124,58,237,.3);color:var(--text)">
+        <b>⚡ ${pending.length} замен(а) ждут подтверждения</b>
+        ${pending.map(w=>`
+          <div class="sub-confirm-row">
+            <div>
+              <span class="hi-client">${w.clients?.fio||'?'}</span>
+              <span class="hint"> · от ${w.profiles?.fio||'?'} · ${fmtDate(w.workout_date)}</span>
+            </div>
+            <div style="display:flex;gap:6px;margin-top:6px">
+              <button class="btn btn-sm btn-primary" onclick="doResolveSubstitute('${w.id}','${w.client_id}',true)">✓ Принять</button>
+              <button class="btn btn-sm btn-danger"  onclick="doResolveSubstitute('${w.id}','${w.client_id}',false)">✗ Отклонить</button>
+            </div>
+          </div>`).join('')}
+      </div>`:''}
+
+      ${transfers.length?`<div class="warn-banner" style="background:rgba(16,185,129,.08);border-color:rgba(16,185,129,.3);color:var(--text)">
+        <b>👤 ${transfers.length} запрос(а) на передачу клиента</b>
+        ${transfers.map(t=>`
+          <div class="sub-confirm-row">
+            <div>
+              <span class="hi-client">${t.clients?.fio||'?'}</span>
+              <span class="hint"> · от ${t.profiles?.fio||'?'}</span>
+              ${t.note?`<div class="hint">${t.note}</div>`:''}
+            </div>
+            <div style="display:flex;gap:6px;margin-top:6px">
+              <button class="btn btn-sm btn-primary" onclick="doResolveTransfer('${t.id}','${t.client_id}',${t.to_trainer_id},true)">✓ Принять</button>
+              <button class="btn btn-sm btn-danger"  onclick="doResolveTransfer('${t.id}','${t.client_id}',${t.to_trainer_id},false)">✗ Отклонить</button>
+            </div>
+          </div>`).join('')}
+      </div>`:''}
+
       <div class="summary-cards">
         <div class="summary-card"><div class="s-val">${sal.cat[1]+sal.cat[2]+sal.cat[3]}</div><div class="s-lbl">ПТ</div></div>
         <div class="summary-card"><div class="s-val">${sal.cat.dropIn}</div><div class="s-lbl">Разовые</div></div>
@@ -978,6 +1062,93 @@ async function doDeleteWorkout(id) {
   catch(e){toast('Ошибка','error');}
 }
 
+async function doResolveSubstitute(workoutId, clientId, confirmed) {
+  try {
+    await DB.resolveSubstitute(workoutId, clientId, confirmed);
+    toast(confirmed ? '✅ Замена принята — ПТ в вашей ведомости' : 'Замена отклонена', confirmed?'success':'info');
+    renderReportTab();
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+
+async function doResolveTransfer(transferId, clientId, toTrainerId, confirmed) {
+  try {
+    await DB.resolveTransfer(transferId, clientId, toTrainerId, confirmed);
+    toast(confirmed ? '✅ Клиент принят' : 'Передача отклонена', confirmed?'success':'info');
+    renderReportTab();
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+
+// Модал: передать клиента (для тренера)
+function renderTransferClientModal(clientId, clientFio, fromTrainerId) {
+  const m=el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>Передать клиента</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <p class="hint" style="margin-bottom:12px">Клиент: <b>${clientFio}</b></p>
+    <div class="form-group"><label>ФИО тренера <span class="required">*</span></label>
+      <input id="transfer-fio" type="text" placeholder="Иванов Иван Иванович"
+        list="trainers-datalist-t" autocomplete="off">
+    </div>
+    <div class="form-group"><label>Примечание (необязательно)</label>
+      <textarea id="transfer-note" rows="2" placeholder="Причина передачи"></textarea>
+    </div>
+    <button class="btn btn-primary btn-full" onclick="doInitiateTransfer('${clientId}',${fromTrainerId})">
+      Запросить передачу</button>
+  </div>`;
+  document.body.appendChild(m);
+}
+
+async function doInitiateTransfer(clientId, fromTrainerId) {
+  const fio  = document.getElementById('transfer-fio')?.value.trim();
+  const note = document.getElementById('transfer-note')?.value.trim()||'';
+  if (!fio) return toast('Введите ФИО тренера','error');
+  const profiles = await DB.getAllProfiles();
+  const found = profiles.find(p=>p.fio.toLowerCase()===fio.toLowerCase());
+  if (!found) return toast(`Тренер «${fio}» не найден`,'error');
+  try {
+    await DB.initiateTransfer(clientId, fromTrainerId, found.id, STATE.profile.id, note);
+    document.querySelector('.modal-overlay')?.remove();
+    toast('✅ Запрос отправлен — тренер увидит его в Отчёте','success');
+    switchTab('clients');
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+
+// Административная передача (координатор)
+async function renderAdminTransferModal(clientId, clientFio) {
+  const profiles = await DB.getAllProfiles();
+  const trainers = profiles.filter(p=>['trainer','senior_trainer'].includes(p.role));
+  const m=el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>Передать клиента</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <p style="margin-bottom:12px">Клиент: <b>${clientFio}</b><br>
+      <span class="hint">Передача без подтверждения тренера.</span></p>
+    <div class="form-group"><label>Новый тренер</label>
+      <select id="admin-transfer-trainer">
+        ${trainers.map(t=>`<option value="${t.id}">${t.fio}</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-group"><label>Примечание</label>
+      <textarea id="admin-transfer-note" rows="2" placeholder="Причина"></textarea>
+    </div>
+    <button class="btn btn-primary btn-full" onclick="doAdminTransfer('${clientId}')">
+      Передать клиента</button>
+  </div>`;
+  document.body.appendChild(m);
+}
+
+async function doAdminTransfer(clientId) {
+  const toId = parseInt(document.getElementById('admin-transfer-trainer')?.value);
+  const note = document.getElementById('admin-transfer-note')?.value.trim()||'';
+  if (!toId) return toast('Выберите тренера','error');
+  try {
+    await DB.adminTransfer(clientId, toId, STATE.profile.id, note);
+    document.querySelector('.modal-overlay')?.remove();
+    toast('✅ Клиент передан','success');
+    renderAdminClients();
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+
 // ── ПРОФИЛЬ КЛИЕНТА ───────────────────────────
 async function renderClientProfile(clientId, backTab='home') {
   const isAdmin = STATE.profile.role === 'admin';
@@ -1005,6 +1176,12 @@ async function renderClientProfile(clientId, backTab='home') {
           <div class="client-meta">${client.age?client.age+' лет · ':''}Кат.${client.category} · Баланс: ${client.balance}</div>
           <div class="client-meta">Тренер: ${client.profiles?.fio||'—'}</div>
           ${!canEdit?'<div class="hint" style="margin-top:4px;font-size:11px">👁 Только просмотр</div>':''}
+          ${canEdit?`<button class="btn btn-sm" style="margin-top:8px;background:var(--card);border:1px solid var(--border)"
+            onclick="renderTransferClientModal('${clientId}','${client.fio}',${STATE.profile.id})">
+            🔄 Передать клиента</button>`:''}
+          ${isAdmin?`<button class="btn btn-sm" style="margin-top:8px;background:var(--card);border:1px solid var(--border)"
+            onclick="renderAdminTransferModal('${clientId}','${client.fio}')">
+            🔄 Передать (административно)</button>`:''}
         </div>
       </div>
       ${activeSub?`
