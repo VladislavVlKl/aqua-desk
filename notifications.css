@@ -1,0 +1,39 @@
+/* ── Уведомления — добавить в конец style.css ── */
+
+.notif-rule-card {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--rs); padding: 12px 14px; margin-bottom: 10px;
+}
+.notif-rule-info { flex: 1; min-width: 0; }
+.notif-rule-name { font-size: 14px; font-weight: 600; margin-bottom: 3px; }
+.notif-rule-desc { font-size: 12px; line-height: 1.4; }
+
+.notif-preview {
+  background: rgba(124,58,237,.08); border: 1px solid rgba(124,58,237,.2);
+  border-radius: var(--rs); padding: 12px 14px; margin-bottom: 12px;
+}
+.notif-preview-label { font-size: 11px; color: var(--hint); margin-bottom: 8px; }
+.notif-preview-bubble {
+  font-size: 13px; line-height: 1.5; white-space: pre-wrap;
+}
+
+.notif-history-item {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--rs); padding: 10px 12px; margin-bottom: 8px;
+}
+.notif-h-row {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 4px;
+}
+.notif-h-name { font-size: 13px; font-weight: 600; }
+.notif-h-msg  { font-size: 12px; margin-bottom: 3px; }
+.notif-h-time { font-size: 11px; }
+
+.notif-status-badge {
+  font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 20px;
+}
+.notif-status-badge.sent    { background: rgba(16,185,129,.15); color: var(--success); }
+.notif-status-badge.failed  { background: rgba(239,68,68,.15);  color: var(--danger); }
+.notif-status-badge.pending { background: rgba(245,158,11,.15); color: var(--warn); }
