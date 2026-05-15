@@ -16,7 +16,8 @@ async function get(path) {
 
 async function patch(path, body) {
   try {
-    await fetch(BASE + path, { method: 'PATCH', headers: H, body: JSON.stringify(body) });
+    const r = await fetch(BASE + path, { method: 'PATCH', headers: H, body: JSON.stringify(body) });
+    if (!r.ok) { const t = await r.text(); console.error('PATCH error:', t.slice(0,200)); }
   } catch(e) { console.error('PATCH:', e.message); }
 }
 
@@ -32,21 +33,24 @@ async function tg(chatId, text) {
 }
 
 async function main() {
-  // Используем encodeURIComponent чтобы правильно закодировать символы в дате
-  const now = encodeURIComponent(new Date().toISOString());
-  console.log('=== Process Queue ===', decodeURIComponent(now));
+  const now = Date.now();
+  console.log('=== Process Queue ===', new Date(now).toISOString());
 
-  const pending = await get(
-    '/notifications_queue?select=*' +
-    '&status=eq.pending' +
-    '&scheduled_for=lte.' + now +
-    '&order=scheduled_for.asc&limit=50'
+  // Получаем ВСЕ pending — фильтрацию по дате делаем в JS
+  // чтобы избежать проблем с форматом даты в PostgREST
+  const allPending = await get(
+    '/notifications_queue?select=*&status=eq.pending&order=scheduled_for.asc&limit=100'
   );
 
-  console.log('Pending notifications:', pending.length);
+  console.log('Total pending in queue:', allPending.length);
+
+  // Фильтруем: только те что уже должны были уйти
+  const toSend = allPending.filter(n => new Date(n.scheduled_for).getTime() <= now);
+  console.log('Ready to send:', toSend.length);
 
   let sent = 0, failed = 0;
-  for (const n of pending) {
+  for (const n of toSend) {
+    console.log('Sending to:', n.recipient_name, '| tg_id:', n.recipient_tg_id);
     const ok = await tg(n.recipient_tg_id, n.message);
     await patch(
       '/notifications_queue?id=eq.' + n.id,
@@ -54,8 +58,8 @@ async function main() {
         ? { status: 'sent',   sent_at: new Date().toISOString() }
         : { status: 'failed', error_text: 'Telegram delivery failed' }
     );
-    if (ok) { sent++; console.log('Sent to:', n.recipient_name); }
-    else   { failed++; console.log('Failed:', n.recipient_name); }
+    if (ok) { sent++; console.log('  ✓ Sent'); }
+    else   { failed++; console.log('  ✗ Failed'); }
   }
 
   console.log('Done. Sent:', sent, '| Failed:', failed);
