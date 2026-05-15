@@ -992,6 +992,11 @@ async function renderClientProfile(clientId, backTab='home') {
       clientId,STATE.profile.role,STATE.profile.branches);
     const activeSub=subscriptions.find(s=>s.is_active);
     const pastSubs=subscriptions.filter(s=>!s.is_active);
+
+    // Права: редактировать может только тренер этого клиента
+    const isOwnClient = client.trainer_id === STATE.profile.id;
+    const canEdit     = isOwnClient && ['trainer','senior_trainer'].includes(STATE.profile.role);
+
     $('#tab-content').innerHTML=`<div class="tab-pad">
       <div class="client-header">
         <div class="client-avatar">${client.fio.charAt(0)}</div>
@@ -999,33 +1004,34 @@ async function renderClientProfile(clientId, backTab='home') {
           <div class="client-name">${client.fio}</div>
           <div class="client-meta">${client.age?client.age+' лет · ':''}Кат.${client.category} · Баланс: ${client.balance}</div>
           <div class="client-meta">Тренер: ${client.profiles?.fio||'—'}</div>
+          ${!canEdit?'<div class="hint" style="margin-top:4px;font-size:11px">👁 Только просмотр</div>':''}
         </div>
       </div>
       ${activeSub?`
         <div class="sub-card active-sub">
           <div class="sub-card-header">
             <span>📅 Абонемент с ${activeSub.start_date}</span>
-            <button class="btn btn-sm btn-danger" onclick="renderCloseSubModal(${activeSub.id})">Закрыть</button>
+            ${canEdit?`<button class="btn btn-sm btn-warn" onclick="renderCloseSubModal(${activeSub.id})">❄️ Заморозить</button>`:''}
           </div>
           <div class="goals-section">
             <div class="goals-header">
               <span class="goals-title">🎯 Цели</span>
-              <button class="btn btn-sm" onclick="renderAddGoalModal(${activeSub.id},'${clientId}')">+ Цель</button>
+              ${canEdit?`<button class="btn btn-sm" onclick="renderAddGoalModal(${activeSub.id},'${clientId}')">+ Цель</button>`:''}
             </div>
             ${activeSub.training_goals?.length
               ?activeSub.training_goals.map(g=>`<div class="goal-item">
                   <span>${g.goal_text}</span>
-                  <button class="btn-icon" style="font-size:12px;color:var(--danger)" onclick="doDeleteGoal('${g.id}','${clientId}')">✕</button>
+                  ${canEdit?`<button class="btn-icon" style="font-size:12px;color:var(--danger)" onclick="doDeleteGoal('${g.id}','${clientId}')">✕</button>`:''}
                 </div>`).join('')
               :'<p class="hint">Цели не установлены</p>'}
           </div>
         </div>
         <h4>Занятия абонемента</h4>
-        ${renderSessionsList(workouts,activeSub.id,clientId)}`
+        ${renderSessionsList(workouts,activeSub.id,clientId,canEdit)}`
       :`<div class="sub-card new-sub-card">
           <p class="hint">Нет активного абонемента</p>
-          <button class="btn btn-primary btn-full" style="margin-top:10px"
-            onclick="renderNewSubModal('${clientId}')">+ Начать абонемент</button>
+          ${canEdit?`<button class="btn btn-primary btn-full" style="margin-top:10px"
+            onclick="renderNewSubModal('${clientId}')">+ Начать абонемент</button>`:''}
         </div>`}
       ${pastSubs.length?`
         <h4 style="margin-top:20px">История абонементов</h4>
@@ -1052,7 +1058,7 @@ function togglePastSub(id) {
   if (arrow) arrow.textContent=open?'∨':'›';
 }
 
-function renderSessionsList(workouts,activeSubId,clientId) {
+function renderSessionsList(workouts, activeSubId, clientId, canEdit=true) {
   if (!workouts.length) return '<p class="hint">Нет тренировок</p>';
   return workouts.map((w,i)=>{
     const note=w.session_notes;
@@ -1063,14 +1069,16 @@ function renderSessionsList(workouts,activeSubId,clientId) {
         <span class="si-num">№${workouts.length-i}</span>
         <span class="si-date">${fmtDate(w.workout_date)}</span>
         <span class="si-cat cat-${w.category_at_moment}">Кат.${w.category_at_moment}</span>
-        ${isOverdue?'<span class="overdue-badge">⛔ Нет конспекта</span>':''}
+        ${isOverdue&&canEdit?'<span class="overdue-badge">⛔ Нет конспекта</span>':''}
       </div>
       ${hasNote?`<div class="note-block">
           <div class="note-label">✅ ${note.accomplishments}</div>
           ${note.next_task?`<div class="note-next">→ ${note.next_task}</div>`:''}
-        </div>`:`<button class="btn btn-sm" style="margin-top:6px"
+        </div>`
+      : canEdit ? `<button class="btn btn-sm" style="margin-top:6px"
           onclick="renderSessionNoteModal('${w.id}','${clientId}')">
-          ${isOverdue?'⛔ Написать (просрочено)':'Написать конспект'}</button>`}
+          ${isOverdue?'⛔ Написать (просрочено)':'Написать конспект'}</button>`
+      : '<p class="hint" style="font-size:12px;margin-top:4px">Конспект не написан</p>'}
     </div>`;
   }).join('');
 }
