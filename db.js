@@ -374,6 +374,61 @@ const DB = {
       .select().single();
     if (error) throw error; return data;
   },
+
+  /** Создать абонемент для действующего клиента (баланс уже установлен отдельно) */
+  async createSubscriptionWithInitial(clientId, trainerId, startDate, initialBalance, currentBalance) {
+    await sb().from('subscriptions')
+      .update({is_active:false}).eq('client_id',clientId).eq('is_active',true);
+    const {data,error} = await sb().from('subscriptions')
+      .insert({client_id:clientId,trainer_id:trainerId,
+               start_date:startDate,initial_balance:initialBalance,is_active:true})
+      .select().single();
+    if (error) throw error;
+    // Синхронизируем баланс клиента
+    await sb().from('clients').update({balance:currentBalance}).eq('id',clientId);
+    return data;
+  },
+
+  /** Купить новый пакет ПТ:
+   *  - Ребёнок: закрывает старый (остаток сгорает), создаёт новый
+   *  - Взрослый: добавляет ПТ к балансу, абонемент не закрывается */
+  async buyNewPackage(clientId, trainerId, isChild, quantity, startDate) {
+    const endDate = calcSubEnd(startDate, quantity);
+    if (isChild) {
+      // Закрыть старый (баланс сгорает)
+      await sb().from('subscriptions')
+        .update({is_active:false, end_date:startDate, closing_note:'Истёк. Остаток сгорел.'})
+        .eq('client_id',clientId).eq('is_active',true);
+      // Обнулить баланс и установить новый
+      await sb().from('clients').update({balance:quantity}).eq('id',clientId);
+      // Создать новый абонемент
+      const {data,error} = await sb().from('subscriptions')
+        .insert({client_id:clientId,trainer_id:trainerId,
+                 start_date:startDate,end_date:endDate,initial_balance:quantity,is_active:true})
+        .select().single();
+      if (error) throw error; return data;
+    } else {
+      // Взрослый: просто добавить к балансу
+      const {data:cl} = await sb().from('clients').select('balance').eq('id',clientId).single();
+      const newBal = (cl?.balance||0) + quantity;
+      await sb().from('clients').update({balance:newBal}).eq('id',clientId);
+      // Если нет активного абонемента — создать
+      const {data:subs} = await sb().from('subscriptions')
+        .select('id').eq('client_id',clientId).eq('is_active',true).limit(1);
+      if (!subs?.length) {
+        await sb().from('subscriptions')
+          .insert({client_id:clientId,trainer_id:trainerId,
+                   start_date:startDate,initial_balance:quantity,is_active:true})
+          .select().single();
+      } else {
+        // Обновить initial_balance активного абонемента (суммируем пакеты)
+        await sb().from('subscriptions')
+          .update({initial_balance: (subs[0].initial_balance||0)+quantity})
+          .eq('id',subs[0].id);
+      }
+      return {balance:newBal};
+    }
+  },
   async closeSubscription(subId, closingNote, endDate) {
     const {data,error} = await sb().from('subscriptions')
       .update({is_active:false,end_date:endDate,closing_note:closingNote||null})
