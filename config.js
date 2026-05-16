@@ -76,6 +76,15 @@ function daysUntil(dateStr) {
   return Math.ceil((new Date(dateStr) - new Date(todayStr())) / 86400000);
 }
 
+/** Рассчитать дату окончания абонемента по количеству ПТ */
+function calcSubEnd(startDate, qty) {
+  const d = new Date(startDate);
+  if (qty <= 5)       d.setDate(d.getDate() + 14);
+  else if (qty <= 10) d.setMonth(d.getMonth() + 1);
+  else                d.setMonth(d.getMonth() + 3);
+  return d.toISOString().slice(0,10);
+}
+
 function pct(curr, prev) {
   if (!prev) return curr > 0 ? '+100%' : '0%';
   const p = Math.round((curr - prev) / prev * 100);
