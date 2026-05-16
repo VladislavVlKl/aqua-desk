@@ -543,19 +543,121 @@ async function doAddClient() {
 }
 
 // ── ТАБ: РАСПИСАНИЕ ───────────────────────────
+// ── ТАБ: РАСПИСАНИЕ (КАЛЕНДАРНОЕ) ────────────
+
+// Глобальное состояние недели
+let _schedWeekOffset = 0;
+
+function getWeekBounds(offset=0) {
+  const now = new Date();
+  const mon = new Date(now);
+  mon.setDate(now.getDate() - (now.getDay()+6)%7 + offset*7);
+  mon.setHours(0,0,0,0);
+  const sun = new Date(mon); sun.setDate(mon.getDate()+6);
+  const fmt = d => d.toISOString().slice(0,10);
+  return { mon, sun, monStr: fmt(mon), sunStr: fmt(sun) };
+}
+
+function weekLabel(offset) {
+  const {mon,sun} = getWeekBounds(offset);
+  if (offset===0) return 'Эта неделя';
+  if (offset===1) return 'Следующая неделя';
+  if (offset===-1) return 'Прошлая неделя';
+  return `${mon.toLocaleDateString('ru-RU',{day:'2-digit',month:'short'})} – ${sun.toLocaleDateString('ru-RU',{day:'2-digit',month:'short'})}`;
+}
+
 async function renderScheduleTab() {
   $('#tab-content').innerHTML=`<div class="center-screen"><div class="spinner"></div></div>`;
+  await loadScheduleWeek(_schedWeekOffset);
+}
+
+async function loadScheduleWeek(offset) {
+  _schedWeekOffset = offset;
+  const {mon, monStr, sunStr} = getWeekBounds(offset);
+  const branch = STATE.profile.branches?.[0]||'';
+
   try {
-    const slots=await DB.getSlots(STATE.profile.id);
-    const grid=buildGrid(slots);
+    const [recurring, oneTime, events] = await Promise.all([
+      DB.getRecurringSlots(STATE.profile.id),
+      DB.getOneTimeSlots(STATE.profile.id, monStr, sunStr),
+      DB.getEventsForWeek(monStr, sunStr, branch),
+    ]);
+
+    const recurringIds = recurring.map(s=>s.id);
+    const cancellations = await DB.getCancellations(recurringIds, monStr, sunStr);
+    const cancelledSet = new Set(cancellations.map(c=>`${c.slot_id}__${c.cancel_date}`));
+
+    // Строим сетку по датам недели
+    const grid = {}; // grid[dow][hKey] = []
+    for (let d=0;d<7;d++) { grid[d]={}; SCHEDULE_HOURS.forEach(h=>{grid[d][h]=[];}); }
+
+    // Повторяющиеся (фильтруем отменённые)
+    recurring.forEach(s=>{
+      const dateForDow = new Date(mon); dateForDow.setDate(mon.getDate()+s.day_of_week);
+      const dateStr = dateForDow.toISOString().slice(0,10);
+      if (cancelledSet.has(`${s.id}__${dateStr}`)) return; // отменён
+      const startH = parseInt(s.start_time.slice(0,2));
+      const endH   = parseInt(s.end_time.slice(0,2));
+      if (s.slot_type==='duty') {
+        for (let h=startH;h<endH;h++) {
+          const hKey=`${String(h).padStart(2,'0')}:00`;
+          if (grid[s.day_of_week]?.[hKey])
+            grid[s.day_of_week][hKey].push({...s,_dutyFirst:h===startH,_dutyLast:h===endH-1,_date:dateStr});
+        }
+      } else {
+        const hKey=`${String(startH).padStart(2,'0')}:00`;
+        if (grid[s.day_of_week]?.[hKey]) grid[s.day_of_week][hKey].push({...s,_date:dateStr});
+      }
+    });
+
+    // Разовые слоты
+    oneTime.forEach(s=>{
+      const date = new Date(s.specific_date+'T12:00:00');
+      const dow  = (date.getDay()+6)%7;
+      const startH = parseInt(s.start_time.slice(0,2));
+      const hKey=`${String(startH).padStart(2,'0')}:00`;
+      if (grid[dow]?.[hKey]) grid[dow][hKey].push({...s,_date:s.specific_date,_oneTime:true});
+    });
+
+    // События
+    events.forEach(ev=>{
+      const startDate = new Date(ev.start_time);
+      const dow = (startDate.getDay()+6)%7;
+      const startH = startDate.getUTCHours()+5; // Ташкент UTC+5
+      const adjH = startH % 24;
+      const hKey = `${String(adjH).padStart(2,'0')}:00`;
+      if (grid[dow]?.[hKey] !== undefined)
+        grid[dow][hKey].push({...ev,_isEvent:true,_date:ev.start_time.slice(0,10)});
+    });
+
+    // Заголовки дней с датами
+    const dayHeaders = DAYS_SHORT.map((d,i)=>{
+      const date = new Date(mon); date.setDate(mon.getDate()+i);
+      const isToday = date.toISOString().slice(0,10) === todayStr();
+      return `<th class="${isToday?'sched-today':''}">
+        ${d}<br><span class="sched-date-num">${date.getDate()}</span>
+      </th>`;
+    }).join('');
+
     $('#tab-content').innerHTML=`<div class="tab-pad">
-      <div class="section-header"><h3>Моё расписание</h3>
-        <button class="btn btn-sm" onclick="renderAddSlotModal()">+ Слот</button></div>
-      <p class="hint" style="margin-bottom:10px">Нажмите слот для удаления.</p>
+      <div class="section-header">
+        <h3>Расписание</h3>
+        <button class="btn btn-sm" onclick="renderAddSlotModal()">+ Слот</button>
+      </div>
+
+      <!-- Навигация по неделям -->
+      <div class="week-nav">
+        <button class="btn btn-sm" onclick="loadScheduleWeek(${offset-1})">‹</button>
+        <span class="week-label">${weekLabel(offset)}</span>
+        <button class="btn btn-sm" onclick="loadScheduleWeek(${offset+1})">›</button>
+      </div>
+      ${offset!==0?`<button class="btn btn-sm" style="width:100%;margin-bottom:10px;background:var(--card)"
+        onclick="loadScheduleWeek(0)">Сегодня</button>`:''}
+
       <div class="schedule-scroll">
         <table class="sched-table">
-          <thead><tr><th class="sched-time-col"></th>
-            ${DAYS_SHORT.map(d=>`<th>${d}</th>`).join('')}
+          <thead><tr>
+            <th class="sched-time-col"></th>${dayHeaders}
           </tr></thead>
           <tbody>
             ${SCHEDULE_HOURS.map(h=>`<tr>
@@ -567,65 +669,111 @@ async function renderScheduleTab() {
           </tbody>
         </table>
       </div>
+
       <div class="legend">
         ${Object.entries(SLOT_COLORS).map(([k,v])=>
           `<span class="legend-item" style="background:${v.bg};color:${v.color}">${v.label}</span>`
         ).join('')}
+        <span class="legend-item" style="background:rgba(245,158,11,.15);color:var(--warn)">📌 Событие</span>
+        <span class="legend-item" style="background:rgba(99,102,241,.15);color:#818cf8">★ Разовый</span>
       </div>
     </div>`;
-  } catch(e) { toast('Ошибка','error'); console.error(e); }
-}
-
-function buildGrid(slots) {
-  const grid={};
-  for (let d=0;d<7;d++) { grid[d]={}; SCHEDULE_HOURS.forEach(h=>{grid[d][h]=[];}); }
-  slots.forEach(s=>{
-    const startH=parseInt(s.start_time.slice(0,2));
-    const endH=parseInt(s.end_time.slice(0,2));
-    if (s.slot_type==='duty') {
-      for (let h=startH;h<endH;h++) {
-        const hKey=`${String(h).padStart(2,'0')}:00`;
-        if (grid[s.day_of_week]?.[hKey])
-          grid[s.day_of_week][hKey].push({...s,_dutyFirst:h===startH,_dutyLast:h===endH-1});
-      }
-    } else {
-      const hKey=`${String(startH).padStart(2,'0')}:00`;
-      if (grid[s.day_of_week]?.[hKey]) grid[s.day_of_week][hKey].push(s);
-    }
-  });
-  return grid;
+  } catch(e) { toast('Ошибка загрузки расписания','error'); console.error(e); }
 }
 
 function renderSlotPill(s) {
+  // Событие
+  if (s._isEvent) {
+    const bg = s.blocks_pool ? 'rgba(239,68,68,.15)' : 'rgba(245,158,11,.15)';
+    const color = s.blocks_pool ? 'var(--danger)' : 'var(--warn)';
+    return `<div class="slot-pill" style="background:${bg};color:${color}" title="${s.title}">
+      📌 ${s.title.slice(0,8)}</div>`;
+  }
   const c=SLOT_COLORS[s.slot_type];
+  const oneTimeMark = s._oneTime ? '★ ' : '';
+  const oneBorder   = s._oneTime ? `border:1px dashed ${c.color};` : '';
+
   if (s.slot_type==='duty') {
     const bTop=s._dutyFirst?`border-top:2px solid ${c.color};border-radius:4px 4px 0 0;`:'';
     const bBot=s._dutyLast?`border-bottom:2px solid ${c.color};border-radius:0 0 4px 4px;margin-bottom:0;`:'';
     const label=s._dutyFirst?`${s.start_time.slice(0,5)}–${s.end_time.slice(0,5)}`:'│';
     return `<div class="slot-pill slot-duty-block" style="background:${c.bg};color:${c.color};${bTop}${bBot}"
-      onclick="confirmDeleteSlot('${s.id}','duty')">${label}</div>`;
+      onclick="showSlotMenu('${s.id}','${s.slot_type}','${s._date||''}',${!!s._oneTime})">${label}</div>`;
   }
-  const label=s.slot_type==='pt'?(s.clients?.fio?.split(' ')[0]||'ПТ'):(s.group_types?.name?.slice(0,6)||'Гр');
-  return `<div class="slot-pill" style="background:${c.bg};color:${c.color}"
-    onclick="confirmDeleteSlot('${s.id}','${s.slot_type}')">${label}</div>`;
+  const label = s.slot_type==='pt'
+    ? (s.clients?.fio?.split(' ')[0]||'ПТ')
+    : (s.group_types?.name?.slice(0,6)||'Гр');
+  return `<div class="slot-pill" style="background:${c.bg};color:${c.color};${oneBorder}"
+    onclick="showSlotMenu('${s.id}','${s.slot_type}','${s._date||''}',${!!s._oneTime})">
+    ${oneTimeMark}${label}</div>`;
 }
-async function confirmDeleteSlot(id,type) {
-  if (!confirm(`Удалить слот (${SLOT_COLORS[type]?.label||type})?`)) return;
-  try { await DB.deactivateSlot(id); toast('Удалено','success'); renderScheduleTab(); }
+
+function showSlotMenu(slotId, type, date, isOneTime) {
+  const m=el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>Действие со слотом</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    ${date&&!isOneTime?`
+      <button class="btn btn-full" style="margin-bottom:8px;background:var(--card);border:1px solid var(--warn);color:var(--warn)"
+        onclick="this.closest('.modal-overlay').remove();doSkipSlotDate('${slotId}','${date}')">
+        Пропустить ${date} (только этот день)</button>`:''}
+    <button class="btn btn-danger btn-full"
+      onclick="this.closest('.modal-overlay').remove();doDeleteSlot('${slotId}','${type}',${isOneTime})">
+      ${isOneTime?'Удалить разовый слот':'Удалить из расписания навсегда'}</button>
+  </div>`;
+  document.body.appendChild(m);
+}
+
+async function doSkipSlotDate(slotId, date) {
+  try {
+    await DB.cancelSlotDate(slotId, date);
+    toast(`Слот ${date} пропущен`,'success');
+    loadScheduleWeek(_schedWeekOffset);
+  } catch(e) { toast('Ошибка','error'); }
+}
+
+async function doDeleteSlot(slotId, type, isOneTime) {
+  const msg = isOneTime ? 'Удалить разовый слот?' : `Удалить слот (${SLOT_COLORS[type]?.label||type}) навсегда?`;
+  if (!confirm(msg)) return;
+  try { await DB.deactivateSlot(slotId); toast('Удалено','success'); loadScheduleWeek(_schedWeekOffset); }
   catch(e) { toast('Ошибка','error'); }
 }
+
+async function confirmDeleteSlot(id,type) {
+  await doDeleteSlot(id,type,false);
+}
+
 async function renderAddSlotModal() {
   const branches=STATE.profile.branches||[];
   const clients=await DB.getClients(STATE.profile.id);
   const groupList=await DB.getTrainerGroups(STATE.profile.id);
   window._slotClients=clients; window._slotGroupList=groupList;
+
+  // Даты текущей недели для разового слота
+  const {mon} = getWeekBounds(_schedWeekOffset);
+  const weekDates = DAYS_FULL.map((d,i)=>{
+    const date=new Date(mon); date.setDate(mon.getDate()+i);
+    return `<option value="${date.toISOString().slice(0,10)}">${d} (${date.getDate()})</option>`;
+  }).join('');
+
   const m=el('div','modal-overlay');
   m.innerHTML=`<div class="modal">
     <div class="modal-header"><h3>Добавить слот</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     ${branchSelect('slot-branch',branches)}
-    <div class="form-group"><label>День недели</label>
+
+    <div class="form-group"><label>Тип добавления</label>
+      <select id="slot-recur" onchange="onSlotRecurChange(this)">
+        <option value="recurring">Постоянный (каждую неделю)</option>
+        <option value="onetime">Разовый (конкретная дата)</option>
+      </select>
+    </div>
+
+    <div id="slot-recurring-dow" class="form-group"><label>День недели</label>
       <select id="slot-dow">${DAYS_FULL.map((d,i)=>`<option value="${i}">${d}</option>`).join('')}</select></div>
+    <div id="slot-onetime-date" class="form-group" style="display:none"><label>Дата</label>
+      <select id="slot-date">${weekDates}</select></div>
+
     <div class="form-group" style="display:flex;gap:10px">
       <div style="flex:1"><label>Начало</label><input type="time" id="slot-start" value="09:00"></div>
       <div style="flex:1"><label>Конец</label><input type="time" id="slot-end" value="10:00"></div>
@@ -635,13 +783,20 @@ async function renderAddSlotModal() {
         <option value="duty">Дежурство</option>
         <option value="pt">ПТ</option>
         <option value="group">Группа</option>
-      </select></div>
+      </select>
+    </div>
     <div id="slot-extra"></div>
     <button class="btn btn-primary btn-full" onclick="doAddSlot()">Добавить</button>
   </div>`;
   document.body.appendChild(m);
   onSlotTypeChange(document.getElementById('slot-type'));
 }
+
+function onSlotRecurChange(sel) {
+  document.getElementById('slot-recurring-dow').style.display = sel.value==='onetime' ? 'none' : '';
+  document.getElementById('slot-onetime-date').style.display  = sel.value==='onetime' ? '' : 'none';
+}
+
 function onSlotTypeChange(sel) {
   const extra=document.getElementById('slot-extra'); if (!extra) return;
   const clients=window._slotClients||[], groups=window._slotGroupList||[];
@@ -660,27 +815,43 @@ function onSlotTypeChange(sel) {
         <input type="number" id="slot-headcount" min="1" value="5"></div>`;
   } else { extra.innerHTML=''; }
 }
+
 async function doAddSlot() {
-  const branch=document.getElementById('slot-branch')?.value||STATE.profile.branches?.[0]||'';
-  const dow=parseInt(document.getElementById('slot-dow')?.value||'0');
-  const start=document.getElementById('slot-start')?.value;
-  const end=document.getElementById('slot-end')?.value;
-  const type=document.getElementById('slot-type')?.value;
-  const clientId=document.getElementById('slot-client')?.value||null;
-  const groupId=document.getElementById('slot-group')?.value||null;
-  const headcount=parseInt(document.getElementById('slot-headcount')?.value||'0');
-  if (!start||!end) return toast('Укажите время','error');
-  if (start>=end) return toast('Конец позже начала','error');
-  if (type==='pt'&&!clientId) return toast('Выберите клиента','error');
-  if (type==='group'&&!groupId) return toast('Выберите группу','error');
+  const branch    = document.getElementById('slot-branch')?.value||STATE.profile.branches?.[0]||'';
+  const recur     = document.getElementById('slot-recur')?.value||'recurring';
+  const dow       = parseInt(document.getElementById('slot-dow')?.value||'0');
+  const date      = document.getElementById('slot-date')?.value||null;
+  const start     = document.getElementById('slot-start')?.value;
+  const end       = document.getElementById('slot-end')?.value;
+  const type      = document.getElementById('slot-type')?.value;
+  const clientId  = document.getElementById('slot-client')?.value||null;
+  const groupId   = document.getElementById('slot-group')?.value||null;
+  const headcount = parseInt(document.getElementById('slot-headcount')?.value||'0');
+  if (!start||!end)            return toast('Укажите время','error');
+  if (start>=end)              return toast('Конец позже начала','error');
+  if (type==='pt'&&!clientId)  return toast('Выберите клиента','error');
+  if (type==='group'&&!groupId)return toast('Выберите группу','error');
+
+  const fields = {
+    trainer_id:    STATE.profile.id,
+    branch,
+    day_of_week:   recur==='onetime'
+      ? (date ? (new Date(date+'T12:00:00').getDay()+6)%7 : dow)
+      : dow,
+    start_time:    start,
+    end_time:      end,
+    slot_type:     type,
+    client_id:     type==='pt'    ? clientId          : null,
+    group_type_id: type==='group' ? parseInt(groupId) : null,
+    avg_headcount: type==='group' ? headcount         : null,
+    specific_date: recur==='onetime' ? date : null,
+  };
+
   try {
-    await DB.addSlot({trainer_id:STATE.profile.id,branch,day_of_week:dow,
-      start_time:start,end_time:end,slot_type:type,
-      client_id:type==='pt'?clientId:null,
-      group_type_id:type==='group'?parseInt(groupId):null,
-      avg_headcount:type==='group'?headcount:null});
+    await DB.addSlot(fields);
     document.querySelector('.modal-overlay')?.remove();
-    toast('Слот добавлен ✅','success'); renderScheduleTab();
+    toast('Слот добавлен ✅','success');
+    loadScheduleWeek(_schedWeekOffset);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 
