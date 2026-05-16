@@ -207,13 +207,50 @@ const DB = {
   },
 
   // ─── SCHEDULE SLOTS ──────────────────────────
+
+  /** Повторяющиеся слоты тренера */
+  async getRecurringSlots(trainerId) {
+    const {data,error} = await sb().from('schedule_slots')
+      .select('*, clients(fio,category), group_types(name,type)')
+      .eq('trainer_id',trainerId).eq('active',true)
+      .is('specific_date',null)
+      .order('day_of_week').order('start_time');
+    if (error) throw error; return data||[];
+  },
+
+  /** Разовые слоты тренера для конкретной недели */
+  async getOneTimeSlots(trainerId, weekStart, weekEnd) {
+    const {data,error} = await sb().from('schedule_slots')
+      .select('*, clients(fio,category), group_types(name,type)')
+      .eq('trainer_id',trainerId).eq('active',true)
+      .not('specific_date','is',null)
+      .gte('specific_date',weekStart)
+      .lte('specific_date',weekEnd)
+      .order('specific_date').order('start_time');
+    if (error) throw error; return data||[];
+  },
+
+  /** Отмены повторяющихся слотов за неделю */
+  async getCancellations(slotIds, weekStart, weekEnd) {
+    if (!slotIds.length) return [];
+    const {data,error} = await sb().from('schedule_cancellations')
+      .select('slot_id,cancel_date')
+      .in('slot_id',slotIds)
+      .gte('cancel_date',weekStart)
+      .lte('cancel_date',weekEnd);
+    if (error) throw error; return data||[];
+  },
+
+  /** Все активные слоты — для обратной совместимости */
   async getSlots(trainerId) {
     const {data,error} = await sb().from('schedule_slots')
       .select('*, clients(fio,category), group_types(name,type)')
       .eq('trainer_id',trainerId).eq('active',true)
+      .is('specific_date',null)
       .order('day_of_week').order('start_time');
     if (error) throw error; return data||[];
   },
+
   async getAllActiveSlots() {
     const {data,error} = await sb().from('schedule_slots')
       .select('*, profiles!trainer_id(fio), clients(fio), group_types(name)')
@@ -221,14 +258,42 @@ const DB = {
       .order('day_of_week').order('start_time');
     if (error) throw error; return data||[];
   },
+
   async addSlot(fields) {
     const {data,error} = await sb().from('schedule_slots')
       .insert(fields).select('*, clients(fio,category), group_types(name,type)').single();
     if (error) throw error; return data;
   },
+
   async deactivateSlot(id) {
     const {error} = await sb().from('schedule_slots').update({active:false}).eq('id',id);
     if (error) throw error;
+  },
+
+  /** Отменить повторяющийся слот на одну дату */
+  async cancelSlotDate(slotId, date, reason='') {
+    const {error} = await sb().from('schedule_cancellations')
+      .upsert({slot_id:slotId, cancel_date:date, reason:reason||null},
+              {onConflict:'slot_id,cancel_date'});
+    if (error) throw error;
+  },
+
+  /** Восстановить отменённый слот */
+  async restoreSlotDate(slotId, date) {
+    const {error} = await sb().from('schedule_cancellations')
+      .delete().eq('slot_id',slotId).eq('cancel_date',date);
+    if (error) throw error;
+  },
+
+  /** События за неделю */
+  async getEventsForWeek(weekStart, weekEnd, branch) {
+    let q = sb().from('events')
+      .select('id,title,event_type,start_time,end_time,blocks_pool,branch')
+      .gte('end_time', weekStart+'T00:00:00')
+      .lte('start_time', weekEnd+'T23:59:59');
+    if (branch) q = q.or(`branch.is.null,branch.eq.${branch}`);
+    const {data,error} = await q;
+    if (error) throw error; return data||[];
   },
 
   // ─── TODAY / CONFIRMATIONS ───────────────────
