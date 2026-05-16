@@ -69,3 +69,14 @@
 }
 .warn-dot { font-size: 12px; margin-left: 4px; }
 .exp-dot  { font-size: 12px; margin-left: 4px; }
+
+/* ── Календарное расписание ── */
+.week-nav {
+  display:flex;align-items:center;justify-content:space-between;
+  margin-bottom:10px;
+}
+.week-label { font-size:14px;font-weight:600; }
+.sched-today { background:rgba(124,58,237,.12);color:var(--accent); }
+.sched-date-num { font-size:11px;font-weight:400;color:var(--hint); }
+.sub-confirm-row { padding:8px 0;border-bottom:1px solid var(--border); }
+.sub-confirm-row:last-child { border-bottom:none; }
