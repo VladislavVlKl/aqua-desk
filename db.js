@@ -28,8 +28,14 @@ const DB = {
 
   // ─── PROFILES ────────────────────────────────
   async getAllProfiles() {
-    const {data,error} = await sb().from('profiles').select('*').order('fio');
-    if (error) throw error; return data||[];
+    const {data,error} = await sb().from('profiles')
+      .select('*').eq('is_archived', false).order('fio');
+    if (error) {
+      // Fallback if column doesn't exist yet
+      const {data:d2,error:e2} = await sb().from('profiles').select('*').order('fio');
+      if (e2) throw e2; return d2||[];
+    }
+    return data||[];
   },
   async getProfilesByRole(role) {
     const {data,error} = await sb().from('profiles').select('*').eq('role',role).order('fio');
@@ -44,6 +50,23 @@ const DB = {
     const {data,error} = await sb().from('profiles')
       .update(fields).eq('id',id).select().single();
     if (error) throw error; return data;
+  },
+
+  /** Архивировать тренера: закрывает доступ, история сохраняется */
+  async archiveTrainer(id) {
+    const {error} = await sb().from('profiles')
+      .update({ tg_id: null, pincode: null, is_archived: true })
+      .eq('id', id);
+    if (error) throw error;
+  },
+
+  /** Удалить тренера: полное удаление (только если нет workouts) */
+  async deleteTrainer(id) {
+    const {data: wk} = await sb().from('workouts')
+      .select('id').eq('trainer_id', id).limit(1);
+    if (wk?.length) throw new Error('has_history');
+    const {error} = await sb().from('profiles').delete().eq('id', id);
+    if (error) throw error;
   },
 
   // ─── BRANCHES ────────────────────────────────
