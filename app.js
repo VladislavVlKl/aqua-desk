@@ -173,14 +173,15 @@ function renderTrainerShell(tab) {
       <button class="nav-btn" onclick="switchTab('today')"><span>✅</span>Сегодня</button>
       <button class="nav-btn" onclick="switchTab('schedule')"><span>📅</span>Расписание</button>
       <button class="nav-btn" onclick="switchTab('report')"><span>📊</span>Отчёт</button>
-      <button class="nav-btn" onclick="switchTab('events')"><span>🏆</span>События</button>
+<button class="nav-btn" onclick="switchTab('events')"><span>🏆</span>События</button>
+      <button class="nav-btn" onclick="switchTab('groups')"><span>🏊</span>Группы</button>
     </nav>`);
   switchTab(tab);
 }
 
 function switchTab(tab) {
   STATE.currentTab=tab;
-  const tabs=['home','clients','today','schedule','report','events'];
+  const tabs=['home','clients','today','schedule','report','events','groups'];
   $$('.nav-btn').forEach((b,i)=>b.classList.toggle('active',tabs[i]===tab));
   if (tab==='home')     renderHomeTab();
   if (tab==='clients')  renderClientsTab();
@@ -188,6 +189,7 @@ function switchTab(tab) {
   if (tab==='schedule') renderScheduleTab();
   if (tab==='report')   renderReportTab();
   if (tab==='events')   renderEventsTab();
+  if (tab==='groups')   renderSeniorGroups();
 }
 
 // Проверяем наличие незакрытых конспектов и показываем бейдж
