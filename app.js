@@ -2681,34 +2681,48 @@ async function renderAssignGroupForm() {
       DB.getGroupTypes(),DB.getBranches(),
     ]);
     const allT=[...trainers,...seniors];
+    window._agGts = gts;
     form.innerHTML=`
-      <div class="form-group"><label>Тренер</label><select id="ag-trainer">
-        ${allT.map(t=>`<option value="${t.id}">${t.fio}</option>`).join('')}
-      </select></div>
-      <div class="form-group"><label>Тип группы</label>
-        <select id="ag-type" onchange="onAgTypeChange(this,${JSON.stringify(gts).replace(/"/g,'&quot;')})">
-          ${gts.map(g=>`<option value="${g.id}" data-type="${g.type}">${g.name}</option>`).join('')}
+      <div class="form-group"><label>Тренер</label>
+        <select id="ag-trainer">
+          <option value="">— выберите —</option>
+          ${allT.map(t=>`<option value="${t.id}">${t.fio}</option>`).join('')}
         </select></div>
-      <div class="form-group"><label>Филиал</label><select id="ag-branch">
-        ${branches.map(b=>`<option>${b.name}</option>`).join('')}
-      </select></div>
-      <div id="ag-date-wrap" class="form-group"><label>Начало абонемента</label>
+      <div class="form-group"><label>Тип группы</label>
+        <select id="ag-type" onchange="onAgTypeChange(this)">
+          ${gts.map(g=>`<option value="${g.id}" data-type="${g.type}" data-name="${g.name}">${g.name}</option>`).join('')}
+        </select></div>
+      <div class="form-group"><label>Филиал</label>
+        <select id="ag-branch">
+          ${branches.map(b=>`<option>${b.name}</option>`).join('')}
+        </select></div>
+      <div id="ag-date-wrap" class="form-group"><label>Начало</label>
         <input type="date" id="ag-start" value="${todayStr()}"></div>
+      <div id="ag-artswim-role" class="form-group" style="display:none">
+        <label>Роль (Art-swim)</label>
+        <select id="ag-role">
+          <option value="суша">Суша</option>
+          <option value="вода">Вода</option>
+        </select></div>
       <div class="form-group"><label>Тип ставки</label>
         <select id="ag-rate-type" onchange="onRateTypeChange(this)">
           <option value="percent">Процент (%)</option>
           <option value="flat">Фиксированная сумма</option>
         </select></div>
-      <div class="form-group" id="ag-rate-wrap"><label id="ag-rate-label">Процент (%)</label>
+      <div class="form-group"><label id="ag-rate-label">Процент (%)</label>
         <input id="ag-rate-value" type="number" value="40" min="0"></div>
-      <button class="btn btn-primary" onclick="doAssignGroup()">Назначить</button>`;
+      <button class="btn btn-primary btn-full" onclick="doAssignGroup()">Назначить</button>`;
     if (sel) onAgTypeChange(sel,gts);
   } catch(e) { form.innerHTML='<p class="hint">Ошибка</p>'; }
 }
-function onAgTypeChange(sel,gts) {
-  const opt=sel.options[sel.selectedIndex];
-  const wrap=document.getElementById('ag-date-wrap');
-  if (wrap) wrap.style.display=opt?.dataset.type==='children'?'':'none';
+function onAgTypeChange(sel) {
+  const opt = sel.options[sel.selectedIndex];
+  const isChildren = opt?.dataset.type === 'children';
+  const isArtSwim  = opt?.dataset.name?.toLowerCase().includes('art');
+  const dateWrap   = document.getElementById('ag-date-wrap');
+  const roleWrap   = document.getElementById('ag-artswim-role');
+  if (dateWrap) dateWrap.style.display = isChildren ? '' : 'none';
+  if (roleWrap) roleWrap.style.display = isArtSwim  ? '' : 'none';
 }
 async function doAssignGroup() {
   const trainerId   = parseInt(document.getElementById('ag-trainer')?.value);
