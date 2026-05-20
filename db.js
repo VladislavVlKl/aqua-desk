@@ -210,7 +210,14 @@ async deleteClient(id) {
     const {data,error} = await sb().from('group_types').insert(fields).select().single();
     if (error) throw error; return data;
   },
-
+async getAssignedTrainers(groupTypeId) {
+    const {data,error} = await sb().from('trainer_groups')
+      .select('*, profiles(fio)')
+      .eq('group_type_id',groupTypeId)
+      .is('subscription_end',null);
+    if (error) throw error; return data||[];
+  },
+  
   // ─── TRAINER GROUPS ──────────────────────────
   async getTrainerGroups(trainerId) {
     const {data,error} = await sb().from('trainer_groups')
