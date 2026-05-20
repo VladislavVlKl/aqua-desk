@@ -187,6 +187,10 @@ const DB = {
       .not('end_time','is',null).order('start_time',{ascending:false});
     if (error) throw error; return data||[];
   },
+  async deleteDuty(id) {
+    const {error} = await sb().from('duties').delete().eq('id',id);
+    if (error) throw error;
+  },
 
   // ─── GROUP TYPES ─────────────────────────────
   async getGroupTypes() {
