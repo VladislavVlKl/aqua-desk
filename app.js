@@ -2696,7 +2696,14 @@ async function renderAssignGroupForm() {
       </select></div>
       <div id="ag-date-wrap" class="form-group"><label>Начало абонемента</label>
         <input type="date" id="ag-start" value="${todayStr()}"></div>
-      <button class="btn btn-primary" onclick="doAssignGroup()">Назначить</button>`;
+      <div class="form-group"><label>Тип ставки</label>
+        <select id="ag-rate-type" onchange="onRateTypeChange(this)">
+          <option value="percent">Процент (%)</option>
+          <option value="flat">Фиксированная сумма</option>
+        </select></div>
+      <div class="form-group" id="ag-rate-wrap"><label id="ag-rate-label">Процент (%)</label>
+        <input id="ag-rate-value" type="number" value="40" min="0"></div>
+      <button class="btn btn-primary" onclick="doAssignGroup()">Назначить</button>\`;
     const sel=document.getElementById('ag-type');
     if (sel) onAgTypeChange(sel,gts);
   } catch(e) { form.innerHTML='<p class="hint">Ошибка</p>'; }
@@ -2707,15 +2714,39 @@ function onAgTypeChange(sel,gts) {
   if (wrap) wrap.style.display=opt?.dataset.type==='children'?'':'none';
 }
 async function doAssignGroup() {
-  const trainerId=parseInt(document.getElementById('ag-trainer')?.value);
-  const groupTypeId=parseInt(document.getElementById('ag-type')?.value);
-  const branch=document.getElementById('ag-branch')?.value;
-  const start=document.getElementById('ag-start')?.value||todayStr();
+  const trainerId   = parseInt(document.getElementById('ag-trainer')?.value);
+  const groupTypeId = parseInt(document.getElementById('ag-type')?.value);
+  const branch      = document.getElementById('ag-branch')?.value;
+  const start       = document.getElementById('ag-start')?.value||todayStr();
+  const rateType    = document.getElementById('ag-rate-type')?.value||'percent';
+  const rateValue   = parseFloat(document.getElementById('ag-rate-value')?.value)||40;
   if (!trainerId||!groupTypeId||!branch) return toast('Заполните все поля','error');
-  try { await DB.addTrainerGroup(trainerId,groupTypeId,branch,start); toast('✅ Назначено','success'); }
-  catch(e) { toast('Ошибка','error'); console.error(e); }
+  try {
+    await DB.addTrainerGroup(trainerId,groupTypeId,branch,start,rateType,rateValue);
+    toast('✅ Назначено','success');
+    await loadGroupsList();
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 
+async function doUnassignGroup(id) {
+  if (!confirm('Открепить тренера от группы?')) return;
+  try {
+    await DB.unassignTrainerGroup(id);
+    toast('Откреплено','success');
+    await loadGroupsList();
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+function onRateTypeChange(sel) {
+  const label = document.getElementById('ag-rate-label');
+  const input = document.getElementById('ag-rate-value');
+  if (sel.value==='percent') {
+    if (label) label.textContent='Процент (%)';
+    if (input) { input.value=40; input.placeholder='40'; }
+  } else {
+    if (label) label.textContent='Сумма (сум)';
+    if (input) { input.value=60000; input.placeholder='60000'; }
+  }
+}
 // ─ ADMIN: КОНТРОЛЬ
 async function renderAdminControl() {
   $('#tab-content').innerHTML=`<div class="tab-pad"><h3>Контроль</h3>
