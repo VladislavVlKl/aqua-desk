@@ -2623,11 +2623,8 @@ async function loadGroupsList() {
   try {
     const types=await DB.getGroupTypes();
     const allAssigned = await Promise.all(types.map(gt=>
-      sb().from('trainer_groups')
-        .select('*, profiles(fio)')
-        .eq('group_type_id',gt.id)
-        .is('subscription_end',null)
-    ));
+  DB.getAssignedTrainers(gt.id).then(data=>({data}))
+));
     body.innerHTML=types.map((gt,i)=>{
       const assigned = allAssigned[i]?.data||[];
       return `<div class="staff-card" style="flex-direction:column;align-items:flex-start;gap:8px">
