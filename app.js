@@ -2365,6 +2365,102 @@ async function doEditTrainer(id) {
   try { await DB.updateProfile(id,{fio,role,branches:brs}); document.querySelector('.modal-overlay')?.remove(); toast('✅','success'); loadStaffList(); }
   catch(e) { toast('Ошибка','error'); }
 }
+function renderAddGroupClientModal(groupId) {
+  const m=el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>Добавить ребёнка</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="form-group"><label>Имя</label>
+      <input id="gc-name" type="text" placeholder="Иванова Маша"></div>
+    <div class="form-group"><label>Возраст</label>
+      <input id="gc-age" type="number" min="3" max="18" placeholder="8"></div>
+    <div class="form-group"><label>Сумма оплаты в месяц (сум)</label>
+      <input id="gc-price" type="number" placeholder="800000"></div>
+    <button class="btn btn-primary btn-full" onclick="doAddGroupClient('${groupId}')">Добавить</button>
+  </div>`;
+  document.body.appendChild(m);
+}
+async function doAddGroupClient(groupId) {
+  const name  = document.getElementById('gc-name')?.value.trim();
+  const age   = parseInt(document.getElementById('gc-age')?.value)||null;
+  const price = parseInt(document.getElementById('gc-price')?.value)||0;
+  if (!name) return toast('Введите имя','error');
+  try {
+    await DB.addGroupClient(groupId, name, age, price, todayStr());
+    document.querySelector('.modal-overlay')?.remove();
+    toast('Ребёнок добавлен ✅','success');
+    renderGroupDetail(groupId);
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+async function toggleGroupPayment(groupId, clientId, paid, amount, month) {
+  try {
+    await DB.setGroupPayment(groupId, clientId, month, amount, paid==='true'||paid===true);
+    renderGroupDetail(groupId);
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+async function updateGroupClientLevel(clientId, level) {
+  try {
+    await DB.updateGroupClient(clientId, {level});
+    toast('Уровень обновлён','success');
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+function renderGroupNoteModal(groupId, clientId, nameEnc, month, noteEnc) {
+  const name = decodeURIComponent(nameEnc);
+  const note = decodeURIComponent(noteEnc);
+  const m=el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>Заметка — ${name}</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="form-group"><label>Прогресс за месяц</label>
+      <textarea id="gn-note" rows="4" placeholder="Освоил технику кроля, работаем над дыханием..."
+        style="width:100%;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text);font-size:14px">${note}</textarea></div>
+    <button class="btn btn-primary btn-full"
+      onclick="doSaveGroupNote('${groupId}','${clientId}','${month}')">Сохранить</button>
+  </div>`;
+  document.body.appendChild(m);
+}
+async function doSaveGroupNote(groupId, clientId, month) {
+  const note = document.getElementById('gn-note')?.value.trim();
+  try {
+    await DB.saveGroupProgressNote(groupId, clientId, STATE.profile.id, month, note);
+    document.querySelector('.modal-overlay')?.remove();
+    toast('Заметка сохранена ✅','success');
+    renderGroupDetail(groupId);
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+async function archiveGroupClientConfirm(clientId, nameEnc) {
+  const name = decodeURIComponent(nameEnc);
+  if (!confirm(`Архивировать «${name}»?`)) return;
+  try {
+    await DB.archiveGroupClient(clientId);
+    toast('Архивирован','success');
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+async function renderGroupAttendance(groupId) {
+  const clients = await DB.getGroupClients(groupId);
+  const today = todayStr();
+  const existing = await DB.getGroupAttendance(groupId, today);
+  const attMap = Object.fromEntries(existing.map(a=>[a.group_client_id, a.attended]));
+  const m=el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>Посещаемость — ${today}</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    ${clients.map(c=>`
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)">
+        <span>${c.name}</span>
+        <input type="checkbox" ${attMap[c.id]?'checked':''} style="width:20px;height:20px"
+          onchange="saveAttendance('${groupId}','${c.id}','${today}',this.checked)">
+      </div>`).join('')}
+    <button class="btn btn-primary btn-full" style="margin-top:12px"
+      onclick="this.closest('.modal-overlay').remove()">Готово</button>
+  </div>`;
+  document.body.appendChild(m);
+}
+async function saveAttendance(groupId, clientId, date, attended) {
+  try {
+    await DB.saveGroupAttendance(groupId, clientId, date, attended);
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
 async function doArchiveClient(id, fioEnc) {
   const fio = decodeURIComponent(fioEnc);
   if (!confirm(`Архивировать «${fio}»?\nКлиент исчезнет из списка. История сохранится.`)) return;
