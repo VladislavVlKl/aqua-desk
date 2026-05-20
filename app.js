@@ -1908,6 +1908,7 @@ async function renderGroupDetail(groupId) {
     </div></div>`);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
+
 async function renderBranchReport() {
   const branches=STATE.profile.branches||[];
   const now=new Date(); let year=now.getFullYear(),month=now.getMonth()+1;
