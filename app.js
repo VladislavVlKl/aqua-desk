@@ -1824,16 +1824,89 @@ function seniorTab(tab) {
   if (tab==='groups')   renderSeniorGroups();
 }
 async function renderSeniorGroups() {
-  const branches = STATE.profile.branches||[];
   $('#tab-content').innerHTML=`<div class="tab-pad">
-    <div class="section-header"><h3>Группы</h3>
-      <button class="btn btn-sm" onclick="renderAddGroupTypeModal()">+ Тип</button></div>
+    <div class="section-header"><h3>Мои группы</h3></div>
     <div id="groups-list"><div class="center-screen"><div class="spinner"></div></div></div>
-    <h4 style="margin-top:20px">Назначить группу тренеру</h4>
-    <div id="assign-form"></div>
   </div>`;
-  await loadGroupsList();
-  await renderAssignGroupForm();
+  await loadSeniorGroupsList();
+}
+
+async function loadSeniorGroupsList() {
+  const body=document.getElementById('groups-list'); if (!body) return;
+  try {
+    const groups = await DB.getTrainerGroups(STATE.profile.id);
+    if (!groups.length) { body.innerHTML='<p class="hint">Нет назначенных групп</p>'; return; }
+    body.innerHTML = groups.map(g=>`
+      <div class="staff-card" style="flex-direction:column;align-items:flex-start;gap:8px">
+        <div style="display:flex;justify-content:space-between;width:100%">
+          <div>
+            <div class="staff-fio">${g.group_types?.name||'Группа'}</div>
+            <div class="staff-meta">${g.branch} · с ${g.subscription_start||'—'}</div>
+          </div>
+          <button class="btn btn-sm btn-primary"
+            onclick="renderGroupDetail('${g.id}')">Открыть</button>
+        </div>
+      </div>`).join('');
+  } catch(e) { body.innerHTML='<p class="hint">Ошибка</p>'; console.error(e); }
+}
+
+async function renderGroupDetail(groupId) {
+  const month = new Date().toISOString().slice(0,7)+'-01';
+  loading('Загрузка группы...');
+  try {
+    const [clients, payments, notes] = await Promise.all([
+      DB.getGroupClients(groupId),
+      DB.getGroupPayments(groupId, month),
+      DB.getGroupProgressNotes(groupId, month),
+    ]);
+    const paidMap = Object.fromEntries(payments.map(p=>[p.group_client_id, p]));
+    const noteMap = Object.fromEntries(notes.map(n=>[n.group_client_id, n]));
+    const LEVELS = ['Подготовительный','Обучающий','Совершенствование','Спортивный'];
+    setScreen(`<div class="app-header">
+      <button class="btn-icon" onclick="switchTab('groups')">←</button>
+      <div class="app-title">Группа</div><div></div></div>
+    <div class="tab-content"><div class="tab-pad">
+      <div class="section-header"><h3>Состав группы</h3>
+        <button class="btn btn-sm" onclick="renderAddGroupClientModal('${groupId}')">+ Ребёнок</button>
+      </div>
+      <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);margin-bottom:16px"
+        onclick="renderGroupAttendance('${groupId}')">✅ Отметить посещаемость</button>
+      ${!clients.length?'<p class="hint">Детей пока нет</p>':
+        clients.map(c=>{
+          const pay = paidMap[c.id];
+          const note = noteMap[c.id];
+          const paid = pay?.paid;
+          return `<div class="staff-card" style="flex-direction:column;gap:8px">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <div>
+                <div class="staff-fio">${c.name}${c.age?`, ${c.age} лет`:''}</div>
+                <div class="staff-meta">${c.level} · ${fmt(c.monthly_price)} сум/мес</div>
+              </div>
+              <div style="display:flex;gap:6px;align-items:center">
+                <span style="font-size:11px;padding:3px 8px;border-radius:12px;
+                  background:${paid?'rgba(16,185,129,.15)':'rgba(239,68,68,.15)'};
+                  color:${paid?'#10b981':'#ef4444'}">
+                  ${paid?'Оплачен':'Не оплачен'}</span>
+                <button class="btn btn-sm" onclick="toggleGroupPayment('${groupId}','${c.id}',${paid?'false':'true'},${c.monthly_price},'${month}')">
+                  ${paid?'↩':'✓'}</button>
+              </div>
+            </div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <select onchange="updateGroupClientLevel('${c.id}',this.value)"
+                style="font-size:11px;background:var(--card);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:3px 6px">
+                ${LEVELS.map(l=>`<option ${l===c.level?'selected':''}>${l}</option>`).join('')}
+              </select>
+              <button class="btn btn-sm" style="font-size:11px"
+                onclick="renderGroupNoteModal('${groupId}','${c.id}','${encodeURIComponent(c.name)}','${month}','${encodeURIComponent(note?.note||'')}')">
+                📝 ${note?.note?'Заметка':'+ Заметка'}</button>
+              <button class="btn btn-sm btn-danger" style="font-size:11px"
+                onclick="archiveGroupClientConfirm('${c.id}','${encodeURIComponent(c.name)}')">
+                Архив</button>
+            </div>
+          </div>`;
+        }).join('')}
+    </div></div>`);
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 async function renderBranchReport() {
   const branches=STATE.profile.branches||[];
