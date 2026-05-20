@@ -2278,7 +2278,26 @@ async function doEditTrainer(id) {
   try { await DB.updateProfile(id,{fio,role,branches:brs}); document.querySelector('.modal-overlay')?.remove(); toast('✅','success'); loadStaffList(); }
   catch(e) { toast('Ошибка','error'); }
 }
-
+async function doArchiveClient(id, fioEnc) {
+  const fio = decodeURIComponent(fioEnc);
+  if (!confirm(`Архивировать «${fio}»?\nКлиент исчезнет из списка. История сохранится.`)) return;
+  try {
+    await DB.archiveClient(id);
+    toast('Клиент архивирован','success');
+    switchTab(STATE.currentTab||'clients');
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+async function doDeleteClientCheck(id, fioEnc, createdAt) {
+  const fio = decodeURIComponent(fioEnc);
+  const diffH = (Date.now() - new Date(createdAt).getTime()) / 3600000;
+  if (diffH > 24) return toast('Удалить можно только в течение 24 часов после добавления','error');
+  if (!confirm(`Удалить «${fio}» полностью?\nЭто действие нельзя отменить.`)) return;
+  try {
+    await DB.deleteClient(id);
+    toast('Клиент удалён','success');
+    switchTab(STATE.currentTab||'clients');
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
 async function doArchiveTrainer(id, fioEnc) {
   const fio = decodeURIComponent(fioEnc);
   const m = el('div','modal-overlay');
