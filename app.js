@@ -2527,3 +2527,11 @@ async function renderAdminControl() {
 }
 
 window.addEventListener('DOMContentLoaded', init);
+async function doDeleteDuty(id) {
+  if (!confirm('Удалить это дежурство?')) return;
+  try {
+    await DB.deleteDuty(id);
+    toast('Дежурство удалено','success');
+    renderHomeTab();
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
