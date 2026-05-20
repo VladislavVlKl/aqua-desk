@@ -2619,7 +2619,9 @@ async function renderAdminGroups() {
     <h4 style="margin-top:20px">Назначить группу тренеру</h4>
     <div id="assign-form"></div>
   </div>`;
-  await loadGroupsList(); await renderAssignGroupForm();
+  await loadGroupsList(); 
+  try { await renderAssignGroupForm(); } 
+  catch(e) { console.error('renderAssignGroupForm failed:', e); document.getElementById('assign-form').innerHTML='<p class="hint">Ошибка формы: '+e.message+'</p>'; }
 }
 async function loadGroupsList() {
   const body=document.getElementById('groups-list'); if (!body) return;
