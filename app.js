@@ -469,7 +469,9 @@ async function doLogWorkout() {
   }
   const dates=[];
   for (let i=0;i<count;i++) {
-    const v=document.getElementById(`wk-date-${i}`)?.value;
+    const d=document.getElementById(`wk-date-${i}`)?.value;
+    const t=document.getElementById(`wk-time-${i}`)?.value||'09:00';
+    const v = d ? `${d}T${t}` : null;
     if (!v) return toast(`Введите дату для ПТ №${i+1}`,'error');
     if (!isValidWorkoutDate(v)) return toast(`ПТ №${i+1}: не старше 24 часов`,'error');
     dates.push(v);
