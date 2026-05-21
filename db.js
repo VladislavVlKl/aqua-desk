@@ -986,4 +986,69 @@ function calcSalary({workouts=[], duties=[], trainerGroups=[], groupSessions=[],
   const penalty = adjustment?.penalty||0;
   const total   = ptSum+dropInSum+dutySum+childSum+adultSum+bonus-penalty;
   return {cat,hours,ptSum,dropInSum,dutySum,childSum,adultSum,bonus,penalty,total};
+// ─── ТЕХНИЧКА ────────────────────────────────
+  async getTechEquipment(branch) {
+    const {data,error} = await sb().from('tech_equipment')
+      .select('*').eq('branch',branch).order('category').order('name');
+    if (error) throw error; return data||[];
+  },
+  async addTechEquipment(fields) {
+    const {data,error} = await sb().from('tech_equipment')
+      .insert(fields).select().single();
+    if (error) throw error; return data;
+  },
+  async updateTechEquipment(id, fields) {
+    const {error} = await sb().from('tech_equipment').update(fields).eq('id',id);
+    if (error) throw error;
+  },
+  async deleteTechEquipment(id) {
+    const {error} = await sb().from('tech_equipment').delete().eq('id',id);
+    if (error) throw error;
+  },
+  async getTechIssues(branch) {
+    const {data,error} = await sb().from('tech_issues')
+      .select('*, tech_equipment(name)')
+      .eq('branch',branch).neq('status','resolved')
+      .order('priority').order('created_at',{ascending:false});
+    if (error) throw error; return data||[];
+  },
+  async addTechIssue(fields) {
+    const {data,error} = await sb().from('tech_issues')
+      .insert(fields).select().single();
+    if (error) throw error; return data;
+  },
+  async updateTechIssue(id, fields) {
+    const {error} = await sb().from('tech_issues').update(fields).eq('id',id);
+    if (error) throw error;
+  },
+  async getTechShopping(branch) {
+    const {data,error} = await sb().from('tech_shopping')
+      .select('*').eq('branch',branch).neq('status','received')
+      .order('priority').order('created_at',{ascending:false});
+    if (error) throw error; return data||[];
+  },
+  async addTechShopping(fields) {
+    const {data,error} = await sb().from('tech_shopping')
+      .insert(fields).select().single();
+    if (error) throw error; return data;
+  },
+  async updateTechShopping(id, fields) {
+    const {error} = await sb().from('tech_shopping').update(fields).eq('id',id);
+    if (error) throw error;
+  },
+  async getTechBills(branch) {
+    const {data,error} = await sb().from('tech_bills')
+      .select('*').eq('branch',branch)
+      .order('bill_date',{ascending:false});
+    if (error) throw error; return data||[];
+  },
+  async addTechBill(fields) {
+    const {data,error} = await sb().from('tech_bills')
+      .insert(fields).select().single();
+    if (error) throw error; return data;
+  },
+  async updateTechBill(id, fields) {
+    const {error} = await sb().from('tech_bills').update(fields).eq('id',id);
+    if (error) throw error;
+  },
 }
