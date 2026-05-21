@@ -2715,7 +2715,8 @@ async function renderAssignGroupForm() {
       <div class="form-group"><label id="ag-rate-label">Процент (%)</label>
         <input id="ag-rate-value" type="number" value="40" min="0"></div>
       <button class="btn btn-primary btn-full" onclick="doAssignGroup()">Назначить</button>`;
-    if (sel) onAgTypeChange(sel,gts);
+    const sel = document.getElementById('ag-type');
+if (sel) onAgTypeChange(sel);
   } catch(e) { form.innerHTML='<p class="hint">Ошибка</p>'; }
 }
 function onAgTypeChange(sel) {
