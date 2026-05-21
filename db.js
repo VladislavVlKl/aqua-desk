@@ -986,8 +986,10 @@ function calcSalary({workouts=[], duties=[], trainerGroups=[], groupSessions=[],
   const penalty = adjustment?.penalty||0;
   const total   = ptSum+dropInSum+dutySum+childSum+adultSum+bonus-penalty;
   return {cat,hours,ptSum,dropInSum,dutySum,childSum,adultSum,bonus,penalty,total};
-  },
-  // ─── ТЕХНИЧКА ────────────────────────────────
+}
+
+// ─── ТЕХНИЧКА ────────────────────────────────
+Object.assign(DB, {
   async getTechEquipment(branch) {
     const {data,error} = await sb().from('tech_equipment')
       .select('*').eq('branch',branch).order('category').order('name');
@@ -1052,4 +1054,4 @@ function calcSalary({workouts=[], duties=[], trainerGroups=[], groupSessions=[],
     const {error} = await sb().from('tech_bills').update(fields).eq('id',id);
     if (error) throw error;
   },
-}
+});
