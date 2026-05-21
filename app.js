@@ -2643,7 +2643,7 @@ async function loadGroupsList() {
           </div>`).join(''):'<p class="hint" style="font-size:12px">Нет тренеров</p>'}
       </div>`;
     }).join('')||'<p class="hint">Нет типов</p>';
-  } catch(e) { body.innerHTML='<p class="hint">Ошибка: '+e.message+'</p>'; console.error(e); }
+  } catch(e) { body.innerHTML='<p class="hint">Ошибка</p>'; console.error(e); }
 }
 function renderAddGroupTypeModal() {
   const m=el('div','modal-overlay');
