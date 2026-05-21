@@ -1969,7 +1969,7 @@ function renderAdminApp() {
 }
 function adminTab(tab) {
   $$('.nav-btn').forEach((b,i)=>b.classList.toggle('active',
-    ['summary','analytics','clients','staff','branches','groups','notifications','events','control'][i]===tab));
+    ['summary','analytics','clients','staff','branches','groups','notifications','events','control','tech'][i]===tab));
   if (tab==='summary')       renderAdminSummary();
   if (tab==='analytics')     renderAdminAnalytics();
   if (tab==='clients')       renderAdminClients();
