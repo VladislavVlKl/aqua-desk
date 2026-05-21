@@ -1964,6 +1964,7 @@ function renderAdminApp() {
     <button class="nav-btn" onclick="adminTab('notifications')"><span>🔔</span>Уведомл.</button>
     <button class="nav-btn" onclick="adminTab('events')"><span>🏆</span>События</button>
     <button class="nav-btn" onclick="adminTab('control')"><span>🔍</span>Контроль</button>
+    <button class="nav-btn" onclick="adminTab('tech')"><span>🔧</span>Техника</button>
   </nav>`);
   adminTab('summary');
 }
