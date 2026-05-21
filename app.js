@@ -3317,32 +3317,32 @@ async function renderCeoGroups() {
     const month = new Date().toISOString().slice(0,7)+'-01';
     let html = '';
     for (const branch of branches) {
-      const groups = await DB.getAssignedTrainers ? [] : [];
-      // Get all trainer_groups for this branch
-      const {data:tgs} = await window._supabaseClient ?
-        window._supabaseClient.from('trainer_groups').select('*, group_types(*), profiles(fio)').eq('branch',branch).is('subscription_end',null) :
-        {data:[]};
+      const {data:tgs} = await _sb.from('trainer_groups')
+        .select('*, group_types(*), profiles(fio)')
+        .eq('branch',branch).is('subscription_end',null);
       if (!tgs?.length) continue;
+      let branchHtml = '';
+      for (const tg of tgs) {
+        const clients  = await DB.getGroupClients(tg.id);
+        const payments = await DB.getGroupPayments(tg.id, month);
+        const paid     = payments.filter(p=>p.paid).length;
+        const unpaid   = clients.length - paid;
+        branchHtml += `<div class="staff-card" style="flex-direction:column;gap:4px">
+          <div style="display:flex;justify-content:space-between">
+            <div>
+              <div class="staff-fio">${tg.group_types?.name||'Группа'}</div>
+              <div class="staff-meta">${tg.profiles?.fio||'—'}</div>
+            </div>
+            <div style="text-align:right">
+              <div style="font-size:13px;font-weight:600">${clients.length} чел.</div>
+              ${unpaid>0?`<div style="font-size:11px;color:var(--danger)">${unpaid} не оплатили</div>`:'<div style="font-size:11px;color:var(--success)">Все оплатили</div>'}
+            </div>
+          </div>
+        </div>`;
+      }
       html += `<div style="margin-bottom:16px">
         <div style="font-weight:700;font-size:13px;color:var(--hint);margin-bottom:8px">${branch}</div>
-        ${await Promise.all(tgs.map(async tg=>{
-          const clients  = await DB.getGroupClients(tg.id);
-          const payments = await DB.getGroupPayments(tg.id, month);
-          const paid     = payments.filter(p=>p.paid).length;
-          const unpaid   = clients.length - paid;
-          return `<div class="staff-card" style="flex-direction:column;gap:4px">
-            <div style="display:flex;justify-content:space-between">
-              <div>
-                <div class="staff-fio">${tg.group_types?.name||'Группа'}</div>
-                <div class="staff-meta">${tg.profiles?.fio||'—'}</div>
-              </div>
-              <div style="text-align:right">
-                <div style="font-size:13px;font-weight:600">${clients.length} чел.</div>
-                ${unpaid>0?`<div style="font-size:11px;color:var(--danger)">${unpaid} не оплатили</div>`:'<div style="font-size:11px;color:var(--success)">Все оплатили</div>'}
-              </div>
-            </div>
-          </div>`;
-        })).then(r=>r.join(''))}
+        ${branchHtml}
       </div>`;
     }
     document.getElementById('ceo-groups-body').innerHTML = html||'<p class="hint">Нет групп</p>';
