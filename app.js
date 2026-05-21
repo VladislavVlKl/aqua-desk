@@ -3182,6 +3182,212 @@ async function deleteTechItem(type, id) {
     toast('Удалено','success'); loadTechSection();
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
+    // ── СЕО ПАНЕЛЬ ───────────────────────────────────────────────────────────────
+
+async function renderCeoApp() {
+  setupBack(null);
+  setScreen(`
+    <div class="app-header">
+      <div><div class="app-title">👑 AquaDesk</div>
+        <div class="app-sub">${STATE.profile.fio}</div></div>
+    </div>
+    <div id="tab-content" class="tab-content"></div>
+    <nav class="bottom-nav">
+      <button class="nav-btn" onclick="ceoTab('summary')"><span>📊</span>Сводка</button>
+      <button class="nav-btn" onclick="ceoTab('groups')"><span>🏊</span>Группы</button>
+      <button class="nav-btn" onclick="ceoTab('tech')"><span>🔧</span>Техника</button>
+      <button class="nav-btn" onclick="ceoTab('nps')"><span>⭐</span>НПС</button>
+    </nav>`);
+  ceoTab('summary');
+}
+
+function ceoTab(tab) {
+  const tabs = ['summary','groups','tech','nps'];
+  $$('.nav-btn').forEach((b,i)=>b.classList.toggle('active',tabs[i]===tab));
+  if (tab==='summary') renderCeoSummary();
+  if (tab==='groups')  renderCeoGroups();
+  if (tab==='tech')    renderCeoTech();
+  if (tab==='nps')     renderCeoNps();
+}
+
+// ── СВОДКА ПТ ────────────────────────────────
+async function renderCeoSummary() {
+  $('#tab-content').innerHTML=`<div class="tab-pad">
+    <div class="section-header"><h3>Сводка</h3>
+      <div class="month-nav">
+        <button id="ceo-prev">‹</button>
+        <span id="ceo-month"></span>
+        <button id="ceo-next">›</button>
+      </div>
+    </div>
+    <div id="ceo-summary-body"><div class="center-screen"><div class="spinner"></div></div></div>
+  </div>`;
+
+  const now = new Date();
+  let year = now.getFullYear(), month = now.getMonth()+1;
+
+  const render = async () => {
+    document.getElementById('ceo-month').textContent = fmtMY(year,month);
+    const body = document.getElementById('ceo-summary-body');
+    if (!body) return;
+    body.innerHTML=`<div class="center-screen"><div class="spinner"></div></div>`;
+    try {
+      const branches = (await DB.getBranches()).map(b=>b.name);
+      const allData  = await Promise.all(branches.map(b=>DB.getSummary(year,month,b)));
+
+      let totalPT=0, totalDuty=0, totalSalary=0, totalClients=0;
+      const branchCards = branches.map((branch,i)=>{
+        const data = allData[i]||[];
+        const bPT     = data.reduce((s,t)=>s+(t.pt_count||0),0);
+        const bSalary = data.reduce((s,t)=>s+(t.total||0),0);
+        const bClients= data.reduce((s,t)=>s+(t.client_count||0),0);
+        const bDuty   = data.reduce((s,t)=>s+(t.duty_hours||0),0);
+        totalPT+=bPT; totalSalary+=bSalary; totalClients+=bClients; totalDuty+=bDuty;
+        return `<div class="staff-card" style="flex-direction:column;gap:8px;margin-bottom:8px">
+          <div style="font-weight:700;font-size:14px">${branch}</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <div style="background:var(--card);border-radius:8px;padding:10px;text-align:center">
+              <div style="font-size:20px;font-weight:700">${bPT}</div>
+              <div style="font-size:11px;color:var(--hint)">ПТ</div>
+            </div>
+            <div style="background:var(--card);border-radius:8px;padding:10px;text-align:center">
+              <div style="font-size:20px;font-weight:700">${bClients}</div>
+              <div style="font-size:11px;color:var(--hint)">Клиентов</div>
+            </div>
+            <div style="background:var(--card);border-radius:8px;padding:10px;text-align:center">
+              <div style="font-size:16px;font-weight:700">${bDuty.toFixed(0)}ч</div>
+              <div style="font-size:11px;color:var(--hint)">Дежурство</div>
+            </div>
+            <div style="background:var(--card);border-radius:8px;padding:10px;text-align:center">
+              <div style="font-size:14px;font-weight:700">${fmt(Math.round(bSalary))}</div>
+              <div style="font-size:11px;color:var(--hint)">ЗП сум</div>
+            </div>
+          </div>
+          <div style="border-top:1px solid var(--border);padding-top:6px">
+            ${data.map(t=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0">
+              <span>${t.fio||'—'}</span>
+              <span style="color:var(--hint)">${t.pt_count||0} ПТ · ${fmt(Math.round(t.total||0))} сум</span>
+            </div>`).join('')}
+          </div>
+        </div>`;
+      });
+
+      body.innerHTML=`
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px">
+          <div style="background:rgba(124,58,237,.15);border-radius:10px;padding:12px;text-align:center">
+            <div style="font-size:24px;font-weight:700;color:var(--accent)">${totalPT}</div>
+            <div style="font-size:11px;color:var(--hint)">Всего ПТ</div>
+          </div>
+          <div style="background:rgba(16,185,129,.15);border-radius:10px;padding:12px;text-align:center">
+            <div style="font-size:24px;font-weight:700;color:var(--success)">${totalClients}</div>
+            <div style="font-size:11px;color:var(--hint)">Клиентов</div>
+          </div>
+          <div style="background:rgba(245,158,11,.15);border-radius:10px;padding:12px;text-align:center">
+            <div style="font-size:18px;font-weight:700;color:var(--warn)">${totalDuty.toFixed(0)}ч</div>
+            <div style="font-size:11px;color:var(--hint)">Дежурство</div>
+          </div>
+          <div style="background:rgba(239,68,68,.15);border-radius:10px;padding:12px;text-align:center">
+            <div style="font-size:14px;font-weight:700;color:var(--danger)">${fmt(Math.round(totalSalary))}</div>
+            <div style="font-size:11px;color:var(--hint)">ЗП итого</div>
+          </div>
+        </div>
+        ${branchCards.join('')}`;
+    } catch(e) { if(body) body.innerHTML='<p class="hint">Ошибка</p>'; console.error(e); }
+  };
+
+  document.getElementById('ceo-prev')?.addEventListener('click',()=>{
+    if(month===1){year--;month=12;}else month--;
+    render();
+  });
+  document.getElementById('ceo-next')?.addEventListener('click',()=>{
+    if(month===12){year++;month=1;}else month++;
+    render();
+  });
+  await render();
+}
+
+// ── ГРУППЫ ───────────────────────────────────
+async function renderCeoGroups() {
+  $('#tab-content').innerHTML=`<div class="tab-pad">
+    <h3 style="margin-bottom:12px">Группы</h3>
+    <div id="ceo-groups-body"><div class="center-screen"><div class="spinner"></div></div></div>
+  </div>`;
+  try {
+    const branches = (await DB.getBranches()).map(b=>b.name);
+    const month = new Date().toISOString().slice(0,7)+'-01';
+    let html = '';
+    for (const branch of branches) {
+      const groups = await DB.getAssignedTrainers ? [] : [];
+      // Get all trainer_groups for this branch
+      const {data:tgs} = await window._supabaseClient ?
+        window._supabaseClient.from('trainer_groups').select('*, group_types(*), profiles(fio)').eq('branch',branch).is('subscription_end',null) :
+        {data:[]};
+      if (!tgs?.length) continue;
+      html += `<div style="margin-bottom:16px">
+        <div style="font-weight:700;font-size:13px;color:var(--hint);margin-bottom:8px">${branch}</div>
+        ${await Promise.all(tgs.map(async tg=>{
+          const clients  = await DB.getGroupClients(tg.id);
+          const payments = await DB.getGroupPayments(tg.id, month);
+          const paid     = payments.filter(p=>p.paid).length;
+          const unpaid   = clients.length - paid;
+          return `<div class="staff-card" style="flex-direction:column;gap:4px">
+            <div style="display:flex;justify-content:space-between">
+              <div>
+                <div class="staff-fio">${tg.group_types?.name||'Группа'}</div>
+                <div class="staff-meta">${tg.profiles?.fio||'—'}</div>
+              </div>
+              <div style="text-align:right">
+                <div style="font-size:13px;font-weight:600">${clients.length} чел.</div>
+                ${unpaid>0?`<div style="font-size:11px;color:var(--danger)">${unpaid} не оплатили</div>`:'<div style="font-size:11px;color:var(--success)">Все оплатили</div>'}
+              </div>
+            </div>
+          </div>`;
+        })).then(r=>r.join(''))}
+      </div>`;
+    }
+    document.getElementById('ceo-groups-body').innerHTML = html||'<p class="hint">Нет групп</p>';
+  } catch(e) { document.getElementById('ceo-groups-body').innerHTML='<p class="hint">Ошибка</p>'; console.error(e); }
+}
+
+// ── ТЕХНИЧКА (только просмотр) ───────────────
+async function renderCeoTech() {
+  $('#tab-content').innerHTML=`<div class="tab-pad">
+    <h3 style="margin-bottom:12px">Техника</h3>
+    <div id="ceo-tech-body"><div class="center-screen"><div class="spinner"></div></div></div>
+  </div>`;
+  try {
+    const branches = (await DB.getBranches()).map(b=>b.name);
+    let html = '';
+    for (const branch of branches) {
+      const [issues, bills] = await Promise.all([
+        DB.getTechIssues(branch),
+        DB.getTechBills(branch),
+      ]);
+      const unpaidBills = bills.filter(b=>!b.paid);
+      const unpaidSum   = unpaidBills.reduce((s,b)=>s+b.amount,0);
+      const highIssues  = issues.filter(i=>i.priority==='high'||i.priority==='urgent');
+      html += `<div class="staff-card" style="flex-direction:column;gap:8px;margin-bottom:8px">
+        <div style="font-weight:700">${branch}</div>
+        ${highIssues.length?`<div style="color:var(--danger);font-size:12px">🔴 Срочные поломки: ${highIssues.map(i=>i.description).join(', ')}</div>`:'<div style="color:var(--success);font-size:12px">✅ Критических проблем нет</div>'}
+        ${unpaidSum>0?`<div style="color:var(--warn);font-size:12px">💳 Неоплачено: ${fmt(Math.round(unpaidSum))} сум (${unpaidBills.length} счетов)</div>`:''}
+        <div style="font-size:12px;color:var(--hint)">Открытых проблем: ${issues.length}</div>
+      </div>`;
+    }
+    document.getElementById('ceo-tech-body').innerHTML = html||'<p class="hint">Нет данных</p>';
+  } catch(e) { document.getElementById('ceo-tech-body').innerHTML='<p class="hint">Ошибка</p>'; console.error(e); }
+}
+
+// ── НПС ──────────────────────────────────────
+function renderCeoNps() {
+  $('#tab-content').innerHTML=`<div class="tab-pad">
+    <div style="text-align:center;padding:60px 20px">
+      <div style="font-size:48px;margin-bottom:16px">⭐</div>
+      <h3 style="margin-bottom:8px">НПС от клиентов</h3>
+      <p class="hint">Будет доступно после запуска клиентского портала.</p>
+      <p class="hint" style="margin-top:8px">Клиенты смогут оценивать тренировки после каждого занятия.</p>
+    </div>
+  </div>`;
+}
 window.addEventListener('DOMContentLoaded', init);
 async function doDeleteDuty(id) {
   if (!confirm('Удалить это дежурство?')) return;
