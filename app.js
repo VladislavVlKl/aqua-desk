@@ -88,6 +88,7 @@ async function enterApp() {
   checkShowTutorial(() => {
     if      (STATE.profile.role==='admin')          renderAdminApp();
     else if (STATE.profile.role==='senior_trainer') renderSeniorApp();
+    else if (STATE.profile.role==='ceo')            renderCeoApp();
     else                                            renderTrainerApp();
   });
 }
