@@ -1865,7 +1865,7 @@ async function renderGroupDetail(groupId) {
     const noteMap = Object.fromEntries(notes.map(n=>[n.group_client_id, n]));
     const LEVELS = ['Подготовительный','Обучающий','Совершенствование','Спортивный'];
     setScreen(`<div class="app-header">
-      <button class="btn-icon" onclick="switchTab('groups')">←</button>
+      <button class="btn-icon" onclick="STATE.profile.role==='trainer'?switchTab('groups'):seniorTab('groups')">←</button>
       <div class="app-title">Группа</div><div></div></div>
     <div class="tab-content"><div class="tab-pad">
       <div class="section-header"><h3>Состав группы</h3>
