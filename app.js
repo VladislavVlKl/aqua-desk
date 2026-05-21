@@ -330,8 +330,8 @@ async function doLogDutyHome() {
   try {
     await sb().from('duties').insert({
       trainer_id:STATE.profile.id,branch,
-      start_time: start+':00+05:00',
-end_time:   end+':00+05:00',
+      start_time: new Date(start).toISOString(),
+end_time:   new Date(end).toISOString(),
     });
     toast(`✅ ${h.toFixed(1)}ч = ${fmt(Math.round(h*RATES.duty_per_hour))} сум`,'success');
     renderHomeTab();
