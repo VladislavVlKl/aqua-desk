@@ -2682,20 +2682,38 @@ async function loadGroupsList() {
 function renderAddGroupTypeModal() {
   const m=el('div','modal-overlay');
   m.innerHTML=`<div class="modal">
-    <div class="modal-header"><h3>Тип группы</h3>
+    <div class="modal-header"><h3>Новый тип группы</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
-    <div class="form-group"><label>Название</label><input id="gt-name"></div>
+    <div class="form-group"><label>Название</label>
+      <input id="gt-name" placeholder="Акваджим / Детская группа / Art-swim"></div>
     <div class="form-group"><label>Тип</label>
-      <select id="gt-type" onchange="document.getElementById('gt-child').style.display=this.value==='children'?'':'none'">
-        <option value="children">Детская</option><option value="adult">Взрослая</option>
+      <select id="gt-type" onchange="onGtTypeChange(this.value)">
+        <option value="children">👶 Детская</option>
+        <option value="adult">🏊 Взрослая</option>
       </select></div>
-    <div id="gt-child">
-      <div class="form-group"><label>Стоимость (сум/мес)</label><input id="gt-price" type="number" value="1000000"></div>
-      <div class="form-group"><label>% тренеру</label><input id="gt-pct" type="number" value="40"></div>
+    <div id="gt-children-opts">
+      <div style="background:rgba(124,58,237,.1);border-radius:8px;padding:10px;margin-bottom:12px;font-size:12px;color:var(--hint)">
+        Детская группа: тренер получает % от стоимости абонемента каждого ребёнка
+      </div>
+      <div class="form-group"><label>Стоимость абонемента (сум/мес)</label>
+        <input id="gt-price" type="number" value="1000000"></div>
+      <div class="form-group"><label>% тренеру (стандартный)</label>
+        <input id="gt-pct" type="number" value="40"></div>
     </div>
-    <button class="btn btn-primary btn-full" onclick="doAddGroupType()">Добавить</button>
+    <div id="gt-adult-opts" style="display:none">
+      <div style="background:rgba(16,185,129,.1);border-radius:8px;padding:10px;font-size:12px;color:var(--hint)">
+        Взрослая группа: ставка тренера зависит от явки<br>
+        <b>1-3 чел = 110 000 · 4-6 чел = 120 000 · 7+ чел = 130 000 сум</b><br>
+        Ставки настраиваются в Config
+      </div>
+    </div>
+    <button class="btn btn-primary btn-full" style="margin-top:16px" onclick="doAddGroupType()">Добавить</button>
   </div>`;
   document.body.appendChild(m);
+}
+function onGtTypeChange(val) {
+  document.getElementById('gt-children-opts').style.display = val==='children' ? '' : 'none';
+  document.getElementById('gt-adult-opts').style.display    = val==='adult'    ? '' : 'none';
 }
 async function doAddGroupType() {
   const name=document.getElementById('gt-name')?.value.trim();
@@ -3422,12 +3440,42 @@ async function renderDeleteRequests() {
   } catch(e) { return ''; }
 }
 async function doApproveDelete(reqId, clientId, nameEnc) {
-  if (!confirm(`Удалить клиента «${decodeURIComponent(nameEnc)}» окончательно?`)) return;
+  const fio = decodeURIComponent(nameEnc);
+  try {
+    // Check if client has records
+    const {data:wks} = await sb().from('workouts').select('id').eq('client_id',clientId).limit(1);
+    const hasRecords = wks && wks.length > 0;
+    if (hasRecords) {
+      const m = el('div','modal-overlay');
+      m.innerHTML=`<div class="modal">
+        <div class="modal-header"><h3>Удаление клиента</h3>
+          <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+        <div class="warn-banner" style="margin-bottom:16px">
+          ⚠️ У клиента <b>${fio}</b> есть история тренировок и записи.<br>
+          Удаление уберёт все данные безвозвратно.
+        </div>
+        <button class="btn btn-full btn-danger" style="margin-bottom:8px"
+          onclick="doForceDelete('${reqId}','${clientId}','${encodeURIComponent(fio)}')">
+          🗑 Удалить принудительно вместе с историей</button>
+        <button class="btn btn-full" style="background:var(--card)"
+          onclick="this.closest('.modal-overlay').remove()">Отмена</button>
+      </div>`;
+      document.body.appendChild(m);
+    } else {
+      if (!confirm(`Удалить клиента «${fio}» окончательно?`)) return;
+      await DB.approveDeleteRequest(reqId, clientId);
+      toast('Клиент удалён','success');
+      adminTab('control');
+    }
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+async function doForceDelete(reqId, clientId, nameEnc) {
+  document.querySelector('.modal-overlay')?.remove();
   try {
     await DB.approveDeleteRequest(reqId, clientId);
-    toast('Клиент удалён','success');
+    toast('Клиент удалён вместе с историей','success');
     adminTab('control');
-  } catch(e) { toast('Ошибка','error'); console.error(e); }
+  } catch(e) { toast('Ошибка удаления','error'); console.error(e); }
 }
 async function doRejectDelete(reqId) {
   try {
