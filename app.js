@@ -153,6 +153,7 @@ async function renderTrainerApp() {
   setupBack(null);
   renderTrainerShell('home');
   setTimeout(checkNoteBadge, 1500);
+  setTimeout(checkInAppNotifications, 2000);
 }
 
 function renderTrainerShell(tab) {
@@ -165,6 +166,8 @@ function renderTrainerShell(tab) {
       <button class="btn-icon" id="note-badge" onclick="switchTab('clients')" style="display:none">📝</button>
       <button class="btn-icon" onclick="openSchedule()">📅</button>
       <button class="btn-icon" onclick="renderHelpModal()">?</button>
+      <button class="btn-icon" onclick="renderTrainerEditProfile()">👤</button>
+      <button class="btn-icon" id="notif-bell" onclick="renderInAppNotifications()" style="position:relative">🔔<span id="notif-count" style="display:none;position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;border-radius:50%;font-size:9px;width:16px;height:16px;line-height:16px;text-align:center"></span></button>
     </div>
   </div>
   <div id="tab-content" class="tab-content"></div>
@@ -351,38 +354,41 @@ async function renderClientsTab() {
     pendingNotes += overdue.length;
   }
 
+  const renderList = (filter='') => {
+    const body = document.getElementById('cl-list');
+    if (!body) return;
+    const arr = filter ? clients.filter(c=>c.fio.toLowerCase().includes(filter.toLowerCase())) : clients;
+    if (!arr.length) { body.innerHTML='<p class="hint" style="text-align:center;padding:20px">Не найдено</p>'; return; }
+    body.innerHTML = arr.map(c=>{
+      const days = daysUntil(c.subscription_end);
+      const warn = days!==null&&days<=SUBSCRIPTION_WARN_DAYS&&days>=0;
+      const exp  = days!==null&&days<0;
+      const dot  = c.color?`<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${c.color};margin-right:4px;vertical-align:middle"></span>`:'';
+      return `<div class="client-row" onclick="renderClientProfile('${c.id}','clients')">
+        <div>
+          <div class="cr-name">${dot}${c.fio}${warn?'<span class="warn-dot">⚠️</span>':''}${exp?'<span class="exp-dot">❌</span>':''}</div>
+          <div class="cr-meta">Кат.${c.category} · Баланс: ${c.balance}${c.age?' · '+c.age+' лет':''}${c.subscription_end?' · до '+c.subscription_end:''}</div>
+        </div>
+        <span class="cr-arrow">›</span>
+      </div>`;
+    }).join('');
+  };
   $('#tab-content').innerHTML=`<div class="tab-pad">
     <div class="section-header">
       <h3>Мои клиенты</h3>
       <button class="btn btn-sm" onclick="renderAddClientModal()">+ Клиент</button>
     </div>
-
+    <input type="text" id="cl-search" placeholder="🔍 Поиск..." oninput="(()=>{const f=this.value;const b=document.getElementById('cl-list');if(b){const arr=${JSON.stringify('clients')};}})()"
+      style="width:100%;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text);font-size:14px;margin-bottom:8px;box-sizing:border-box">
     ${pendingNotes>0?`<div class="warn-banner" style="cursor:pointer">
       📝 ${pendingNotes} незакрытых конспектов — нажмите на клиента чтобы написать
     </div>`:''}
-
-    ${!clients.length?'<div class="empty-state">👥<p>Клиентов нет.<br>Нажмите + Клиент чтобы добавить.</p></div>':
-      clients.map(c=>{
-        const days = daysUntil(c.subscription_end);
-        const warn = days!==null&&days<=SUBSCRIPTION_WARN_DAYS&&days>=0;
-        const exp  = days!==null&&days<0;
-        return `<div class="client-row" onclick="renderClientProfile('${c.id}','clients')">
-          <div>
-            <div class="cr-name">
-              ${c.fio}
-              ${warn?'<span class="warn-dot">⚠️</span>':''}
-              ${exp?'<span class="exp-dot">❌</span>':''}
-            </div>
-            <div class="cr-meta">
-              Кат.${c.category} · Баланс: ${c.balance}
-              ${c.age?' · '+c.age+' лет':''}
-              ${c.subscription_end?' · до '+c.subscription_end:''}
-            </div>
-          </div>
-          <span class="cr-arrow">›</span>
-        </div>`;
-      }).join('')}
+    ${!clients.length?'<div class="empty-state">👥<p>Клиентов нет.<br>Нажмите + Клиент чтобы добавить.</p></div>':'<div id="cl-list"></div>'}
   </div>`;
+  if (clients.length) {
+    document.getElementById('cl-search').addEventListener('input', e => renderList(e.target.value));
+    renderList();
+  }
 }
 
 // ── ТАБ: СПИСАНИЕ ─────────────────────────────
@@ -1310,7 +1316,8 @@ async function loadTrainerReport(year,month) {
         <div class="summary-card"><div class="s-val">${sal.cat.debt}</div><div class="s-lbl">В долг</div></div>
         <div class="summary-card"><div class="s-val">${sal.hours.toFixed(1)}ч</div><div class="s-lbl">Деж.</div></div>
         <div class="summary-card accent" style="grid-column:span 2">
-          <div class="s-val">${fmt(sal.total)}</div><div class="s-lbl">К выплате (сум)</div>
+          <div class="s-val">${trainerGroups.some(tg=>tg.group_types?.name?.toLowerCase().includes('art'))?'—':fmt(sal.total)}</div>
+          <div class="s-lbl">К выплате (сум)${trainerGroups.some(tg=>tg.group_types?.name?.toLowerCase().includes('art'))?'<br><span style="font-size:9px;opacity:.6">ЗП по запросу у координатора</span>':''}</div>
         </div>
       </div>
       <h4>Тренировки за месяц</h4>
@@ -1327,8 +1334,10 @@ async function loadTrainerReport(year,month) {
           <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
             ${w.is_debt&&!w.debt_confirmed_at?`
               <button class="btn btn-sm btn-primary" onclick="doConfirmDebt('${w.id}','${w.client_id}')">Подтвердить оплату</button>`:''}
-            ${canEdit(w.created_at)&&!w.is_debt?`
-              <button class="btn btn-sm btn-danger" onclick="doDeleteWorkout('${w.id}')">Удалить</button>`:''}
+            ${STATE.profile.role==='admin'?`
+              <button class="btn btn-sm btn-danger" onclick="doAdminDeleteWorkout('${w.id}')">Удалить</button>`:
+              (canEdit(w.created_at)&&!w.is_debt?`
+              <button class="btn btn-sm btn-danger" onclick="doDeleteWorkout('${w.id}')">Удалить</button>`:'')}
             <button class="btn btn-sm" onclick="renderClientProfile('${w.client_id}','report')" style="background:var(--card);border:1px solid var(--border)">
               👤 Профиль</button>
           </div>
@@ -1342,6 +1351,11 @@ async function doConfirmDebt(wid,cid) {
 }
 async function doDeleteWorkout(id) {
   if(!confirm('Удалить запись?'))return;
+  try{await DB.deleteWorkout(id);toast('Удалено','success');renderReportTab();}
+  catch(e){toast('Ошибка','error');}
+}
+async function doAdminDeleteWorkout(id) {
+  if(!confirm('Удалить запись? (Без ограничений по времени)'))return;
   try{await DB.deleteWorkout(id);toast('Удалено','success');renderReportTab();}
   catch(e){toast('Ошибка','error');}
 }
@@ -2314,7 +2328,7 @@ async function renderAdminStaff() {
   </div>`;
   await loadStaffList();
 }
-const ROLE_LBL={trainer:'Тренер',senior_trainer:'Ст.тренер',admin:'Администратор'};
+const ROLE_LBL={trainer:'Тренер',senior_trainer:'Ст.тренер',admin:'Администратор',ceo:'Топ-менеджмент'};
 async function loadStaffList() {
   const body=document.getElementById('staff-list'); if (!body) return;
   const role=document.getElementById('role-filter')?.value||'';
@@ -2348,6 +2362,7 @@ function renderAddTrainerModal() {
         <option value="trainer">Тренер</option>
         <option value="senior_trainer">Старший тренер</option>
         <option value="admin">Администратор</option>
+        <option value="ceo">Топ-менеджмент</option>
       </select></div>
     <div class="form-group"><label>Филиалы (через запятую)</label><input id="nt-branches"></div>
     <button class="btn btn-primary btn-full" onclick="doAddTrainer()">Добавить</button>
@@ -2375,6 +2390,7 @@ function renderEditTrainerModal(id,fioEnc,branches,role) {
         <option value="trainer" ${role==='trainer'?'selected':''}>Тренер</option>
         <option value="senior_trainer" ${role==='senior_trainer'?'selected':''}>Старший тренер</option>
         <option value="admin" ${role==='admin'?'selected':''}>Администратор</option>
+        <option value="ceo" ${role==='ceo'?'selected':''}>Топ-менеджмент</option>
       </select></div>
     <div class="form-group"><label>Филиалы</label><input id="et-branches" value="${branches}"></div>
     <button class="btn btn-primary btn-full" onclick="doEditTrainer(${id})">Сохранить</button>
@@ -2491,17 +2507,6 @@ async function doArchiveClient(id, fioEnc) {
   try {
     await DB.archiveClient(id);
     toast('Клиент архивирован','success');
-    switchTab(STATE.currentTab||'clients');
-  } catch(e) { toast('Ошибка','error'); console.error(e); }
-}
-async function doDeleteClientCheck(id, fioEnc, createdAt) {
-  const fio = decodeURIComponent(fioEnc);
-  const diffH = (Date.now() - new Date(createdAt).getTime()) / 3600000;
-  if (diffH > 24) return toast('Удалить можно только в течение 24 часов после добавления','error');
-  if (!confirm(`Удалить «${fio}» полностью?\nЭто действие нельзя отменить.`)) return;
-  try {
-    await DB.deleteClient(id);
-    toast('Клиент удалён','success');
     switchTab(STATE.currentTab||'clients');
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
@@ -3154,7 +3159,8 @@ async function renderCeoApp() {
   setScreen(`
     <div class="app-header">
       <div><div class="app-title">👑 AquaDesk</div>
-        <div class="app-sub">${STATE.profile.fio}</div></div>
+        <div class="app-sub">${STATE.profile.fio}</div>
+        <div style="font-size:9px;opacity:.6;letter-spacing:1px">ТОП-МЕНЕДЖМЕНТ</div></div>
     </div>
     <div id="tab-content" class="tab-content"></div>
     <nav class="bottom-nav">
@@ -3353,6 +3359,401 @@ function renderCeoNps() {
     </div>
   </div>`;
 }
+
+// setClientColor moved to module
+
+// renderTrainerEditProfile moved to module
+
+async function doDeleteClientCheck(clientId, fioEnc, createdAt) {
+  const fio = decodeURIComponent(fioEnc);
+  const diffH = (Date.now() - new Date(createdAt).getTime()) / 3600000;
+  if (diffH <= 24) {
+    if (!confirm(`Удалить «${fio}» полностью?\nЭто действие нельзя отменить.`)) return;
+    try {
+      await DB.deleteClient(clientId);
+      toast('Клиент удалён','success');
+      switchTab(STATE.currentTab||'clients');
+    } catch(e) { toast('Ошибка','error'); console.error(e); }
+  } else {
+    if (!confirm(`Отправить запрос на удаление «${fio}»?\nЗапрос уйдёт старшему тренеру или координатору.`)) return;
+    try {
+      await DB.createDeleteRequest(clientId, fio, STATE.profile.id, STATE.profile.branches?.[0]||'');
+      toast('Запрос отправлен ✅','success');
+    } catch(e) { toast('Ошибка','error'); console.error(e); }
+  }
+}
+
+// Для координатора — список запросов на удаление в Контроле
+async function renderDeleteRequests() {
+  try {
+    const reqs = await DB.getAllDeleteRequests();
+    if (!reqs.length) return '';
+    return `<div class="control-section">
+      <div class="control-title danger">🗑 Запросы на удаление (${reqs.length})</div>
+      ${reqs.map(r=>`<div class="control-item">
+        <div class="ci-main">${r.client_name} <span class="hint">← ${r.profiles?.fio||'?'}</span></div>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <button class="btn btn-sm btn-danger" onclick="doApproveDelete('${r.id}','${r.client_id}','${encodeURIComponent(r.client_name)}')">Удалить</button>
+          <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
+            onclick="doRejectDelete('${r.id}')">Отклонить</button>
+        </div>
+      </div>`).join('')}
+    </div>`;
+  } catch(e) { return ''; }
+}
+async function doApproveDelete(reqId, clientId, nameEnc) {
+  if (!confirm(`Удалить клиента «${decodeURIComponent(nameEnc)}» окончательно?`)) return;
+  try {
+    await DB.approveDeleteRequest(reqId, clientId);
+    toast('Клиент удалён','success');
+    adminTab('control');
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+async function doRejectDelete(reqId) {
+  try {
+    await DB.rejectDeleteRequest(reqId);
+    toast('Запрос отклонён','success');
+    adminTab('control');
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+
+// ── ЦВЕТА КЛИЕНТОВ ────────────────────────────────────────────────────────────
+
+// setClientColor moved to module
+
+// ── РЕДАКТИРОВАНИЕ ПРОФИЛЯ ТРЕНЕРОМ ──────────────────────────────────────────
+
+async function renderTrainerEditProfile() {
+  const profile = STATE.profile;
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>Мой профиль</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="form-group"><label>Фамилия Имя</label>
+      <input id="ep-fio" type="text" value="${profile.fio}"></div>
+    <div class="form-group"><label>Телефон</label>
+      <input id="ep-phone" type="tel" placeholder="+998 90 000 00 00" value="${profile.phone||''}"></div>
+    <div class="form-group"><label>Новый PIN (оставьте пустым чтобы не менять)</label>
+      <input id="ep-pin" type="password" inputmode="numeric" maxlength="4" placeholder="••••"></div>
+    <div class="form-group"><label>Подтвердите PIN</label>
+      <input id="ep-pin2" type="password" inputmode="numeric" maxlength="4" placeholder="••••"></div>
+    <button class="btn btn-primary btn-full" onclick="doSaveTrainerProfile()">Сохранить</button>
+  </div>`;
+  document.body.appendChild(m);
+}
+async function doSaveTrainerProfile() {
+  const fio   = document.getElementById('ep-fio')?.value.trim();
+  const phone = document.getElementById('ep-phone')?.value.trim();
+  const pin   = document.getElementById('ep-pin')?.value;
+  const pin2  = document.getElementById('ep-pin2')?.value;
+  if (!fio) return toast('Введите ФИО','error');
+  if (pin && !/^\d{4}$/.test(pin)) return toast('PIN: 4 цифры','error');
+  if (pin && pin !== pin2) return toast('PIN не совпадает','error');
+  try {
+    const fields = {fio, phone: phone||null};
+    if (pin) fields.pincode = pin;
+    await DB.updateProfile(STATE.profile.id, fields);
+    STATE.profile = {...STATE.profile, ...fields};
+    document.querySelector('.modal-overlay')?.remove();
+    toast('Профиль обновлён ✅','success');
+    const sub = document.querySelector('.app-sub');
+    if (sub) sub.textContent = fio;
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+
+// ── УВЕДОМЛЕНИЯ ВНУТРИ ПРИЛОЖЕНИЯ ────────────────────────────────────────────
+
+async function checkInAppNotifications() {
+  try {
+    const notifs = await DB.getMyNotifications(STATE.profile.tg_id);
+    const unread = notifs.filter(n=>!n.read_at).length;
+    const count = document.getElementById('notif-count');
+    if (count) {
+      count.style.display = unread > 0 ? '' : 'none';
+      count.textContent = unread > 9 ? '9+' : String(unread);
+    }
+  } catch(e) { console.error(e); }
+}
+async function renderInAppNotifications() {
+  try {
+    const notifs = await DB.getMyNotifications(STATE.profile.tg_id);
+    await DB.markNotificationsRead(STATE.profile.tg_id);
+    checkInAppNotifications();
+    const m = el('div','modal-overlay');
+    m.innerHTML=`<div class="modal">
+      <div class="modal-header"><h3>🔔 Уведомления</h3>
+        <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+      <div style="max-height:60vh;overflow-y:auto">
+      ${!notifs.length?'<p class="hint" style="text-align:center;padding:20px">Нет уведомлений</p>':
+        notifs.map(n=>`<div style="padding:12px 0;border-bottom:1px solid var(--border)">
+          <div style="font-size:13px;line-height:1.5">${n.message}</div>
+          <div style="font-size:11px;color:var(--hint);margin-top:4px">
+            ${fmtDT(n.created_at)}
+            ${!n.read_at?'<span style="color:var(--accent);margin-left:6px">● новое</span>':''}
+          </div>
+        </div>`).join('')}
+      </div>
+    </div>`;
+    document.body.appendChild(m);
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+
+// ── ЗАМЕНА В ГРУППАХ ──────────────────────────────────────────────────────────
+
+async function renderGroupSubstitutionModal(groupId) {
+  try {
+    const trainers = await DB.getAllProfiles();
+    const others = trainers.filter(t=>
+      ['trainer','senior_trainer'].includes(t.role) &&
+      t.id !== STATE.profile.id && t.tg_id
+    );
+    const m = el('div','modal-overlay');
+    m.innerHTML=`<div class="modal">
+      <div class="modal-header"><h3>Замена на занятии</h3>
+        <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+      <p style="font-size:13px;color:var(--hint);margin-bottom:12px">Кто провёл занятие вместо вас?</p>
+      <div class="form-group"><label>Дата занятия</label>
+        <input type="date" id="sub-date" value="${new Date().toISOString().slice(0,10)}"></div>
+      <div class="form-group"><label>Тренер-замена</label>
+        <select id="sub-trainer">
+          <option value="">— выберите —</option>
+          ${others.map(t=>`<option value="${t.id}">${t.fio}</option>`).join('')}
+        </select></div>
+      <button class="btn btn-primary btn-full" onclick="doCreateSubstitution('${groupId}')">Отправить запрос</button>
+    </div>`;
+    document.body.appendChild(m);
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+async function doCreateSubstitution(groupId) {
+  const date = document.getElementById('sub-date')?.value;
+  const subId = parseInt(document.getElementById('sub-trainer')?.value);
+  if (!date || !subId) return toast('Заполните все поля','error');
+  try {
+    await DB.createGroupSubstitution(groupId, STATE.profile.id, subId, date);
+    document.querySelector('.modal-overlay')?.remove();
+    toast('Запрос отправлен старшему тренеру ✅','success');
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+
+// Для старшего тренера — одобрение замены со ставкой
+async function renderPendingSubstitutions() {
+  const body = document.getElementById('pending-subs'); if (!body) return;
+  try {
+    const subs = await DB.getPendingSubstitutions();
+    if (!subs.length) { body.innerHTML=''; return; }
+    body.innerHTML=`<div class="warn-banner" style="margin-bottom:12px">
+      🔄 Запросы на замену (${subs.length})
+      ${subs.map(s=>`<div style="padding:8px 0;border-top:1px solid rgba(255,255,255,.1)">
+        <div style="font-size:12px">${s.trainer_groups?.group_types?.name||'Группа'} · ${s.session_date}</div>
+        <div style="font-size:12px">Провёл: <b>${s.substitute?.fio||'?'}</b> вместо ${s.original?.fio||'?'}</div>
+        <div style="display:flex;gap:6px;margin-top:6px;align-items:center">
+          <input type="number" id="sub-rate-${s.id}" placeholder="Ставка (сум)" 
+            style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:6px;color:var(--text);font-size:12px">
+          <button class="btn btn-sm btn-primary" onclick="doApproveSubstitution('${s.id}')">✓</button>
+        </div>
+      </div>`).join('')}
+    </div>`;
+  } catch(e) { console.error(e); }
+}
+async function doApproveSubstitution(id) {
+  const rate = parseFloat(document.getElementById(`sub-rate-${id}`)?.value)||0;
+  if (!rate) return toast('Укажите ставку','error');
+  try {
+    await DB.approveSubstitution(id, rate);
+    toast('Замена одобрена ✅','success');
+    renderPendingSubstitutions();
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+
+// ── ВЗРОСЛЫЕ ГРУППЫ — КЛИЕНТЫ ────────────────────────────────────────────────
+
+async function renderAdultGroupDetail(groupId) {
+  loading('Загрузка...');
+  try {
+    const clients = await DB.getAdultGroupClients(groupId);
+    setScreen(`<div class="app-header">
+      <button class="btn-icon" onclick="STATE.profile.role==='trainer'?renderTrainerApp():renderSeniorApp()">←</button>
+      <div class="app-title">Группа (взрослые)</div><div></div></div>
+    <div class="tab-content"><div class="tab-pad">
+      <div class="section-header"><h3>Участники</h3>
+        <button class="btn btn-sm" onclick="renderAddAdultGroupClientModal('${groupId}')">+ Участник</button>
+      </div>
+      <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);margin-bottom:16px"
+        onclick="renderAdultGroupHeadcount('${groupId}')">📊 Отметить занятие</button>
+      ${!clients.length?'<p class="hint">Участников нет</p>':
+        clients.map(c=>`<div class="staff-card" style="justify-content:space-between">
+          <span>${c.name}</span>
+          <button class="btn btn-sm btn-danger" onclick="archiveAdultClient('${c.id}','${groupId}')">✕</button>
+        </div>`).join('')}
+    </div></div>`);
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+function renderAddAdultGroupClientModal(groupId) {
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>Добавить участника</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="form-group"><label>Имя Фамилия</label>
+      <input id="agc-name" type="text" placeholder="Иванов Иван"></div>
+    <button class="btn btn-primary btn-full" onclick="doAddAdultGroupClient('${groupId}')">Добавить</button>
+  </div>`;
+  document.body.appendChild(m);
+}
+async function doAddAdultGroupClient(groupId) {
+  const name = document.getElementById('agc-name')?.value.trim();
+  if (!name) return toast('Введите имя','error');
+  try {
+    await DB.addAdultGroupClient(groupId, name);
+    document.querySelector('.modal-overlay')?.remove();
+    toast('Добавлено ✅','success');
+    renderAdultGroupDetail(groupId);
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+async function archiveAdultClient(id, groupId) {
+  if (!confirm('Удалить участника?')) return;
+  try {
+    await DB.archiveAdultGroupClient(id);
+    toast('Удалено','success');
+    renderAdultGroupDetail(groupId);
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+async function renderAdultGroupHeadcount(groupId) {
+  try {
+    const clients = await DB.getAdultGroupClients(groupId);
+    const m = el('div','modal-overlay');
+    m.innerHTML=`<div class="modal">
+      <div class="modal-header"><h3>Отметить занятие</h3>
+        <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+      <div class="form-group"><label>Дата</label>
+        <input type="date" id="ag-hc-date" value="${new Date().toISOString().slice(0,10)}"></div>
+      <div style="margin-bottom:12px">
+        <label style="font-size:13px;font-weight:600">Кто был:</label>
+        ${clients.map(c=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">
+          <span>${c.name}</span>
+          <input type="checkbox" id="hc-${c.id}" style="width:20px;height:20px">
+        </div>`).join('')}
+        ${!clients.length?`<div class="form-group" style="margin-top:8px"><label>Или введите количество вручную</label>
+          <input type="number" id="ag-hc-count" min="0" placeholder="0"></div>`:''}
+      </div>
+      <button class="btn btn-primary btn-full" onclick="doLogAdultGroupSession('${groupId}')">Записать</button>
+    </div>`;
+    document.body.appendChild(m);
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+async function doLogAdultGroupSession(groupId) {
+  const date = document.getElementById('ag-hc-date')?.value;
+  const clients = await DB.getAdultGroupClients(groupId);
+  let headcount = 0;
+  const clientIds = [];
+  if (clients.length) {
+    clients.forEach(c=>{
+      if (document.getElementById(`hc-${c.id}`)?.checked) {
+        headcount++;
+        clientIds.push(c.id);
+      }
+    });
+  } else {
+    headcount = parseInt(document.getElementById('ag-hc-count')?.value)||0;
+  }
+  if (!headcount) return toast('Укажите хотя бы одного участника','error');
+  try {
+    const groupInfo = STATE.profile.branches?.[0]||'';
+    await DB.logGroupSession(STATE.profile.id, null, groupInfo, date, headcount);
+    document.querySelector('.modal-overlay')?.remove();
+    const rate = headcount>=7?130000:headcount>=4?120000:110000;
+    toast(`Записано: ${headcount} чел. · ${(rate/1000).toFixed(0)}к сум ✅`,'success');
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+
+// ── СВОДНОЕ РАСПИСАНИЕ КООРДИНАТОРА ──────────────────────────────────────────
+
+async function renderCoordinatorSchedule() {
+  const branches = (await DB.getBranches()).map(b=>b.name);
+  let selBranch = branches[0]||'';
+  
+  $('#tab-content').innerHTML=`<div class="tab-pad">
+    <div class="section-header"><h3>📅 Расписание</h3>
+      <div class="month-nav">
+        <button id="cs-prev">‹</button>
+        <span id="cs-week-label"></span>
+        <button id="cs-next">›</button>
+      </div>
+    </div>
+    ${branches.length>1?`<select id="cs-branch" style="width:100%;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text);margin-bottom:12px"
+      onchange="selBranch=this.value;loadCoordSchedule(selBranch,weekOffset)">
+      ${branches.map(b=>`<option>${b}</option>`).join('')}
+    </select>`:''}
+    <div id="cs-body"><div class="center-screen"><div class="spinner"></div></div></div>
+  </div>`;
+
+  let weekOffset = 0;
+
+  const load = async () => {
+    const body = document.getElementById('cs-body'); if (!body) return;
+    const branch = document.getElementById('cs-branch')?.value || selBranch;
+    const now = new Date();
+    const mon = new Date(now);
+    mon.setDate(now.getDate() - (now.getDay()+6)%7 + weekOffset*7);
+    mon.setHours(0,0,0,0);
+    const sun = new Date(mon); sun.setDate(mon.getDate()+6);
+    
+    const label = document.getElementById('cs-week-label');
+    if (label) label.textContent = `${mon.getDate()}.${mon.getMonth()+1} – ${sun.getDate()}.${sun.getMonth()+1}`;
+    
+    body.innerHTML=`<div class="center-screen"><div class="spinner"></div></div>`;
+    try {
+      const DAYS = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+      const trainers = (await DB.getAllProfiles()).filter(t=>
+        ['trainer','senior_trainer'].includes(t.role) &&
+        (t.branches||[]).includes(branch)
+      );
+      
+      const from = mon.toISOString();
+      const to   = sun.toISOString();
+      
+      // Load duties for the week for this branch
+      const {data:duties} = await _sb.from('duties')
+        .select('*, profiles(fio)')
+        .eq('branch',branch)
+        .gte('start_time',from).lt('start_time',to)
+        .not('end_time','is',null);
+
+      let html = '';
+      for (let d=0; d<7; d++) {
+        const day = new Date(mon); day.setDate(mon.getDate()+d);
+        const dayStr = day.toISOString().slice(0,10);
+        const dayDuties = (duties||[]).filter(duty=>{
+          return duty.start_time?.slice(0,10) === dayStr;
+        });
+        if (!dayDuties.length && d < 5) {
+          html += `<div style="padding:6px 0;border-bottom:1px solid var(--border)">
+            <div style="font-size:11px;font-weight:600;color:var(--hint)">${DAYS[d]} ${day.getDate()}.${day.getMonth()+1}</div>
+            <div style="font-size:11px;color:var(--hint);padding:4px 0">Нет дежурств</div>
+          </div>`;
+        } else if (dayDuties.length) {
+          html += `<div style="padding:6px 0;border-bottom:1px solid var(--border)">
+            <div style="font-size:11px;font-weight:600;color:var(--hint)">${DAYS[d]} ${day.getDate()}.${day.getMonth()+1}</div>
+            ${dayDuties.map(duty=>{
+              const h = ((new Date(duty.end_time)-new Date(duty.start_time))/3600000).toFixed(1);
+              const start = new Date(duty.start_time).toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit'});
+              const end   = new Date(duty.end_time).toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit'});
+              return `<div style="font-size:12px;padding:3px 0;color:var(--text)">
+                🟢 ${duty.profiles?.fio||'?'} · ${start}–${end} (${h}ч)
+              </div>`;
+            }).join('')}
+          </div>`;
+        }
+      }
+      
+      body.innerHTML = html || '<p class="hint">Нет данных за эту неделю</p>';
+    } catch(e) { body.innerHTML='<p class="hint">Ошибка</p>'; console.error(e); }
+  };
+
+  document.getElementById('cs-prev')?.addEventListener('click',()=>{ weekOffset--; load(); });
+  document.getElementById('cs-next')?.addEventListener('click',()=>{ weekOffset++; load(); });
+  await load();
+}
+
 window.addEventListener('DOMContentLoaded', init);
 async function doDeleteDuty(id) {
   if (!confirm('Удалить это дежурство?')) return;
