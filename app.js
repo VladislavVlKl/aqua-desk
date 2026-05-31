@@ -1859,11 +1859,66 @@ function seniorTab(tab) {
   if (tab==='groups')   renderSeniorGroups();
 }
 async function renderSeniorGroups() {
+  const branches = STATE.profile.branches||[];
   $('#tab-content').innerHTML=`<div class="tab-pad">
-    <div class="section-header"><h3>Мои группы</h3></div>
+    <div class="section-header"><h3>Группы</h3></div>
+    <div id="pending-subs"></div>
+    <h4 style="margin-bottom:8px">Мои группы</h4>
     <div id="groups-list"><div class="center-screen"><div class="spinner"></div></div></div>
+    <h4 style="margin-top:20px;margin-bottom:8px">Назначить тренера в своём филиале</h4>
+    <div id="senior-assign-form"></div>
   </div>`;
   await loadSeniorGroupsList();
+  await renderPendingSubstitutions();
+  await renderSeniorAssignForm();
+}
+
+async function renderSeniorAssignForm() {
+  const form = document.getElementById('senior-assign-form'); if (!form) return;
+  try {
+    const branches = STATE.profile.branches||[];
+    const [allTrainers, allSeniors, gts] = await Promise.all([
+      DB.getProfilesByRole('trainer'),
+      DB.getProfilesByRole('senior_trainer'),
+      DB.getGroupTypes(),
+    ]);
+    // Only trainers in same branch
+    const myTrainers = [...allTrainers, ...allSeniors].filter(t=>
+      (t.branches||[]).some(b=>branches.includes(b))
+    );
+    form.innerHTML=`
+      <div class="form-group"><label>Тренер</label>
+        <select id="sa-trainer">
+          <option value="">— выберите —</option>
+          ${myTrainers.map(t=>`<option value="${t.id}">${t.fio}</option>`).join('')}
+        </select></div>
+      <div class="form-group"><label>Тип группы</label>
+        <select id="sa-type">
+          ${gts.map(g=>`<option value="${g.id}" data-type="${g.type}">${g.name}</option>`).join('')}
+        </select></div>
+      <div class="form-group"><label>Филиал</label>
+        <select id="sa-branch">
+          ${branches.map(b=>`<option>${b}</option>`).join('')}
+        </select></div>
+      <button class="btn btn-primary" onclick="doSeniorAssignGroup()">Назначить</button>`;
+  } catch(e) { form.innerHTML='<p class="hint">Ошибка</p>'; console.error(e); }
+}
+async function doSeniorAssignGroup() {
+  const trainerId   = parseInt(document.getElementById('sa-trainer')?.value);
+  const groupTypeId = parseInt(document.getElementById('sa-type')?.value);
+  const branch      = document.getElementById('sa-branch')?.value;
+  if (!trainerId||!groupTypeId||!branch) return toast('Заполните все поля','error');
+  const typeEl = document.querySelector('#sa-type option:checked');
+  const isChildren = typeEl?.dataset.type === 'children';
+  // Adult groups: use headcount rates. Children: default 40%
+  const rateType  = isChildren ? 'percent' : 'headcount';
+  const rateValue = isChildren ? 40 : 0;
+  try {
+    await DB.addTrainerGroup(trainerId, groupTypeId, branch, todayStr(), rateType, rateValue, null);
+    toast('✅ Назначено','success');
+    await loadSeniorGroupsList();
+    await renderSeniorAssignForm();
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 
 async function loadSeniorGroupsList() {
