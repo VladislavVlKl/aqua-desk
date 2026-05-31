@@ -2665,13 +2665,21 @@ async function loadGroupsList() {
     body.innerHTML=types.map((gt,i)=>{
       const assigned = allAssigned[i]?.data||[];
       return `<div class="staff-card" style="flex-direction:column;align-items:flex-start;gap:8px">
-        <div>
-          <div class="staff-fio">${gt.name}</div>
-          <div class="staff-meta">${gt.type==='children'?`Детская · ${fmt(gt.price_per_month)} сум/мес · ${gt.trainer_percentage}%`:'Взрослая · по явке'}</div>
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;width:100%">
+          <div>
+            <div class="staff-fio">${gt.name}</div>
+            <div class="staff-meta">${gt.type==='children'?`Детская · ${fmt(gt.price_per_month)} сум/мес · ${gt.trainer_percentage}%`:'Взрослая · по явке (110/120/130к)'}</div>
+          </div>
+          <div style="display:flex;gap:4px">
+            <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
+              onclick="renderEditGroupTypeModal(${gt.id},'${encodeURIComponent(gt.name)}','${gt.type}',${gt.price_per_month||0},${gt.trainer_percentage||0})">✏️</button>
+            <button class="btn btn-sm btn-danger"
+              onclick="doDeleteGroupType(${gt.id},'${encodeURIComponent(gt.name)}')">🗑</button>
+          </div>
         </div>
         ${assigned.length?assigned.map(a=>`
           <div style="display:flex;justify-content:space-between;align-items:center;width:100%;padding:4px 0;border-top:1px solid var(--border)">
-            <span style="font-size:13px">${a.profiles?.fio||'—'} · ${a.branch}</span>
+            <span style="font-size:13px">${a.profiles?.fio||'—'} · ${a.branch}${a.role?' · '+a.role:''}</span>
             <button class="btn btn-sm" style="background:rgba(239,68,68,.15);color:#ef4444"
               onclick="doUnassignGroup(${a.id})">Открепить</button>
           </div>`).join(''):'<p class="hint" style="font-size:12px">Нет тренеров</p>'}
@@ -3326,7 +3334,7 @@ async function renderCeoGroups() {
     const month = new Date().toISOString().slice(0,7)+'-01';
     let html = '';
     for (const branch of branches) {
-      const {data:tgs} = await _sb.from('trainer_groups')
+      const {data:tgs} = await sb().from('trainer_groups')
         .select('*, group_types(*), profiles(fio)')
         .eq('branch',branch).is('subscription_end',null);
       if (!tgs?.length) continue;
@@ -3817,6 +3825,57 @@ async function renderCoordinatorSchedule() {
   await load();
 }
 
+
+function renderEditGroupTypeModal(id, nameEnc, type, price, pct) {
+  const name = decodeURIComponent(nameEnc);
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>Редактировать тип</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="form-group"><label>Название</label>
+      <input id="egt-name" value="${name}"></div>
+    <div class="form-group"><label>Тип</label>
+      <select id="egt-type" onchange="onGtTypeChange(this.value)" disabled>
+        <option value="children" ${type==='children'?'selected':''}>👶 Детская</option>
+        <option value="adult" ${type==='adult'?'selected':''}>🏊 Взрослая</option>
+      </select></div>
+    ${type==='children'?`
+    <div class="form-group"><label>Стоимость (сум/мес)</label>
+      <input id="egt-price" type="number" value="${price}"></div>
+    <div class="form-group"><label>% тренеру</label>
+      <input id="egt-pct" type="number" value="${pct}"></div>`:
+    `<div style="background:rgba(16,185,129,.1);border-radius:8px;padding:10px;font-size:12px;color:var(--hint)">
+      Ставки: 1-3 чел = 110к · 4-6 = 120к · 7+ = 130к</div>`}
+    <button class="btn btn-primary btn-full" style="margin-top:16px"
+      onclick="doEditGroupType(${id},'${type}')">Сохранить</button>
+  </div>`;
+  document.body.appendChild(m);
+}
+async function doEditGroupType(id, type) {
+  const name  = document.getElementById('egt-name')?.value.trim();
+  const price = parseInt(document.getElementById('egt-price')?.value||0);
+  const pct   = parseInt(document.getElementById('egt-pct')?.value||40);
+  if (!name) return toast('Введите название','error');
+  try {
+    await DB.updateGroupType(id, {
+      name,
+      price_per_month: type==='children' ? price : 0,
+      trainer_percentage: type==='children' ? pct : 0
+    });
+    document.querySelector('.modal-overlay')?.remove();
+    toast('Обновлено ✅','success');
+    loadGroupsList();
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+async function doDeleteGroupType(id, nameEnc) {
+  const name = decodeURIComponent(nameEnc);
+  if (!confirm(`Удалить тип группы «${name}»?\nВсе назначения тренеров будут откреплены.`)) return;
+  try {
+    await DB.deleteGroupType(id);
+    toast('Удалено','success');
+    loadGroupsList();
+  } catch(e) { toast('Ошибка — возможно есть назначенные тренеры','error'); console.error(e); }
+}
 window.addEventListener('DOMContentLoaded', init);
 async function doDeleteDuty(id) {
   if (!confirm('Удалить это дежурство?')) return;
