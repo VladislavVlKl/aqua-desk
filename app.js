@@ -1879,7 +1879,7 @@ async function loadSeniorGroupsList() {
             <div class="staff-meta">${g.branch} · с ${g.subscription_start||'—'}</div>
           </div>
           <button class="btn btn-sm btn-primary"
-            onclick="g.group_types?.type==='children'?renderGroupDetail('${g.id}'):renderAdultGroupDetail('${g.id}')">Открыть</button>
+            onclick="${g.group_types?.type==='children'?`renderGroupDetail('${g.id}')`:`renderAdultGroupDetail('${g.id}')`}">Открыть</button>
         </div>
       </div>`).join('');
   } catch(e) { body.innerHTML='<p class="hint">Ошибка</p>'; console.error(e); }
@@ -2766,13 +2766,19 @@ async function renderAssignGroupForm() {
           <option value="суша">Суша</option>
           <option value="вода">Вода</option>
         </select></div>
-      <div class="form-group"><label>Тип ставки</label>
-        <select id="ag-rate-type" onchange="onRateTypeChange(this)">
-          <option value="percent">Процент (%)</option>
-          <option value="flat">Фиксированная сумма</option>
-        </select></div>
-      <div class="form-group"><label id="ag-rate-label">Процент (%)</label>
-        <input id="ag-rate-value" type="number" value="40" min="0"></div>
+      <div id="ag-rate-section">
+        <div class="form-group"><label>Тип ставки</label>
+          <select id="ag-rate-type" onchange="onRateTypeChange(this)">
+            <option value="percent">Процент (%)</option>
+            <option value="flat">Фиксированная сумма</option>
+          </select></div>
+        <div class="form-group"><label id="ag-rate-label">Процент (%)</label>
+          <input id="ag-rate-value" type="number" value="40" min="0"></div>
+      </div>
+      <div id="ag-adult-note" style="display:none;background:rgba(16,185,129,.1);border-radius:8px;padding:10px;font-size:12px;color:var(--hint);margin-bottom:12px">
+        ✅ Взрослая группа: ставка считается автоматически по явке<br>
+        <b>1-3 чел = 110 000 · 4-6 = 120 000 · 7+ = 130 000 сум</b>
+      </div>
       <button class="btn btn-primary btn-full" onclick="doAssignGroup()">Назначить</button>`;
     const sel = document.getElementById('ag-type');
 if (sel) onAgTypeChange(sel);
@@ -2784,8 +2790,12 @@ function onAgTypeChange(sel) {
   const isArtSwim  = opt?.dataset.name?.toLowerCase().includes('art');
   const dateWrap   = document.getElementById('ag-date-wrap');
   const roleWrap   = document.getElementById('ag-artswim-role');
-  if (dateWrap) dateWrap.style.display = isChildren ? '' : 'none';
-  if (roleWrap) roleWrap.style.display = isArtSwim  ? '' : 'none';
+  const rateSection = document.getElementById('ag-rate-section');
+  const adultNote   = document.getElementById('ag-adult-note');
+  if (dateWrap)   dateWrap.style.display   = isChildren ? '' : 'none';
+  if (roleWrap)   roleWrap.style.display   = isArtSwim  ? '' : 'none';
+  if (rateSection) rateSection.style.display = isChildren ? '' : 'none';
+  if (adultNote)   adultNote.style.display   = isChildren ? 'none' : '';
 }
 async function doAssignGroup() {
   const trainerId   = parseInt(document.getElementById('ag-trainer')?.value);
