@@ -659,12 +659,12 @@ async unassignTrainerGroup(id) {
 
     // Запросы параллельно
     let currWQ = sb().from('workouts')
-      .select('trainer_id,category_at_moment,is_debt,debt_confirmed_at,is_drop_in')
+      .select('trainer_id,category_at_moment,is_debt,debt_confirmed_at,is_drop_in,drop_in_category')
       .gte('workout_date',from).lt('workout_date',to);
     if (branch) currWQ = currWQ.eq('branch',branch);
 
     let prevWQ = sb().from('workouts')
-      .select('trainer_id,category_at_moment,is_debt,debt_confirmed_at,is_drop_in')
+      .select('trainer_id,category_at_moment,is_debt,debt_confirmed_at,is_drop_in,drop_in_category')
       .gte('workout_date',pfrom).lt('workout_date',pto);
     if (branch) prevWQ = prevWQ.eq('branch',branch);
 
@@ -761,7 +761,7 @@ async unassignTrainerGroup(id) {
     const toDay   = new Date(year,month,1).toISOString().slice(0,10);
 
     let wq  = sb().from('workouts')
-      .select('trainer_id,category_at_moment,branch,is_debt,debt_confirmed_at,is_drop_in')
+      .select('trainer_id,category_at_moment,branch,is_debt,debt_confirmed_at,is_drop_in,drop_in_category')
       .gte('workout_date',from).lt('workout_date',to);
     if (branch) wq = wq.eq('branch',branch);
 
@@ -979,14 +979,16 @@ async unassignTrainerGroup(id) {
 
 // ─── РАСЧЁТ ЗП ───────────────────────────────
 function calcSalary({workouts=[], duties=[], trainerGroups=[], groupSessions=[], adjustment=null}) {
-  const cat={1:0,2:0,3:0,debt:0,dropIn:0};
+  const cat={1:0,2:0,3:0,debt:0,dropIn1:0,dropIn2:0,dropIn3:0};
   workouts.forEach(w=>{
-    if (w.is_drop_in)                          cat.dropIn++;
-    else if (w.is_debt&&!w.debt_confirmed_at)  cat.debt++;
+    if (w.is_drop_in) {
+      const dc = w.drop_in_category||1; // старые записи = 1кт
+      cat[`dropIn${dc}`]++;
+    } else if (w.is_debt&&!w.debt_confirmed_at)  cat.debt++;
     else                                       cat[w.category_at_moment]++;
   });
   const ptSum     = cat[1]*RATES.pt[1]+cat[2]*RATES.pt[2]+cat[3]*RATES.pt[3];
-  const dropInSum = cat.dropIn*RATES.drop_in_trainer;
+  const dropInSum = cat.dropIn1*RATES.pt[1]+cat.dropIn2*RATES.pt[2]+cat.dropIn3*RATES.pt[3];
   const hours     = duties.reduce((s,d)=>s+(new Date(d.end_time)-new Date(d.start_time))/3600000,0);
   const dutySum   = Math.round(hours*RATES.duty_per_hour);
   // childSum: только если в этом месяце есть хотя бы одна сессия по этой группе
