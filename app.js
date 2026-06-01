@@ -7,6 +7,17 @@ const STATE = {
   activeDuty: null, dutyTimer: null, currentTab: null,
 };
 
+// ── ЗАЩИТА ОТ ДВОЙНЫХ НАЖАТИЙ ────────────────
+const _pending = new Set();
+function once(key, fn) {
+  return async function(...args) {
+    if (_pending.has(key)) return;
+    _pending.add(key);
+    try { await fn(...args); }
+    finally { _pending.delete(key); }
+  };
+}
+
 // ── УТИЛИТЫ ──────────────────────────────────
 const $  = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -3583,6 +3594,7 @@ async function renderDeleteRequests() {
   } catch(e) { return ''; }
 }
 async function doApproveDelete(reqId, clientId, nameEnc) {
+  if (_pending.has('approve_'+reqId)) return;
   const fio = decodeURIComponent(nameEnc);
   try {
     // Check if client has records
@@ -3606,26 +3618,34 @@ async function doApproveDelete(reqId, clientId, nameEnc) {
       document.body.appendChild(m);
     } else {
       if (!confirm(`Удалить клиента «${fio}» окончательно?`)) return;
+      _pending.add('approve_'+reqId);
       await DB.approveDeleteRequest(reqId, clientId);
+      _pending.delete('approve_'+reqId);
       toast('Клиент удалён','success');
       adminTab('control');
     }
-  } catch(e) { toast('Ошибка','error'); console.error(e); }
+  } catch(e) { _pending.delete('approve_'+reqId); toast('Ошибка','error'); console.error(e); }
 }
 async function doForceDelete(reqId, clientId, nameEnc) {
+  if (_pending.has('force_'+reqId)) return;
+  _pending.add('force_'+reqId);
   document.querySelector('.modal-overlay')?.remove();
   try {
     await DB.approveDeleteRequest(reqId, clientId);
     toast('Клиент удалён вместе с историей','success');
     adminTab('control');
   } catch(e) { toast('Ошибка удаления','error'); console.error(e); }
+  finally { _pending.delete('force_'+reqId); }
 }
 async function doRejectDelete(reqId) {
+  if (_pending.has('reject_'+reqId)) return;
+  _pending.add('reject_'+reqId);
   try {
     await DB.rejectDeleteRequest(reqId);
     toast('Запрос отклонён','success');
     adminTab('control');
   } catch(e) { toast('Ошибка','error'); console.error(e); }
+  finally { _pending.delete('reject_'+reqId); }
 }
 
 // ── ЦВЕТА КЛИЕНТОВ ────────────────────────────────────────────────────────────
