@@ -16,8 +16,8 @@ const APP_URL      = BASE_URL;
 const RATES = {
   pt: { 1: 85000, 2: 110000, 3: 135000 },
   duty_per_hour:        14000,
-  drop_in_trainer:      85000,
-  drop_in_price:       200000,
+  drop_in_trainer:      85000, // fallback для старых записей (= 1кт)
+  drop_in_price:       200000, // устарело, оставлено для совместимости
   group_children_pct:    0.40,
   group_adult: [
     { max: 3, rate: 110000 },
