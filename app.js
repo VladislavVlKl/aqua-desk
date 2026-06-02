@@ -559,6 +559,8 @@ async function doLogWorkout() {
 // Модал: добавить клиента
 function renderAddClientModal() {
   const m=el('div','modal-overlay');
+  const pkgsChild = SUB_PACKAGES.child;
+  const pkgsAdult = SUB_PACKAGES.adult;
   m.innerHTML=`<div class="modal">
     <div class="modal-header"><h3>Добавить клиента</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
@@ -576,24 +578,39 @@ function renderAddClientModal() {
     <div class="form-group"><label>ФИО</label>
       <input id="nc-fio" type="text" placeholder="Петрова Анна"></div>
     <div class="form-group"><label>Возраст (лет)</label>
-      <input id="nc-age" type="number" min="3" max="99" placeholder="35"></div>
+      <input id="nc-age" type="number" min="3" max="99" placeholder="35"
+        onchange="onNcAgeChange(this.value)"></div>
     <div class="form-group"><label>Категория</label>
       <div class="cat-picker">
         ${[1,2,3].map(n=>`<button class="cat-btn ${n===1?'active':''}" data-cat="${n}"
           onclick="selectCat(this)">Кат.${n}<br><small>${fmt(RATES.pt[n])} сум</small></button>`).join('')}
       </div></div>
 
-    <!-- Новый клиент: просто количество ПТ -->
+    <!-- Новый клиент: пакеты -->
     <div id="nc-new-fields">
-      <div class="form-group"><label>Количество ПТ</label>
-        <input id="nc-balance" type="number" min="0" value="0"
-          placeholder="0 — если ещё не купил"></div>
+      <div class="form-group"><label>Пакет абонемента</label>
+        <div id="nc-pkg-list" style="display:flex;flex-direction:column;gap:8px">
+          ${pkgsChild.map((p,i)=>`<button class="btn pkg-btn ${i===1?'btn-primary':''}" data-qty="${p.qty}"
+            onclick="selectNcPkg(this)"
+            style="${i!==1?'background:var(--card);border:1px solid var(--border)':''}">
+            <b>${p.label}</b> · ${p.period}</button>`).join('')}
+        </div>
+        <div style="margin-top:8px;display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="nc-custom-toggle" onchange="toggleNcCustom(this.checked)">
+          <label for="nc-custom-toggle" style="font-size:13px;font-weight:400">Другое количество</label>
+        </div>
+        <input id="nc-custom-qty" type="number" min="1" placeholder="Введите кол-во ПТ"
+          style="display:none;margin-top:8px" oninput="updateNcEndDate()">
+      </div>
+      <div class="form-group"><label>Дата начала</label>
+        <input id="nc-start" type="date" value="${todayStr()}" oninput="updateNcEndDate()"></div>
+      <div id="nc-end-preview" class="hint" style="margin-bottom:12px"></div>
     </div>
 
     <!-- Действующий клиент: история -->
     <div id="nc-existing-fields" style="display:none">
       <div class="form-group"><label>Дата начала текущего абонемента</label>
-        <input id="nc-start" type="date" value="${todayStr()}"></div>
+        <input id="nc-start-ex" type="date" value="${todayStr()}"></div>
       <div class="form-group"><label>Изначально ПТ в пакете</label>
         <input id="nc-initial" type="number" min="1" value="10"
           placeholder="сколько купил изначально"></div>
@@ -606,6 +623,46 @@ function renderAddClientModal() {
     <button class="btn btn-primary btn-full" onclick="doAddClient()">Добавить</button>
   </div>`;
   document.body.appendChild(m);
+  // Инициализируем превью даты
+  selectNcPkg(m.querySelector('.pkg-btn.btn-primary'));
+}
+
+function onNcAgeChange(age) {
+  const isChild = parseInt(age) <= CHILD_MAX_AGE;
+  const pkgs = isChild ? SUB_PACKAGES.child : SUB_PACKAGES.adult;
+  const list = document.getElementById('nc-pkg-list');
+  if (!list) return;
+  list.innerHTML = pkgs.map((p,i)=>`<button class="btn pkg-btn ${i===1?'btn-primary':''}" data-qty="${p.qty}"
+    onclick="selectNcPkg(this)"
+    style="${i!==1?'background:var(--card);border:1px solid var(--border)':''}">
+    <b>${p.label}</b> · ${p.period}</button>`).join('');
+  selectNcPkg(list.querySelector('.pkg-btn.btn-primary'));
+}
+function selectNcPkg(btn) {
+  if (!btn) return;
+  document.querySelectorAll('.pkg-btn').forEach(b=>{
+    b.classList.remove('btn-primary');
+    b.style.background='var(--card)'; b.style.border='1px solid var(--border)';
+  });
+  btn.classList.add('btn-primary');
+  btn.style.background=''; btn.style.border='';
+  updateNcEndDate();
+}
+function toggleNcCustom(on) {
+  document.getElementById('nc-custom-qty').style.display = on ? '' : 'none';
+  document.querySelectorAll('.pkg-btn').forEach(b=>{ b.disabled = on; b.style.opacity = on ? '0.4' : '1'; });
+  updateNcEndDate();
+}
+function updateNcEndDate() {
+  const customOn = document.getElementById('nc-custom-toggle')?.checked;
+  const qty = customOn
+    ? parseInt(document.getElementById('nc-custom-qty')?.value||'0')
+    : parseInt(document.querySelector('.pkg-btn.btn-primary')?.dataset.qty||'0');
+  const start = document.getElementById('nc-start')?.value || todayStr();
+  const preview = document.getElementById('nc-end-preview');
+  if (!preview) return;
+  if (!qty) { preview.textContent=''; return; }
+  preview.textContent = `📅 Действует до: ${calcSubEnd(start, qty)}`;
 }
 
 function setClientMode(mode) {
@@ -648,17 +705,23 @@ async function doAddClient() {
 
   try {
     if (!isExisting) {
-      const bal = parseInt($('#nc-balance')?.value||'0');
-      const client = await DB.addClient(fio, cat, STATE.profile.id, age, todayStr(), null);
+      const customOn = document.getElementById('nc-custom-toggle')?.checked;
+      const bal = customOn
+        ? parseInt(document.getElementById('nc-custom-qty')?.value||'0')
+        : parseInt(document.querySelector('.pkg-btn.btn-primary')?.dataset.qty||'0');
+      const startDate = document.getElementById('nc-start')?.value || todayStr();
+      const endDate   = bal > 0 ? calcSubEnd(startDate, bal) : null;
+      const client = await DB.addClient(fio, cat, STATE.profile.id, age, startDate, endDate);
       if (bal > 0) {
         await DB.addBalance(client.id, bal);
-        await DB.createSubscription(client.id, STATE.profile.id, todayStr(), bal);
+        await DB.createSubscription(client.id, STATE.profile.id, startDate, bal);
       }
     } else {
-      const startDate = $('#nc-start')?.value || todayStr();
+      const startDate = $('#nc-start-ex')?.value || todayStr();
       const remaining = parseInt($('#nc-remaining')?.value||'0');
       const initOrig  = parseInt($('#nc-initial')?.value||remaining);
-      const client = await DB.addClient(fio, cat, STATE.profile.id, age, startDate, null);
+      const endDate   = remaining > 0 ? calcSubEnd(startDate, initOrig) : null;
+      const client = await DB.addClient(fio, cat, STATE.profile.id, age, startDate, endDate);
       if (remaining > 0) await DB.addBalance(client.id, remaining);
       await DB.createSubscriptionWithInitial(client.id, STATE.profile.id, startDate, initOrig, remaining);
     }
@@ -1443,11 +1506,7 @@ async function doInitiateTransfer(clientId, fromTrainerId) {
 
 // Купить новый пакет ПТ
 function renderBuyPackageModal(clientId, isChildClient, currentBalance) {
-  const packages = [
-    {qty:5,  label:'5 ПТ',  period:'14 дней'},
-    {qty:10, label:'10 ПТ', period:'1 месяц'},
-    {qty:25, label:'25 ПТ', period:'3 месяца'},
-  ];
+  const packages = isChildClient ? SUB_PACKAGES.child : SUB_PACKAGES.adult;
   const m = el('div','modal-overlay');
   m.innerHTML=`<div class="modal">
     <div class="modal-header"><h3>🛒 Новый пакет ПТ</h3>
@@ -1462,9 +1521,15 @@ function renderBuyPackageModal(clientId, isChildClient, currentBalance) {
           onclick="selectPkg(this)" style="${i!==1?'background:var(--card);border:1px solid var(--border)':''}">
           <b>${p.label}</b> · ${p.period}</button>`).join('')}
       </div>
+      <div style="margin-top:8px;display:flex;align-items:center;gap:8px">
+        <input type="checkbox" id="pkg-custom-toggle" onchange="togglePkgCustom(this.checked)">
+        <label for="pkg-custom-toggle" style="font-size:13px;font-weight:400">Другое количество</label>
+      </div>
+      <input id="pkg-custom-qty" type="number" min="1" placeholder="Введите кол-во ПТ"
+        style="display:none;margin-top:8px" oninput="updatePkgEndDate()">
     </div>
     <div class="form-group"><label>Дата начала</label>
-      <input id="pkg-start" type="date" value="${todayStr()}"></div>
+      <input id="pkg-start" type="date" value="${todayStr()}" oninput="updatePkgEndDate()"></div>
     <div id="pkg-end-preview" class="hint" style="margin-bottom:12px"></div>
     <button class="btn btn-primary btn-full"
       onclick="doBuyPackage('${clientId}',${isChildClient})">Оформить</button>
@@ -1472,21 +1537,38 @@ function renderBuyPackageModal(clientId, isChildClient, currentBalance) {
   document.body.appendChild(m);
   selectPkg(m.querySelector('.pkg-btn.btn-primary'));
 }
+function togglePkgCustom(on) {
+  document.getElementById('pkg-custom-qty').style.display = on ? '' : 'none';
+  document.querySelectorAll('.pkg-btn').forEach(b=>{ b.disabled = on; b.style.opacity = on ? '0.4' : '1'; });
+  updatePkgEndDate();
+}
+function updatePkgEndDate() {
+  const customOn = document.getElementById('pkg-custom-toggle')?.checked;
+  const qty = customOn
+    ? parseInt(document.getElementById('pkg-custom-qty')?.value||'0')
+    : parseInt(document.querySelector('.pkg-btn.btn-primary')?.dataset.qty||'0');
+  const start = document.getElementById('pkg-start')?.value || todayStr();
+  const preview = document.getElementById('pkg-end-preview');
+  if (!preview) return;
+  if (!qty) { preview.textContent=''; return; }
+  preview.textContent = `📅 Действует до: ${calcSubEnd(start, qty)}`;
+}
 function selectPkg(btn) {
+  if (!btn) return;
   document.querySelectorAll('.pkg-btn').forEach(b=>{
     b.classList.remove('btn-primary');
     b.style.background='var(--card)'; b.style.border='1px solid var(--border)';
   });
   btn.classList.add('btn-primary');
   btn.style.background=''; btn.style.border='';
-  const qty = parseInt(btn.dataset.qty);
-  const start = document.getElementById('pkg-start')?.value||todayStr();
-  const end = calcSubEnd(start, qty);
-  const preview = document.getElementById('pkg-end-preview');
-  if (preview) preview.textContent = `Действует до: ${end}`;
+  updatePkgEndDate();
 }
 async function doBuyPackage(clientId, isChildClient) {
-  const qty   = parseInt(document.querySelector('.pkg-btn.btn-primary')?.dataset.qty||'10');
+  const customOn = document.getElementById('pkg-custom-toggle')?.checked;
+  const qty = customOn
+    ? parseInt(document.getElementById('pkg-custom-qty')?.value||'0')
+    : parseInt(document.querySelector('.pkg-btn.btn-primary')?.dataset.qty||'10');
+  if (!qty) return toast('Выберите пакет или введите количество','error');
   const start = document.getElementById('pkg-start')?.value||todayStr();
   try {
     await DB.buyNewPackage(clientId, STATE.profile.id, isChildClient, qty, start);
@@ -1497,7 +1579,7 @@ async function doBuyPackage(clientId, isChildClient) {
 }
 
 // Редактирование данных клиента
-function renderEditClientModal(clientId, fioEnc, cat, age, subStart, subEnd) {
+function renderEditClientModal(clientId, fioEnc, cat, age, subStart, subEnd, balance) {
   const fio = decodeURIComponent(fioEnc);
   const m = el('div','modal-overlay');
   m.innerHTML=`<div class="modal">
@@ -1507,29 +1589,36 @@ function renderEditClientModal(clientId, fioEnc, cat, age, subStart, subEnd) {
       <input id="ec-fio" value="${fio}"></div>
     <div class="form-group"><label>Категория</label>
       <select id="ec-cat">
-        <option value="1" ${cat==1?'selected':''}>1</option>
-        <option value="2" ${cat==2?'selected':''}>2</option>
-        <option value="3" ${cat==3?'selected':''}>3</option>
+        <option value="1" ${cat==1?'selected':''}>Кат.1 — ${fmt(RATES.pt[1])} сум</option>
+        <option value="2" ${cat==2?'selected':''}>Кат.2 — ${fmt(RATES.pt[2])} сум</option>
+        <option value="3" ${cat==3?'selected':''}>Кат.3 — ${fmt(RATES.pt[3])} сум</option>
       </select></div>
     <div class="form-group"><label>Возраст (лет)</label>
-      <input id="ec-age" type="number" min="1" max="99" value="${age}"></div>
+      <input id="ec-age" type="number" min="1" max="99" value="${age||''}"></div>
+    <div class="form-group"><label>Баланс ПТ (текущий: ${balance||0})</label>
+      <input id="ec-balance" type="number" min="0" value="${balance||0}">
+      <p class="hint" style="margin-top:4px">Изменение баланса не влияет на ЗП за прошлые ПТ</p></div>
     <div class="form-group"><label>Начало абонемента</label>
-      <input id="ec-sub-start" type="date" value="${subStart}"></div>
+      <input id="ec-sub-start" type="date" value="${subStart||''}"></div>
     <div class="form-group"><label>Конец абонемента</label>
-      <input id="ec-sub-end" type="date" value="${subEnd}"></div>
-    <button class="btn btn-primary btn-full" onclick="doEditClient('${clientId}')">Сохранить</button>
+      <input id="ec-sub-end" type="date" value="${subEnd||''}"></div>
+    <button class="btn btn-primary btn-full" onclick="doEditClient('${clientId}',${balance||0})">Сохранить</button>
   </div>`;
   document.body.appendChild(m);
 }
-async function doEditClient(clientId) {
-  const fio      = document.getElementById('ec-fio')?.value.trim();
-  const category = parseInt(document.getElementById('ec-cat')?.value)||1;
-  const age      = parseInt(document.getElementById('ec-age')?.value)||null;
-  const subStart = document.getElementById('ec-sub-start')?.value||null;
-  const subEnd   = document.getElementById('ec-sub-end')?.value||null;
+async function doEditClient(clientId, oldBalance) {
+  const fio       = document.getElementById('ec-fio')?.value.trim();
+  const category  = parseInt(document.getElementById('ec-cat')?.value)||1;
+  const age       = parseInt(document.getElementById('ec-age')?.value)||null;
+  const newBalance= parseInt(document.getElementById('ec-balance')?.value||'0');
+  const subStart  = document.getElementById('ec-sub-start')?.value||null;
+  const subEnd    = document.getElementById('ec-sub-end')?.value||null;
   if (!fio) return toast('Введите ФИО','error');
   try {
-    await DB.updateClient(clientId, {fio, category, age, subscription_start:subStart, subscription_end:subEnd});
+    const fields = {fio, category, age, subscription_start:subStart, subscription_end:subEnd};
+    // Если баланс изменился — обновляем напрямую
+    if (newBalance !== oldBalance) fields.balance = newBalance;
+    await DB.updateClient(clientId, fields);
     document.querySelector('.modal-overlay')?.remove();
     toast('✅ Данные сохранены','success');
     renderClientProfile(clientId, STATE.currentTab||'clients');
@@ -1604,7 +1693,7 @@ async function renderClientProfile(clientId, backTab='home') {
           ${!canEdit&&!isAdmin?'<div class="hint" style="margin-top:4px;font-size:11px">👁 Только просмотр</div>':''}
           <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
             ${canEditInfo?`<button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
-              onclick="renderEditClientModal('${clientId}','${encodeURIComponent(client.fio)}',${client.category},'${client.age||''}','${activeSub?.start_date||''}','${client.subscription_end||''}')">
+              onclick="renderEditClientModal('${clientId}','${encodeURIComponent(client.fio)}',${client.category},'${client.age||''}','${activeSub?.start_date||''}','${client.subscription_end||''}',${client.balance||0})">
               ✏️ Редактировать</button>`:''}
             ${canEdit&&(balanceZero||subExpired)?`<button class="btn btn-sm btn-primary"
               onclick="renderBuyPackageModal('${clientId}',${isChildClient},${client.balance||0})">
