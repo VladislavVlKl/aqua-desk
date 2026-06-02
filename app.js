@@ -44,6 +44,9 @@ function once(key, fn) {
 }
 
 // ── УТИЛИТЫ ──────────────────────────────────
+function isToday(dateStr) {
+  return new Date(dateStr).toDateString() === new Date().toDateString();
+}
 const $  = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 
@@ -1514,6 +1517,9 @@ async function loadTrainerReport(year,month) {
               <button class="btn btn-sm btn-danger" onclick="doAdminDeleteWorkout('${w.id}')">Удалить</button>`:
               (!w.is_debt&&(!w.session_notes?.accomplishments||canEdit(w.created_at))?`
               <button class="btn btn-sm btn-danger" onclick="doDeleteWorkout('${w.id}')">Удалить</button>`:'')}
+            ${isToday(w.workout_date)&&!w.is_debt?`
+              <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
+                onclick="renderEditWorkoutModal('${w.id}','${w.client_id}','${w.workout_date}',${w.category_at_moment})">✏️</button>`:''}
             <button class="btn btn-sm" onclick="renderClientProfile('${w.client_id}','report')" style="background:var(--card);border:1px solid var(--border)">
               👤 Профиль</button>
           </div>
@@ -1548,6 +1554,57 @@ async function doAdminDeleteWorkout(id) {
   if(!confirm('Удалить запись? (Без ограничений по времени)'))return;
   try{await DB.deleteWorkout(id);toast('Удалено','success');renderReportTab();}
   catch(e){toast('Ошибка','error');}
+}
+
+async function renderEditWorkoutModal(workoutId, clientId, workoutDate, category) {
+  const clients = await DB.getClients(STATE.profile.id);
+  const dateLocal = new Date(workoutDate).toISOString().slice(0,16);
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>✏️ Редактировать тренировку</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="form-group"><label>Клиент</label>
+      <select id="ew-client">
+        ${clients.map(c=>`<option value="${c.id}" ${c.id===clientId?'selected':''}>${c.fio} (кат.${c.category}, баланс:${c.balance})</option>`).join('')}
+      </select></div>
+    <div class="form-group"><label>Дата и время</label>
+      <input type="datetime-local" id="ew-date" value="${dateLocal}"></div>
+    <div class="form-group"><label>Категория</label>
+      <select id="ew-cat">
+        ${[1,2,3].map(n=>`<option value="${n}" ${n==category?'selected':''}>Кат.${n} — ${fmt(RATES.pt[n])} сум</option>`).join('')}
+      </select></div>
+    <p class="hint" style="margin-bottom:12px">Редактировать можно только тренировки текущего дня</p>
+    <button class="btn btn-primary btn-full" onclick="doEditWorkout('${workoutId}','${clientId}')">Сохранить</button>
+  </div>`;
+  document.body.appendChild(m);
+}
+async function doEditWorkout(workoutId, oldClientId) {
+  const newClientId = document.getElementById('ew-client')?.value;
+  const newDate     = document.getElementById('ew-date')?.value;
+  const newCat      = parseInt(document.getElementById('ew-cat')?.value||1);
+  if (!newDate) return toast('Укажите дату','error');
+  if (!isToday(newDate)) return toast('Можно редактировать только тренировки сегодняшнего дня','error');
+  if (_pending.has('editWorkout_'+workoutId)) return;
+  _pending.add('editWorkout_'+workoutId);
+  try {
+    const updates = {
+      workout_date: new Date(newDate).toISOString(),
+      category_at_moment: newCat,
+    };
+    // Если клиент изменился — нужно вернуть баланс старому и списать новому
+    if (newClientId !== oldClientId) {
+      updates.client_id = newClientId;
+      // Возвращаем баланс старому клиенту
+      await DB.addBalance(oldClientId, 1);
+      // Списываем у нового
+      await DB.addBalance(newClientId, -1);
+    }
+    await sb().from('workouts').update(updates).eq('id',workoutId);
+    document.querySelector('.modal-overlay')?.remove();
+    toast('✅ Тренировка обновлена','success');
+    renderReportTab();
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+  finally { _pending.delete('editWorkout_'+workoutId); }
 }
 
 async function doResolveSubstitute(workoutId, clientId, confirmed) {
@@ -2062,16 +2119,14 @@ async function renderSeniorApp() {
     <button class="nav-btn" onclick="seniorTab('home')"><span>🏠</span>Главная</button>
     <button class="nav-btn" onclick="seniorTab('clients')"><span>👥</span>Клиенты</button>
     <button class="nav-btn" onclick="seniorTab('today')"><span>✅</span>Сегодня</button>
-    <button class="nav-btn" onclick="seniorTab('schedule')"><span>📅</span>Расписание</button>
     <button class="nav-btn" onclick="seniorTab('report')"><span>📊</span>Отчёт</button>
-    <button class="nav-btn" onclick="seniorTab('events')"><span>🏆</span>События</button>
-    <button class="nav-btn" onclick="seniorTab('branch')"><span>🏢</span>Филиал</button>
     <button class="nav-btn" onclick="seniorTab('groups')"><span>🏊</span>Группы</button>
+    <button class="nav-btn" onclick="seniorTab('more')"><span>⋯</span>Ещё</button>
   </nav>`);
   seniorTab('home');
 }
 function seniorTab(tab) {
-  const tabs=['home','clients','today','schedule','report','events','branch','groups'];
+  const tabs=['home','clients','today','report','groups','more'];
   $$('.nav-btn').forEach((b,i)=>b.classList.toggle('active',tabs[i]===tab));
   if (tab==='home')     renderHomeTab();
   if (tab==='clients')  renderClientsTab();
@@ -2081,6 +2136,25 @@ function seniorTab(tab) {
   if (tab==='events')   renderEventsTab();
   if (tab==='branch')   renderBranchReport();
   if (tab==='groups')   renderSeniorGroups();
+  if (tab==='more')     renderSeniorMore();
+}
+
+function renderSeniorMore() {
+  $('#tab-content').innerHTML=`<div class="tab-pad">
+    <h3 style="margin-bottom:16px">Ещё</h3>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);text-align:left;padding:14px 16px;border-radius:12px"
+        onclick="seniorTab('schedule')">📅 Расписание</button>
+      <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);text-align:left;padding:14px 16px;border-radius:12px"
+        onclick="seniorTab('branch')">🏢 Отчёт филиала</button>
+      <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);text-align:left;padding:14px 16px;border-radius:12px"
+        onclick="seniorTab('events')">🏆 События</button>
+      <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);text-align:left;padding:14px 16px;border-radius:12px"
+        onclick="renderSubstitutionsApproval()">🔄 Замены</button>
+      <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);text-align:left;padding:14px 16px;border-radius:12px"
+        onclick="renderAdminSessionNotes()">📝 Конспекты и цели</button>
+    </div>
+  </div>`;
 }
 async function renderSeniorGroups() {
   const isSenior = STATE.profile.role === 'senior_trainer';
