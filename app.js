@@ -2622,12 +2622,11 @@ async function adminDetail(trainerId,fioEnc,year,month) {
         <button class="btn btn-sm" onclick="doExportTrainer(${trainerId},'${encodeURIComponent(fio)}',${year},${month})">⬇️ Excel</button>
       </div>
       <div class="summary-cards">
-        <div class="summary-card"><div class="s-val">${sal.cat[1]}</div><div class="s-lbl">Кат.1</div></div>
-        <div class="summary-card"><div class="s-val">${sal.cat[2]}</div><div class="s-lbl">Кат.2</div></div>
-        <div class="summary-card"><div class="s-val">${sal.cat[3]}</div><div class="s-lbl">Кат.3</div></div>
+        <div class="summary-card"><div class="s-val">${sal.cat[1]+sal.cat[2]+sal.cat[3]}</div><div class="s-lbl">ПТ</div></div>
         <div class="summary-card"><div class="s-val">${(sal.cat.dropIn1||0)+(sal.cat.dropIn2||0)+(sal.cat.dropIn3||0)}</div><div class="s-lbl">Разовые</div></div>
         <div class="summary-card"><div class="s-val">${sal.hours.toFixed(1)}ч</div><div class="s-lbl">Деж.</div></div>
-        <div class="summary-card accent" style="grid-column:span 2">
+        ${sal.adultSum+sal.childSum>0?`<div class="summary-card"><div class="s-val" style="font-size:13px">${fmt(sal.adultSum+sal.childSum)}</div><div class="s-lbl">Группы</div></div>`:''}
+        <div class="summary-card accent" style="grid-column:span ${sal.adultSum+sal.childSum>0?1:2}">
           <div class="s-val">${fmt(sal.total)}</div><div class="s-lbl">К выплате</div>
         </div>
       </div>
@@ -2643,7 +2642,8 @@ async function adminDetail(trainerId,fioEnc,year,month) {
         <button class="btn btn-sm btn-primary" style="margin-top:8px;width:100%"
           onclick="doSaveAdj(${trainerId},${year},${month})">Сохранить</button>
       </div>
-      <h4 style="margin-top:16px">Тренировки</h4>
+
+      <h4 style="margin-top:16px">Тренировки (${d.workouts.length})</h4>
       ${!d.workouts.length?'<p class="hint">Нет</p>':d.workouts.map(w=>`
         <div class="history-item">
           <div class="hi-main">
@@ -2654,7 +2654,22 @@ async function adminDetail(trainerId,fioEnc,year,month) {
           </div>
           <div class="hi-sub">${fmtDT(w.workout_date)} · ${w.branch}</div>
         </div>`).join('')}
-      <h4 style="margin-top:16px">Дежурства</h4>
+
+      ${d.groupSessions.length?`
+        <h4 style="margin-top:16px">Групповые занятия (${d.groupSessions.length})</h4>
+        ${d.groupSessions.map(gs=>{
+          const rate = gs.group_types?.billing_model==='headcount' ? getAdultGroupRate(gs.headcount) : 0;
+          return `<div class="history-item">
+            <div class="hi-main">
+              <span class="hi-client">${gs.group_types?.name||'Группа'}</span>
+              ${rate>0?`<span class="hi-cat" style="background:rgba(16,185,129,.15);color:#10b981">${fmt(rate)} сум</span>`:''}
+              ${gs.headcount?`<span class="hint">${gs.headcount} чел.</span>`:''}
+            </div>
+            <div class="hi-sub">${fmtDate(gs.session_date)}</div>
+          </div>`;
+        }).join('')}`:''}
+
+      <h4 style="margin-top:16px">Дежурства (${d.duties.length})</h4>
       ${!d.duties.length?'<p class="hint">Нет</p>':d.duties.map(duty=>{
         const h=hoursFromDuty(duty.start_time,duty.end_time);
         return `<div class="history-item">
@@ -2664,6 +2679,19 @@ async function adminDetail(trainerId,fioEnc,year,month) {
           <div class="hi-sub">${fmt(Math.round(h*RATES.duty_per_hour))} сум</div>
         </div>`;
       }).join('')}
+
+      <h4 style="margin-top:16px">Конспекты (${(d.sessionNotes||[]).length})</h4>
+      ${!(d.sessionNotes||[]).length?'<p class="hint">Нет конспектов за этот период</p>':
+        (d.sessionNotes||[]).map(n=>`
+          <div class="history-item">
+            <div class="hi-main">
+              <span class="hi-client">${n.clients?.fio||'—'}</span>
+              ${n.workouts?.category_at_moment?`<span class="hi-cat cat-${n.workouts.category_at_moment}">Кат.${n.workouts.category_at_moment}</span>`:''}
+            </div>
+            ${n.workouts?.workout_date?`<div class="hi-sub">Тренировка: ${fmtDate(n.workouts.workout_date)}</div>`:''}
+            ${n.accomplishments?`<div style="margin-top:6px;font-size:13px"><b>Что делали:</b> ${n.accomplishments}</div>`:''}
+            ${n.next_task?`<div style="font-size:13px;color:var(--hint)"><b>Задача:</b> ${n.next_task}</div>`:''}
+          </div>`).join('')}
     </div>`;
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
