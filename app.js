@@ -1823,14 +1823,18 @@ function togglePastSub(id) {
 }
 
 function renderSessionsList(workouts, activeSubId, clientId, canEdit=true) {
-  if (!workouts.length) return '<p class="hint">Нет тренировок</p>';
-  return workouts.map((w,i)=>{
-    const note=w.session_notes;
-    const hasNote=note?.accomplishments;
-    const isOverdue=!hasNote&&(Date.now()-new Date(w.workout_date))>48*3600000;
+  // Фильтруем: конспекты нужны только для обычных ПТ (не разовые, не долг без подтверждения)
+  const ptWorkouts = workouts.filter(w => !w.is_drop_in && (!w.is_debt || w.debt_confirmed_at));
+  if (!ptWorkouts.length) return '<p class="hint">Нет тренировок по абонементу</p>';
+  return ptWorkouts.map((w,i)=>{
+    const note = w.session_notes;
+    const hasNote = note?.accomplishments;
+    const ageMs = Date.now() - new Date(w.workout_date).getTime();
+    const isOverdue = !hasNote && ageMs > 48*3600000;
+    const canWriteNote = canEdit && ageMs < 30*24*3600000; // можно писать в течение 30 дней
     return `<div class="session-item ${isOverdue?'overdue-session':''}">
       <div class="si-header">
-        <span class="si-num">№${workouts.length-i}</span>
+        <span class="si-num">№${ptWorkouts.length-i}</span>
         <span class="si-date">${fmtDate(w.workout_date)}</span>
         <span class="si-cat cat-${w.category_at_moment}">Кат.${w.category_at_moment}</span>
         ${isOverdue&&canEdit?'<span class="overdue-badge">⛔ Нет конспекта</span>':''}
@@ -1838,10 +1842,12 @@ function renderSessionsList(workouts, activeSubId, clientId, canEdit=true) {
       ${hasNote?`<div class="note-block">
           <div class="note-label">✅ ${note.accomplishments}</div>
           ${note.next_task?`<div class="note-next">→ ${note.next_task}</div>`:''}
+          ${canWriteNote?`<button class="btn btn-sm" style="font-size:11px;margin-top:4px"
+            onclick="renderSessionNoteModal('${w.id}','${clientId}')">✏️ Изменить</button>`:''}
         </div>`
-      : canEdit ? `<button class="btn btn-sm" style="margin-top:6px"
+      : canWriteNote ? `<button class="btn btn-sm" style="margin-top:6px"
           onclick="renderSessionNoteModal('${w.id}','${clientId}')">
-          ${isOverdue?'⛔ Написать (просрочено)':'Написать конспект'}</button>`
+          ${isOverdue?'⛔ Написать (просрочено)':'📝 Написать конспект'}</button>`
       : '<p class="hint" style="font-size:12px;margin-top:4px">Конспект не написан</p>'}
     </div>`;
   }).join('');
@@ -2030,9 +2036,13 @@ function seniorTab(tab) {
 async function renderSeniorGroups() {
   const isSenior = STATE.profile.role === 'senior_trainer';
   const branches = STATE.profile.branches||[];
+  const monthStr = new Date().toISOString().slice(0,7)+'-01';
   $('#tab-content').innerHTML=`<div class="tab-pad">
     <div class="section-header"><h3>Группы</h3>
-      ${isSenior?`<button class="btn btn-sm" onclick="renderSubstitutionsApproval()">🔄 Замены</button>`:''}
+      <div style="display:flex;gap:6px">
+        ${isSenior?`<button class="btn btn-sm" onclick="renderSubstitutionsApproval()">🔄 Замены</button>`:''}
+        ${isSenior?`<button class="btn btn-sm btn-primary" onclick="renderSeniorPayoutsModal('${monthStr}')">💰 Ставки</button>`:''}
+      </div>
     </div>
     ${isSenior?'<div id="pending-subs"></div>':''}
     <h4 style="margin-bottom:8px">Мои группы</h4>
@@ -2044,7 +2054,45 @@ async function renderSeniorGroups() {
   if (isSenior) {
     await renderPendingSubstitutions();
     await renderSeniorAssignForm();
+    // Загружаем доп.доступ и показываем группы других филиалов
+    await loadExtraBranchGroups();
   }
+}
+
+async function loadExtraBranchGroups() {
+  try {
+    const extraBranches = await DB.getBranchAccess(STATE.profile.id);
+    if (!extraBranches.length) return;
+    const body = document.getElementById('tab-content');
+    const existingExtra = document.getElementById('extra-branch-groups');
+    if (existingExtra) existingExtra.remove();
+    const div = el('div','');
+    div.id = 'extra-branch-groups';
+    div.style.cssText = 'padding:0 16px 16px';
+    div.innerHTML = `<h4 style="margin-bottom:8px">Дополнительные филиалы</h4>`;
+    for (const branch of extraBranches) {
+      const {data:tgs} = await sb().from('trainer_groups')
+        .select('*, group_types(name,type), profiles(fio)')
+        .eq('branch',branch).is('subscription_end',null);
+      const monthStr = new Date().toISOString().slice(0,7)+'-01';
+      div.innerHTML += `<div style="margin-bottom:12px">
+        <div style="font-weight:600;font-size:13px;color:var(--hint);margin-bottom:6px">${branch}</div>
+        ${(tgs||[]).map(tg=>`<div class="staff-card" style="flex-direction:column;align-items:flex-start;gap:6px">
+          <div style="display:flex;justify-content:space-between;width:100%">
+            <div>
+              <div class="staff-fio">${tg.group_types?.name||'Группа'}</div>
+              <div class="staff-meta">${tg.profiles?.fio||'—'}</div>
+            </div>
+            <div style="display:flex;gap:6px">
+              ${tg.group_types?.type==='children'?`<button class="btn btn-sm btn-primary"
+                onclick="renderGroupMonthReport('${tg.id}','${monthStr}')">📊 Отчёт</button>`:''}
+            </div>
+          </div>
+        </div>`).join('')||'<p class="hint">Нет групп</p>'}
+      </div>`;
+    }
+    body.querySelector('.tab-pad')?.appendChild(div);
+  } catch(e) { console.error(e); }
 }
 
 async function renderSeniorAssignForm() {
@@ -2200,8 +2248,12 @@ async function renderGroupDetail(groupId) {
       <div class="section-header"><h3>Состав группы</h3>
         <button class="btn btn-sm" onclick="renderAddGroupClientModal('${groupId}')">+ Ребёнок</button>
       </div>
-      <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);margin-bottom:16px"
-        onclick="renderGroupAttendance('${groupId}')">✅ Отметить посещаемость</button>
+      <div style="display:flex;gap:8px;margin-bottom:16px">
+        <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);flex:1"
+          onclick="renderGroupAttendance('${groupId}')">✅ Отметить посещаемость</button>
+        <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
+          onclick="renderGroupAttendanceByDate('${groupId}')">📅 За другую дату</button>
+      </div>
       ${!clients.length?'<p class="hint">Детей пока нет</p>':
         clients.map(c=>{
           const pay = paidMap[c.id];
@@ -2233,6 +2285,9 @@ async function renderGroupDetail(groupId) {
               <button class="btn btn-sm" style="font-size:11px"
                 onclick="renderGroupNoteModal('${groupId}','${c.id}','${encodeURIComponent(c.name)}','${month}','${encodeURIComponent(note?.note||'')}')">
                 📝 ${note?.note?'Заметка':'+ Заметка'}</button>
+              <button class="btn btn-sm" style="font-size:11px;background:var(--card);border:1px solid var(--border)"
+                onclick="renderEditGroupClientModal('${c.id}','${encodeURIComponent(c.name)}',${c.age||0},${c.monthly_price||0},'${groupId}')">
+                ✏️</button>
               <button class="btn btn-sm btn-danger" style="font-size:11px"
                 onclick="archiveGroupClientConfirm('${c.id}','${encodeURIComponent(c.name)}')">
                 Архив</button>
@@ -2731,8 +2786,10 @@ async function loadStaffList() {
           <div class="staff-fio">${t.fio}</div>
           <div class="staff-meta">${ROLE_LBL[t.role]||t.role} · ${t.tg_id?'✅ В системе':'⏳ Не входил'} · ${(t.branches||[]).join(', ')||'—'}</div>
         </div>
-        <div style="display:flex;gap:6px">
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
           <button class="btn btn-sm" onclick="renderEditTrainerModal(${t.id},'${encodeURIComponent(t.fio)}','${(t.branches||[]).join(',')}','${t.role}')">✏️</button>
+          ${t.role==='senior_trainer'?`<button class="btn btn-sm" style="background:rgba(124,58,237,.15);color:#a78bfa"
+            onclick="renderBranchAccessModal(${t.id},'${encodeURIComponent(t.fio)}')">🔑</button>`:''}
           <button class="btn btn-sm" style="background:rgba(245,158,11,.15);color:#f59e0b"
             onclick="doArchiveTrainer(${t.id},'${encodeURIComponent(t.fio)}')">📦</button>
           <button class="btn btn-sm btn-danger"
@@ -2948,6 +3005,36 @@ async function doArchiveClient(id, fioEnc) {
     switchTab(STATE.currentTab||'clients');
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
+async function renderBranchAccessModal(trainerId, fioEnc) {
+  const fio = decodeURIComponent(fioEnc);
+  const [allBranches, currentAccess] = await Promise.all([
+    cached('branches',()=>DB.getBranches()),
+    DB.getBranchAccess(trainerId),
+  ]);
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>🔑 Субпанель — ${fio}</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <p class="hint" style="margin-bottom:12px">Выберите филиалы к которым тренер получит доступ к группам и отчётам (дополнительно к своим)</p>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px">
+      ${allBranches.map(b=>`<label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer">
+        <input type="checkbox" class="ba-cb" value="${b.name}" ${currentAccess.includes(b.name)?'checked':''} style="width:18px;height:18px">
+        ${b.name}
+      </label>`).join('')}
+    </div>
+    <button class="btn btn-primary btn-full" onclick="doSaveBranchAccess(${trainerId})">Сохранить</button>
+  </div>`;
+  document.body.appendChild(m);
+}
+async function doSaveBranchAccess(trainerId) {
+  const selected = [...document.querySelectorAll('.ba-cb:checked')].map(cb=>cb.value);
+  try {
+    await DB.setBranchAccess(trainerId, selected);
+    document.querySelector('.modal-overlay')?.remove();
+    toast(selected.length?`✅ Доступ к ${selected.length} филиал(ам) выдан`:'Доп. доступ убран','success');
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+
 async function doArchiveTrainer(id, fioEnc) {
   const fio = decodeURIComponent(fioEnc);
   const m = el('div','modal-overlay');
@@ -3410,6 +3497,73 @@ async function doApproveGroupPayout(groupId, trainerId, monthStr) {
     renderGroupMonthReport(groupId, monthStr);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
   finally { _pending.delete(`payout_${groupId}_${trainerId}`); }
+}
+
+// ── СТАВКИ ЗП ПО ГРУППАМ ─────────────────────────────────────
+async function renderSeniorPayoutsModal(monthStr) {
+  const branches = STATE.profile.branches||[];
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>💰 Ставки за ${new Date(monthStr).toLocaleDateString('ru-RU',{month:'long',year:'numeric'})}</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div id="payouts-body"><div class="center-screen"><div class="spinner"></div></div></div>
+  </div>`;
+  document.body.appendChild(m);
+
+  try {
+    // Загружаем все группы в моих филиалах
+    const {data:tgs} = await sb().from('trainer_groups')
+      .select('*, group_types(name,type), profiles(fio)')
+      .in('branch', branches).is('subscription_end',null);
+
+    const {data:existing} = await sb().from('group_trainer_payouts')
+      .select('*').eq('month',monthStr)
+      .in('group_id', (tgs||[]).map(t=>t.id));
+
+    const payoutMap = {};
+    (existing||[]).forEach(p=>{ payoutMap[`${p.group_id}_${p.trainer_id}`]=p; });
+
+    const body = document.getElementById('payouts-body');
+    if (!tgs?.length) { body.innerHTML='<p class="hint">Нет групп</p>'; return; }
+
+    body.innerHTML = (tgs||[]).map(tg=>{
+      const key = `${tg.id}_${tg.trainer_id}`;
+      const ex  = payoutMap[key];
+      return `<div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px">
+        <div style="font-weight:600">${tg.group_types?.name||'Группа'}</div>
+        <div style="font-size:12px;color:var(--hint);margin-bottom:8px">${tg.profiles?.fio||'—'} · ${tg.branch}</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select id="pt-type-${tg.id}" style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text);font-size:13px">
+            <option value="fixed" ${ex?.payout_type==='fixed'?'selected':''}>Фикс. сумма</option>
+            <option value="percent" ${ex?.payout_type==='percent'?'selected':''}>Процент (%)</option>
+          </select>
+          <input id="pt-val-${tg.id}" type="number" value="${ex?.payout_value||''}" placeholder="Сумма или %"
+            style="width:120px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text);font-size:13px">
+          <button class="btn btn-sm btn-primary"
+            onclick="doSeniorPayout('${tg.id}','${tg.trainer_id}','${monthStr}')">
+            ${ex?'✓ Обновить':'Утвердить'}</button>
+        </div>
+        ${ex?`<div style="font-size:11px;color:var(--success);margin-top:4px">
+          ✓ Утверждено: ${ex.payout_type==='fixed'?fmt(ex.payout_value)+' сум':ex.payout_value+'%'}</div>`:''}
+      </div>`;
+    }).join('');
+  } catch(e) { document.getElementById('payouts-body').innerHTML='<p class="hint">Ошибка</p>'; console.error(e); }
+}
+
+async function doSeniorPayout(groupId, trainerId, monthStr) {
+  if (_pending.has(`sp_${groupId}`)) return;
+  _pending.add(`sp_${groupId}`);
+  const type = document.getElementById(`pt-type-${groupId}`)?.value||'fixed';
+  const val  = parseFloat(document.getElementById(`pt-val-${groupId}`)?.value||0);
+  if (!val) { _pending.delete(`sp_${groupId}`); return toast('Введите сумму или %','error'); }
+  try {
+    await DB.setGroupTrainerPayout(parseInt(groupId), parseInt(trainerId), monthStr, type, val, STATE.profile.id);
+    toast('✅ Ставка сохранена','success');
+    // Обновляем индикатор
+    const btn = document.querySelector(`button[onclick*="doSeniorPayout('${groupId}'"]`);
+    if (btn) btn.textContent='✓ Обновить';
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+  finally { _pending.delete(`sp_${groupId}`); }
 }
 
 // ── УТВЕРЖДЕНИЕ ЗАМЕН ─────────────────────────────────────────
@@ -4363,10 +4517,22 @@ async function doApproveSubstitution(id) {
 async function renderAdultGroupDetail(groupId) {
   loading('Загрузка...');
   try {
-    const clients = await DB.getAdultGroupClients(groupId);
+    const {data:tgInfo} = await sb().from('trainer_groups')
+      .select('branch,group_type_id,group_types(name)').eq('id',groupId).single();
+    const now = new Date();
+    const fromDay = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
+    const toDay   = new Date(now.getFullYear(),now.getMonth()+1,1).toISOString().slice(0,10);
+    const [clients, sessions] = await Promise.all([
+      DB.getAdultGroupClients(groupId),
+      sb().from('group_sessions').select('*')
+        .eq('group_type_id', tgInfo?.group_type_id||0)
+        .eq('branch', tgInfo?.branch||'')
+        .gte('session_date',fromDay).lt('session_date',toDay)
+        .order('session_date',{ascending:false}).then(r=>r.data||[]),
+    ]);
     setScreen(`<div class="app-header">
       <button class="btn-icon" onclick="STATE.profile.role==='trainer'?renderTrainerApp():renderSeniorApp()">←</button>
-      <div class="app-title">Группа (взрослые)</div><div></div></div>
+      <div class="app-title">${tgInfo?.group_types?.name||'Группа'}</div><div></div></div>
     <div class="tab-content"><div class="tab-pad">
       <div class="section-header"><h3>Участники</h3>
         <button class="btn btn-sm" onclick="renderAddAdultGroupClientModal('${groupId}')">+ Участник</button>
@@ -4378,6 +4544,26 @@ async function renderAdultGroupDetail(groupId) {
           <span>${c.name}</span>
           <button class="btn btn-sm btn-danger" onclick="archiveAdultClient('${c.id}','${groupId}')">✕</button>
         </div>`).join('')}
+
+      <div class="section-header" style="margin-top:20px"><h4>Занятия за месяц</h4>
+        <button class="btn btn-sm" onclick="renderAddManualGroupSession('${groupId}')">+ Добавить</button>
+      </div>
+      ${!sessions.length?'<p class="hint">Нет занятий</p>':sessions.map(s=>{
+        const rate = getAdultGroupRate(s.headcount);
+        return `<div class="history-item">
+          <div class="hi-main">
+            <span class="hi-client">${fmtDate(s.session_date)}</span>
+            <span class="hi-cat" style="background:rgba(16,185,129,.15);color:#10b981">${fmt(rate)} сум</span>
+            <span class="hint">${s.headcount} чел.</span>
+          </div>
+          <div style="display:flex;gap:6px;margin-top:4px">
+            <button class="btn btn-sm" style="font-size:11px;background:var(--card);border:1px solid var(--border)"
+              onclick="renderEditGroupSession('${s.id}','${s.session_date}',${s.headcount},'${groupId}')">✏️</button>
+            <button class="btn btn-sm btn-danger" style="font-size:11px"
+              onclick="doDeleteGroupSession('${s.id}','${groupId}')">🗑</button>
+          </div>
+        </div>`;
+      }).join('')}
     </div></div>`);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
@@ -4402,6 +4588,145 @@ async function doAddAdultGroupClient(groupId) {
     renderAdultGroupDetail(groupId);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
+// ── РЕДАКЦИЯ ГРУПП ────────────────────────────────────────────
+
+// Редактировать ребёнка (имя, возраст, цена)
+function renderEditGroupClientModal(clientId, nameEnc, age, price, groupId) {
+  const name = decodeURIComponent(nameEnc);
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>Редактировать ребёнка</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="form-group"><label>Имя</label>
+      <input id="egc-name" value="${name}"></div>
+    <div class="form-group"><label>Возраст</label>
+      <input id="egc-age" type="number" min="3" max="18" value="${age||''}"></div>
+    <div class="form-group"><label>Стоимость (сум/мес)</label>
+      <input id="egc-price" type="number" value="${price||0}"></div>
+    <button class="btn btn-primary btn-full" onclick="doEditGroupClient('${clientId}','${groupId}')">Сохранить</button>
+  </div>`;
+  document.body.appendChild(m);
+}
+async function doEditGroupClient(clientId, groupId) {
+  const name  = document.getElementById('egc-name')?.value.trim();
+  const age   = parseInt(document.getElementById('egc-age')?.value)||null;
+  const price = parseInt(document.getElementById('egc-price')?.value)||0;
+  if (!name) return toast('Введите имя','error');
+  try {
+    await DB.updateGroupClient(clientId, {name, age, monthly_price:price});
+    document.querySelector('.modal-overlay')?.remove();
+    toast('✅ Сохранено','success');
+    renderGroupDetail(groupId);
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+
+// Посещаемость за другую дату
+async function renderGroupAttendanceByDate(groupId) {
+  const clients = await DB.getGroupClients(groupId);
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>Посещаемость за дату</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="form-group"><label>Дата</label>
+      <input type="date" id="att-date" value="${todayStr()}" onchange="loadAttendanceForDate('${groupId}',this.value)"></div>
+    <div id="att-list">
+      ${clients.map(c=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)">
+        <span>${c.name}</span>
+        <input type="checkbox" id="att-${c.id}" style="width:20px;height:20px">
+      </div>`).join('')}
+    </div>
+    <button class="btn btn-primary btn-full" style="margin-top:12px"
+      onclick="saveAttendanceByDate('${groupId}')">Сохранить</button>
+  </div>`;
+  document.body.appendChild(m);
+  await loadAttendanceForDate(groupId, todayStr());
+}
+async function loadAttendanceForDate(groupId, date) {
+  try {
+    const existing = await DB.getGroupAttendance(groupId, date);
+    const attMap = Object.fromEntries(existing.map(a=>[a.group_client_id, a.attended]));
+    const clients = await DB.getGroupClients(groupId);
+    clients.forEach(c=>{
+      const cb = document.getElementById(`att-${c.id}`);
+      if (cb) cb.checked = attMap[c.id]||false;
+    });
+  } catch(e) { console.error(e); }
+}
+async function saveAttendanceByDate(groupId) {
+  const date = document.getElementById('att-date')?.value;
+  if (!date) return toast('Выберите дату','error');
+  const clients = await DB.getGroupClients(groupId);
+  try {
+    await Promise.all(clients.map(c=>
+      DB.saveGroupAttendance(groupId, c.id, date, document.getElementById(`att-${c.id}`)?.checked||false)
+    ));
+    document.querySelector('.modal-overlay')?.remove();
+    toast('✅ Посещаемость сохранена','success');
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+
+// Добавить занятие взрослой группы вручную (за прошедшую дату)
+function renderAddManualGroupSession(groupId) {
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>Добавить занятие</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="form-group"><label>Дата</label>
+      <input type="date" id="mgs-date" value="${todayStr()}"></div>
+    <div class="form-group"><label>Явка (кол-во человек)</label>
+      <input type="number" id="mgs-count" min="1" placeholder="0"></div>
+    <button class="btn btn-primary btn-full" onclick="doAddManualGroupSession('${groupId}')">Добавить</button>
+  </div>`;
+  document.body.appendChild(m);
+}
+async function doAddManualGroupSession(groupId) {
+  const date = document.getElementById('mgs-date')?.value;
+  const headcount = parseInt(document.getElementById('mgs-count')?.value||0);
+  if (!date || !headcount) return toast('Заполните дату и явку','error');
+  try {
+    const {data:tg} = await sb().from('trainer_groups')
+      .select('branch,group_type_id').eq('id',groupId).single();
+    await DB.logGroupSession(STATE.profile.id, tg?.group_type_id, tg?.branch||'', date, headcount);
+    document.querySelector('.modal-overlay')?.remove();
+    toast('✅ Занятие добавлено','success');
+    renderAdultGroupDetail(groupId);
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+
+// Редактировать занятие взрослой группы
+function renderEditGroupSession(sessionId, date, headcount, groupId) {
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>Редактировать занятие</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="form-group"><label>Дата</label>
+      <input type="date" id="egs-date" value="${date}"></div>
+    <div class="form-group"><label>Явка (чел.)</label>
+      <input type="number" id="egs-count" value="${headcount}" min="1"></div>
+    <button class="btn btn-primary btn-full" onclick="doEditGroupSession('${sessionId}','${groupId}')">Сохранить</button>
+  </div>`;
+  document.body.appendChild(m);
+}
+async function doEditGroupSession(sessionId, groupId) {
+  const date      = document.getElementById('egs-date')?.value;
+  const headcount = parseInt(document.getElementById('egs-count')?.value||0);
+  if (!date || !headcount) return toast('Заполните поля','error');
+  try {
+    await sb().from('group_sessions').update({session_date:date, headcount}).eq('id',sessionId);
+    document.querySelector('.modal-overlay')?.remove();
+    toast('✅ Обновлено','success');
+    renderAdultGroupDetail(groupId);
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+async function doDeleteGroupSession(sessionId, groupId) {
+  if (!confirm('Удалить занятие?')) return;
+  try {
+    await sb().from('group_sessions').delete().eq('id',sessionId);
+    toast('Удалено','success');
+    renderAdultGroupDetail(groupId);
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+
 async function archiveAdultClient(id, groupId) {
   if (!confirm('Удалить участника?')) return;
   try {
