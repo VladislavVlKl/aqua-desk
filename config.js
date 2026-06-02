@@ -97,6 +97,7 @@ const SUB_PACKAGES = {
   adult: [
     {qty:5,  label:'5 ПТ',  period:'2 недели'},
     {qty:10, label:'10 ПТ', period:'1 месяц'},
+    {qty:25, label:'25 ПТ', period:'3 месяца'},
   ],
 };
 
