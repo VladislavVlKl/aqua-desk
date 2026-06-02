@@ -4399,129 +4399,214 @@ async function deleteTechItem(type, id) {
     toast('Удалено','success'); loadTechSection();
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
-    // ── СЕО ПАНЕЛЬ ───────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
+// СЕО ПАНЕЛЬ
+// ══════════════════════════════════════════════════════════════
 
 async function renderCeoApp() {
   setupBack(null);
   setScreen(`
     <div class="app-header">
-      <div><div class="app-title">👑 AquaDesk</div>
-        <div class="app-sub">${STATE.profile.fio}</div>
-        <div style="font-size:9px;opacity:.6;letter-spacing:1px">ТОП-МЕНЕДЖМЕНТ</div></div>
+      <div>
+        <div class="app-title">👑 AquaDesk</div>
+        <div class="app-sub">${STATE.profile.fio} · Топ-менеджмент</div>
+      </div>
     </div>
     <div id="tab-content" class="tab-content"></div>
     <nav class="bottom-nav">
-      <button class="nav-btn" onclick="ceoTab('summary')"><span>📊</span>Сводка</button>
+      <button class="nav-btn" onclick="ceoTab('dashboard')"><span>📊</span>Дашборд</button>
+      <button class="nav-btn" onclick="ceoTab('salary')"><span>💰</span>ЗП</button>
       <button class="nav-btn" onclick="ceoTab('groups')"><span>🏊</span>Группы</button>
-      <button class="nav-btn" onclick="ceoTab('tech')"><span>🔧</span>Техника</button>
-      <button class="nav-btn" onclick="ceoTab('nps')"><span>⭐</span>НПС</button>
+      <button class="nav-btn" onclick="ceoTab('ops')"><span>⚙️</span>Операционка</button>
+      <button class="nav-btn" onclick="ceoTab('plans')"><span>📋</span>Планы</button>
     </nav>`);
-  ceoTab('summary');
+  ceoTab('dashboard');
 }
 
 function ceoTab(tab) {
-  const tabs = ['summary','groups','tech','nps'];
+  const tabs = ['dashboard','salary','groups','ops','plans'];
   $$('.nav-btn').forEach((b,i)=>b.classList.toggle('active',tabs[i]===tab));
-  if (tab==='summary') renderCeoSummary();
-  if (tab==='groups')  renderCeoGroups();
-  if (tab==='tech')    renderCeoTech();
-  if (tab==='nps')     renderCeoNps();
+  if (tab==='dashboard') renderCeoDashboard();
+  if (tab==='salary')    renderCeoSalary();
+  if (tab==='groups')    renderCeoGroups();
+  if (tab==='ops')       renderCeoOps();
+  if (tab==='plans')     renderCeoPlans();
 }
 
-// ── СВОДКА ПТ ────────────────────────────────
-async function renderCeoSummary() {
+// ── ДАШБОРД — главный экран ────────────────────────────────────
+async function renderCeoDashboard() {
+  const now = new Date();
+  const year = now.getFullYear(), month = now.getMonth()+1;
   $('#tab-content').innerHTML=`<div class="tab-pad">
-    <div class="section-header"><h3>Сводка</h3>
-      <div class="month-nav">
-        <button id="ceo-prev">‹</button>
-        <span id="ceo-month"></span>
-        <button id="ceo-next">›</button>
-      </div>
+    <div class="section-header"><h3>Дашборд</h3>
+      <span class="hint">${fmtMY(year,month)}</span>
     </div>
-    <div id="ceo-summary-body"><div class="center-screen"><div class="spinner"></div></div></div>
+    <div id="ceo-dash-body"><div class="center-screen"><div class="spinner"></div></div></div>
   </div>`;
+  try {
+    const [summaryData, allClients, issues, bills, chlorine, plans] = await Promise.all([
+      DB.getSummary(year, month, null),
+      DB.getAllClients(),
+      DB.getTechIssues(''),
+      DB.getTechBills(''),
+      sb().from('chlorine_orders').select('quantity_kg,price_total').then(r=>r.data||[]),
+      sb().from('ops_plans').select('*').neq('status','cancelled').then(r=>r.data||[]),
+    ]);
 
+    // Финансы
+    const {groupPayouts=[],groupSubstitutions=[],ptSubstitutions=[]} = summaryData;
+    const adjMap={}; (summaryData.adjustments||[]).forEach(a=>{adjMap[a.trainer_id]=a;});
+    const totalFot = (summaryData.profiles||[]).reduce((s,p)=>{
+      return s + calcSalary({
+        workouts:[...(summaryData.workouts||[]).filter(w=>w.trainer_id===p.id),
+                  ...(ptSubstitutions||[]).filter(w=>w.trainer_id===p.id)],
+        duties:(summaryData.duties||[]).filter(d=>d.trainer_id===p.id),
+        trainerGroups:(summaryData.trainerGroups||[]).filter(tg=>tg.trainer_id===p.id),
+        groupSessions:(summaryData.groupSessions||[]).filter(gs=>gs.trainer_id===p.id),
+        adjustment:adjMap[p.id]||null,
+        groupPayouts:groupPayouts.filter(gp=>gp.trainer_id===p.id),
+        groupSubstitutions, trainerId:p.id,
+      }).total;
+    },0);
+
+    // Клиенты
+    const activeClients  = allClients.filter(c=>c.balance>0).length;
+    const expiredClients = allClients.filter(c=>c.subscription_end && c.subscription_end < todayStr()).length;
+    const totalPT = (summaryData.workouts||[]).filter(w=>!w.is_drop_in&&(!w.is_debt||w.debt_confirmed_at)).length;
+
+    // Операционка
+    const urgentIssues  = (issues||[]).filter(i=>i.priority==='urgent'||i.priority==='high');
+    const unpaidBills   = (bills||[]).filter(b=>!b.paid);
+    const unpaidSum     = unpaidBills.reduce((s,b)=>s+Number(b.amount),0);
+    const activePlans   = (plans||[]).filter(p=>p.status==='active');
+
+    // По филиалам
+    const branches = (await cached('branches',()=>DB.getBranches())).map(b=>b.name);
+
+    document.getElementById('ceo-dash-body').innerHTML=`
+      <!-- Ключевые метрики -->
+      <div class="summary-cards" style="margin-bottom:20px">
+        <div class="summary-card"><div class="s-val">${allClients.length}</div><div class="s-lbl">Клиентов</div></div>
+        <div class="summary-card"><div class="s-val" style="color:var(--success)">${activeClients}</div><div class="s-lbl">Активных</div></div>
+        <div class="summary-card"><div class="s-val" style="color:var(--danger)">${expiredClients}</div><div class="s-lbl">Истёк абон.</div></div>
+        <div class="summary-card"><div class="s-val">${totalPT}</div><div class="s-lbl">ПТ за месяц</div></div>
+        <div class="summary-card accent" style="grid-column:span 2">
+          <div class="s-val">${fmt(Math.round(totalFot))}</div>
+          <div class="s-lbl">ФОТ за месяц (сум)</div>
+        </div>
+      </div>
+
+      <!-- Алерты -->
+      ${urgentIssues.length?`<div class="warn-banner" style="background:rgba(239,68,68,.1);border-color:rgba(239,68,68,.3);margin-bottom:12px">
+        🔴 <b>${urgentIssues.length} срочных поломок:</b> ${urgentIssues.slice(0,3).map(i=>i.description||i.title).join(', ')}
+      </div>`:''}
+      ${unpaidSum>0?`<div class="warn-banner" style="margin-bottom:12px">
+        💳 <b>Неоплачено счетов:</b> ${fmt(Math.round(unpaidSum))} сум (${unpaidBills.length} шт)
+      </div>`:''}
+
+      <!-- По филиалам -->
+      <h4 style="margin-bottom:10px">По филиалам</h4>
+      ${branches.map(branch=>{
+        const bW = (summaryData.workouts||[]).filter(w=>w.branch===branch);
+        const bPT = bW.filter(w=>!w.is_drop_in&&(!w.is_debt||w.debt_confirmed_at)).length;
+        const bClients = allClients.filter(c=>(c.profiles?.branches||[]).includes(branch)||c._trainerBranches?.includes(branch)).length;
+        return `<div class="staff-card" style="flex-direction:column;gap:6px;margin-bottom:8px">
+          <div style="font-weight:700;font-size:14px">${branch}</div>
+          <div style="display:flex;gap:16px;font-size:13px">
+            <span>🏊 ${bPT} ПТ</span>
+            <span>👥 ${bClients} клиентов</span>
+          </div>
+        </div>`;
+      }).join('')}
+
+      <!-- Активные планы -->
+      ${activePlans.length?`
+        <h4 style="margin-top:16px;margin-bottom:8px">📋 Активные планы (${activePlans.length})</h4>
+        ${activePlans.slice(0,5).map(p=>{
+          const pt = PLAN_TYPES[p.plan_type]||{icon:'📌',label:p.plan_type,textColor:'var(--hint)'};
+          return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">
+            <span style="font-size:13px">${pt.icon} ${p.title}</span>
+            <span style="font-size:11px;color:var(--hint)">${p.due_date?fmtDate(p.due_date):''}</span>
+          </div>`;
+        }).join('')}
+        ${activePlans.length>5?`<button class="btn btn-sm" style="margin-top:8px;width:100%;background:var(--card);border:1px solid var(--border)"
+          onclick="ceoTab('plans')">Все планы →</button>`:''}`:''}
+    `;
+  } catch(e) { document.getElementById('ceo-dash-body').innerHTML='<p class="hint">Ошибка загрузки</p>'; console.error(e); }
+}
+
+// ── ЗП ────────────────────────────────────────
+async function renderCeoSalary() {
   const now = new Date();
   let year = now.getFullYear(), month = now.getMonth()+1;
 
-  const render = async () => {
-    document.getElementById('ceo-month').textContent = fmtMY(year,month);
-    const body = document.getElementById('ceo-summary-body');
-    if (!body) return;
+  $('#tab-content').innerHTML=`<div class="tab-pad">
+    <div class="section-header"><h3>Зарплаты</h3>
+      <div class="month-nav">
+        <button id="ceo-prev">‹</button>
+        <span id="ceo-month">${fmtMY(year,month)}</span>
+        <button id="ceo-next">›</button>
+      </div>
+    </div>
+    <div id="ceo-sal-body"><div class="center-screen"><div class="spinner"></div></div></div>
+  </div>`;
+
+  const load = async () => {
+    const body = document.getElementById('ceo-sal-body'); if (!body) return;
     body.innerHTML=`<div class="center-screen"><div class="spinner"></div></div>`;
     try {
-      const branches = (await cached('branches',()=>DB.getBranches())).map(b=>b.name);
-      const allData  = await Promise.all(branches.map(b=>DB.getSummary(year,month,b)));
+      const data = await DB.getSummary(year, month, null);
+      const {groupPayouts=[],groupSubstitutions=[],ptSubstitutions=[]} = data;
+      const adjMap={}; (data.adjustments||[]).forEach(a=>{adjMap[a.trainer_id]=a;});
 
-      let totalPT=0, totalDuty=0, totalSalary=0, totalClients=0;
-      const branchCards = branches.map((branch,i)=>{
-        const data = allData[i]||[];
-        const bPT     = data.reduce((s,t)=>s+(t.pt_count||0),0);
-        const bSalary = data.reduce((s,t)=>s+(t.total||0),0);
-        const bClients= data.reduce((s,t)=>s+(t.client_count||0),0);
-        const bDuty   = data.reduce((s,t)=>s+(t.duty_hours||0),0);
-        totalPT+=bPT; totalSalary+=bSalary; totalClients+=bClients; totalDuty+=bDuty;
-        return `<div class="staff-card" style="flex-direction:column;gap:8px;margin-bottom:8px">
-          <div style="font-weight:700;font-size:14px">${branch}</div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-            <div style="background:var(--card);border-radius:8px;padding:10px;text-align:center">
-              <div style="font-size:20px;font-weight:700">${bPT}</div>
-              <div style="font-size:11px;color:var(--hint)">ПТ</div>
-            </div>
-            <div style="background:var(--card);border-radius:8px;padding:10px;text-align:center">
-              <div style="font-size:20px;font-weight:700">${bClients}</div>
-              <div style="font-size:11px;color:var(--hint)">Клиентов</div>
-            </div>
-            <div style="background:var(--card);border-radius:8px;padding:10px;text-align:center">
-              <div style="font-size:16px;font-weight:700">${bDuty.toFixed(0)}ч</div>
-              <div style="font-size:11px;color:var(--hint)">Дежурство</div>
-            </div>
-            <div style="background:var(--card);border-radius:8px;padding:10px;text-align:center">
-              <div style="font-size:14px;font-weight:700">${fmt(Math.round(bSalary))}</div>
-              <div style="font-size:11px;color:var(--hint)">ЗП сум</div>
-            </div>
-          </div>
-          <div style="border-top:1px solid var(--border);padding-top:6px">
-            ${data.map(t=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0">
-              <span>${t.fio||'—'}</span>
-              <span style="color:var(--hint)">${t.pt_count||0} ПТ · ${fmt(Math.round(t.total||0))} сум</span>
-            </div>`).join('')}
-          </div>
-        </div>`;
-      });
+      const rows = (data.profiles||[]).map(p=>{
+        const sal = calcSalary({
+          workouts:[...(data.workouts||[]).filter(w=>w.trainer_id===p.id),
+                    ...(ptSubstitutions||[]).filter(w=>w.trainer_id===p.id)],
+          duties:(data.duties||[]).filter(d=>d.trainer_id===p.id),
+          trainerGroups:(data.trainerGroups||[]).filter(tg=>tg.trainer_id===p.id),
+          groupSessions:(data.groupSessions||[]).filter(gs=>gs.trainer_id===p.id),
+          adjustment:adjMap[p.id]||null,
+          groupPayouts:groupPayouts.filter(gp=>gp.trainer_id===p.id),
+          groupSubstitutions, trainerId:p.id,
+        });
+        return {p, sal};
+      }).filter(r=>r.sal.total>0).sort((a,b)=>b.sal.total-a.sal.total);
+
+      const totalFot = rows.reduce((s,r)=>s+r.sal.total,0);
 
       body.innerHTML=`
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px">
-          <div style="background:rgba(124,58,237,.15);border-radius:10px;padding:12px;text-align:center">
-            <div style="font-size:24px;font-weight:700;color:var(--accent)">${totalPT}</div>
-            <div style="font-size:11px;color:var(--hint)">Всего ПТ</div>
-          </div>
-          <div style="background:rgba(16,185,129,.15);border-radius:10px;padding:12px;text-align:center">
-            <div style="font-size:24px;font-weight:700;color:var(--success)">${totalClients}</div>
-            <div style="font-size:11px;color:var(--hint)">Клиентов</div>
-          </div>
-          <div style="background:rgba(245,158,11,.15);border-radius:10px;padding:12px;text-align:center">
-            <div style="font-size:18px;font-weight:700;color:var(--warn)">${totalDuty.toFixed(0)}ч</div>
-            <div style="font-size:11px;color:var(--hint)">Дежурство</div>
-          </div>
-          <div style="background:rgba(239,68,68,.15);border-radius:10px;padding:12px;text-align:center">
-            <div style="font-size:14px;font-weight:700;color:var(--danger)">${fmt(Math.round(totalSalary))}</div>
-            <div style="font-size:11px;color:var(--hint)">ЗП итого</div>
-          </div>
+        <div class="summary-cards" style="margin-bottom:16px">
+          <div class="summary-card"><div class="s-val">${rows.length}</div><div class="s-lbl">Тренеров</div></div>
+          <div class="summary-card accent"><div class="s-val">${fmt(Math.round(totalFot))}</div><div class="s-lbl">ФОТ (сум)</div></div>
         </div>
-        ${branchCards.join('')}`;
-    } catch(e) { if(body) body.innerHTML='<p class="hint">Ошибка</p>'; console.error(e); }
+        ${rows.map(({p,sal})=>`
+          <div class="staff-card" style="flex-direction:column;gap:4px;margin-bottom:8px">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <div class="staff-fio">${p.fio}</div>
+              <div style="font-weight:700;font-size:16px">${fmt(sal.total)}</div>
+            </div>
+            <div style="font-size:12px;color:var(--hint);display:flex;gap:12px;flex-wrap:wrap">
+              ${sal.cat[1]+sal.cat[2]+sal.cat[3]>0?`<span>ПТ: ${sal.cat[1]+sal.cat[2]+sal.cat[3]}</span>`:''}
+              ${sal.hours>0?`<span>Деж: ${sal.hours.toFixed(1)}ч</span>`:''}
+              ${sal.adultSum+sal.childSum>0?`<span>Группы: ${fmt(sal.adultSum+sal.childSum)}</span>`:''}
+              ${sal.bonus>0?`<span style="color:var(--success)">+${fmt(sal.bonus)}</span>`:''}
+              ${sal.penalty>0?`<span style="color:var(--danger)">−${fmt(sal.penalty)}</span>`:''}
+            </div>
+          </div>`).join('')}
+      `;
+    } catch(e) { body.innerHTML='<p class="hint">Ошибка</p>'; console.error(e); }
   };
 
   document.getElementById('ceo-prev')?.addEventListener('click',()=>{
     if(month===1){year--;month=12;}else month--;
-    render();
+    document.getElementById('ceo-month').textContent=fmtMY(year,month); load();
   });
   document.getElementById('ceo-next')?.addEventListener('click',()=>{
     if(month===12){year++;month=1;}else month++;
-    render();
+    document.getElementById('ceo-month').textContent=fmtMY(year,month); load();
   });
-  await render();
+  await load();
 }
 
 // ── ГРУППЫ ───────────────────────────────────
@@ -4532,18 +4617,25 @@ async function renderCeoGroups() {
   </div>`;
   try {
     const month = new Date().toISOString().slice(0,7)+'-01';
-    // Один запрос вместо N×M
-    const [{data:tgs}, {data:allClients}, {data:allPayments}] = await Promise.all([
+    const [{data:tgs}, {data:allClients}, {data:allPayments}, {data:allSessions}] = await Promise.all([
       sb().from('trainer_groups').select('*, group_types(*), profiles(fio)').is('subscription_end',null),
       sb().from('group_clients').select('id,group_id').eq('is_active',true),
-      sb().from('group_payments').select('group_id,group_client_id,paid').eq('month',month),
+      sb().from('group_payments').select('group_id,group_client_id,paid,amount').eq('month',month),
+      sb().from('group_sessions').select('group_type_id,branch,headcount')
+        .gte('session_date',month).lt('session_date',new Date(new Date(month).getFullYear(),new Date(month).getMonth()+1,1).toISOString().slice(0,10)),
     ]);
-    const clientsByGroup  = {};
+    const clientsByGroup = {};
     (allClients||[]).forEach(c=>{ clientsByGroup[c.group_id]=(clientsByGroup[c.group_id]||0)+1; });
-    const paidByGroup = {};
-    (allPayments||[]).filter(p=>p.paid).forEach(p=>{ paidByGroup[p.group_id]=(paidByGroup[p.group_id]||0)+1; });
-
-    // Группируем по филиалам
+    const paidByGroup = {}, revenueByGroup = {};
+    (allPayments||[]).filter(p=>p.paid).forEach(p=>{
+      paidByGroup[p.group_id]=(paidByGroup[p.group_id]||0)+1;
+      revenueByGroup[p.group_id]=(revenueByGroup[p.group_id]||0)+Number(p.amount||0);
+    });
+    const sessionsByTypeAndBranch = {};
+    (allSessions||[]).forEach(s=>{
+      const key=`${s.group_type_id}_${s.branch}`;
+      sessionsByTypeAndBranch[key]=(sessionsByTypeAndBranch[key]||0)+1;
+    });
     const byBranch = {};
     (tgs||[]).forEach(tg=>{ if (!byBranch[tg.branch]) byBranch[tg.branch]=[]; byBranch[tg.branch].push(tg); });
 
@@ -4551,20 +4643,26 @@ async function renderCeoGroups() {
       <div style="margin-bottom:16px">
         <div style="font-weight:700;font-size:13px;color:var(--hint);margin-bottom:8px">${branch}</div>
         ${list.map(tg=>{
-          const total  = clientsByGroup[tg.id]||0;
-          const paid   = paidByGroup[tg.id]||0;
-          const unpaid = total - paid;
-          return `<div class="staff-card" style="flex-direction:column;gap:4px">
-            <div style="display:flex;justify-content:space-between">
+          const total   = clientsByGroup[tg.id]||0;
+          const paid    = paidByGroup[tg.id]||0;
+          const unpaid  = total-paid;
+          const revenue = revenueByGroup[tg.id]||0;
+          const sessions= sessionsByTypeAndBranch[`${tg.group_type_id}_${branch}`]||0;
+          return `<div class="staff-card" style="flex-direction:column;gap:6px">
+            <div style="display:flex;justify-content:space-between;align-items:center">
               <div>
                 <div class="staff-fio">${tg.group_types?.name||'Группа'}</div>
-                <div class="staff-meta">${tg.profiles?.fio||'—'}</div>
+                <div class="staff-meta">${tg.profiles?.fio||'—'} · ${tg.group_types?.type==='children'?'Детская':'Взрослая'}</div>
               </div>
               <div style="text-align:right">
-                <div style="font-size:13px;font-weight:600">${total} чел.</div>
+                <div style="font-size:14px;font-weight:600">${total} чел.</div>
                 ${unpaid>0?`<div style="font-size:11px;color:var(--danger)">${unpaid} не оплатили</div>`
-                          :'<div style="font-size:11px;color:var(--success)">Все оплатили</div>'}
+                          :`<div style="font-size:11px;color:var(--success)">✓ все оплатили</div>`}
               </div>
+            </div>
+            <div style="font-size:12px;color:var(--hint);display:flex;gap:12px">
+              ${sessions>0?`<span>📅 ${sessions} занятий</span>`:''}
+              ${revenue>0?`<span>💰 ${fmt(revenue)} сум</span>`:''}
             </div>
           </div>`;
         }).join('')}
@@ -4573,44 +4671,111 @@ async function renderCeoGroups() {
   } catch(e) { document.getElementById('ceo-groups-body').innerHTML='<p class="hint">Ошибка</p>'; console.error(e); }
 }
 
-// ── ТЕХНИЧКА (только просмотр) ───────────────
-async function renderCeoTech() {
+// ── ОПЕРАЦИОНКА (только просмотр) ─────────────
+async function renderCeoOps() {
   $('#tab-content').innerHTML=`<div class="tab-pad">
-    <h3 style="margin-bottom:12px">Техника</h3>
-    <div id="ceo-tech-body"><div class="center-screen"><div class="spinner"></div></div></div>
+    <h3 style="margin-bottom:12px">⚙️ Операционка</h3>
+    <div id="ceo-ops-body"><div class="center-screen"><div class="spinner"></div></div></div>
   </div>`;
   try {
-    const branches = (await cached('branches',()=>DB.getBranches())).map(b=>b.name);
-    let html = '';
-    for (const branch of branches) {
-      const [issues, bills] = await Promise.all([
-        DB.getTechIssues(branch),
-        DB.getTechBills(branch),
-      ]);
-      const unpaidBills = bills.filter(b=>!b.paid);
-      const unpaidSum   = unpaidBills.reduce((s,b)=>s+b.amount,0);
-      const highIssues  = issues.filter(i=>i.priority==='high'||i.priority==='urgent');
-      html += `<div class="staff-card" style="flex-direction:column;gap:8px;margin-bottom:8px">
-        <div style="font-weight:700">${branch}</div>
-        ${highIssues.length?`<div style="color:var(--danger);font-size:12px">🔴 Срочные поломки: ${highIssues.map(i=>i.description).join(', ')}</div>`:'<div style="color:var(--success);font-size:12px">✅ Критических проблем нет</div>'}
-        ${unpaidSum>0?`<div style="color:var(--warn);font-size:12px">💳 Неоплачено: ${fmt(Math.round(unpaidSum))} сум (${unpaidBills.length} счетов)</div>`:''}
-        <div style="font-size:12px;color:var(--hint)">Открытых проблем: ${issues.length}</div>
-      </div>`;
-    }
-    document.getElementById('ceo-tech-body').innerHTML = html||'<p class="hint">Нет данных</p>';
-  } catch(e) { document.getElementById('ceo-tech-body').innerHTML='<p class="hint">Ошибка</p>'; console.error(e); }
+    const [issues, bills, chlorine] = await Promise.all([
+      DB.getTechIssues(''),
+      DB.getTechBills(''),
+      sb().from('chlorine_orders').select('*').order('order_date',{ascending:false}).limit(10).then(r=>r.data||[]),
+    ]);
+    const urgentIssues = issues.filter(i=>i.priority==='urgent'||i.priority==='high');
+    const unpaidBills  = bills.filter(b=>!b.paid);
+    const unpaidSum    = unpaidBills.reduce((s,b)=>s+Number(b.amount),0);
+    const chlorineTotal= chlorine.reduce((s,o)=>s+Number(o.quantity_kg),0);
+
+    document.getElementById('ceo-ops-body').innerHTML=`
+      <!-- Поломки -->
+      <div style="margin-bottom:16px">
+        <h4 style="margin-bottom:8px">🔴 Поломки${urgentIssues.length?` (${urgentIssues.length} срочных)`:''}</h4>
+        ${!urgentIssues.length?'<p class="hint">Критических проблем нет ✅</p>':
+          urgentIssues.map(i=>`<div class="staff-card" style="flex-direction:column;gap:2px">
+            <div class="staff-fio">${i.description||i.title||'—'}</div>
+            <div class="staff-meta">${i.branch} · ${PRIORITY_LBL[i.priority]||i.priority}</div>
+          </div>`).join('')}
+      </div>
+
+      <!-- Счета -->
+      <div style="margin-bottom:16px">
+        <h4 style="margin-bottom:8px">💳 Счета к оплате</h4>
+        ${!unpaidBills.length?'<p class="hint">Все счета оплачены ✅</p>':`
+          <div class="warn-banner" style="margin-bottom:8px">Итого к оплате: <b>${fmt(Math.round(unpaidSum))} сум</b></div>
+          ${unpaidBills.slice(0,5).map(b=>`<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">
+            <span>${b.category}${b.description?' — '+b.description:''}</span>
+            <span style="font-weight:600">${fmt(b.amount)} сум</span>
+          </div>`).join('')}
+          ${unpaidBills.length>5?`<p class="hint" style="margin-top:6px">Ещё ${unpaidBills.length-5} счетов...</p>`:''}`}
+      </div>
+
+      <!-- Хлор -->
+      <div>
+        <h4 style="margin-bottom:8px">🧪 Хлор (последние закупы)</h4>
+        ${!chlorine.length?'<p class="hint">Закупов нет</p>':
+          `<p class="hint" style="margin-bottom:8px">Всего закуплено: ${chlorineTotal.toFixed(1)} кг</p>`+
+          chlorine.slice(0,5).map(o=>`<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">
+            <span>${fmtDate(o.order_date)} · ${o.quantity_kg} кг${!o.branch?'':' · '+o.branch}</span>
+            <span style="color:var(--hint)">${fmt(o.price_total)} сум</span>
+          </div>`).join('')}
+      </div>
+    `;
+  } catch(e) { document.getElementById('ceo-ops-body').innerHTML='<p class="hint">Ошибка</p>'; console.error(e); }
 }
 
-// ── НПС ──────────────────────────────────────
-function renderCeoNps() {
+// ── ПЛАНЫ ─────────────────────────────────────
+async function renderCeoPlans() {
   $('#tab-content').innerHTML=`<div class="tab-pad">
-    <div style="text-align:center;padding:60px 20px">
-      <div style="font-size:48px;margin-bottom:16px">⭐</div>
-      <h3 style="margin-bottom:8px">НПС от клиентов</h3>
-      <p class="hint">Будет доступно после запуска клиентского портала.</p>
-      <p class="hint" style="margin-top:8px">Клиенты смогут оценивать тренировки после каждого занятия.</p>
+    <div class="section-header"><h3>📋 Планы</h3>
+      <button class="btn btn-sm btn-primary" onclick="renderAddPlanModal('')">+ Добавить</button>
     </div>
+    <div id="ceo-plans-body"><div class="center-screen"><div class="spinner"></div></div></div>
   </div>`;
+  try {
+    const {data:plans} = await sb().from('ops_plans')
+      .select('*, profiles!created_by(fio)').neq('status','cancelled')
+      .order('due_date',{ascending:true,nullsFirst:false});
+
+    const done   = (plans||[]).filter(p=>p.status==='done');
+    const active = (plans||[]).filter(p=>p.status==='active');
+
+    document.getElementById('ceo-plans-body').innerHTML = `
+      ${!active.length?'<p class="hint">Нет активных планов</p>':
+        Object.keys(PLAN_TYPES).map(type=>{
+          const items = active.filter(p=>p.plan_type===type);
+          if (!items.length) return '';
+          const pt = PLAN_TYPES[type];
+          return `<div style="margin-bottom:16px">
+            <div style="font-weight:700;font-size:13px;margin-bottom:8px">${pt.icon} ${pt.label}</div>
+            ${items.map(p=>`<div class="staff-card" style="flex-direction:column;gap:4px;border-left:3px solid ${pt.textColor}">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start">
+                <div>
+                  <div class="staff-fio">${p.title}</div>
+                  ${p.description?`<div class="staff-meta">${p.description}</div>`:''}
+                  <div class="staff-meta">${p.branch?p.branch+' · ':''}${p.due_date?'до '+fmtDate(p.due_date):''}${p.profiles?.fio?' · '+p.profiles.fio:''}</div>
+                </div>
+                <div style="display:flex;gap:4px">
+                  <button class="btn btn-sm" style="background:rgba(16,185,129,.15);color:#10b981;font-size:11px"
+                    onclick="updatePlanStatus(${p.id},'done');renderCeoPlans()">✓</button>
+                  <button class="btn btn-sm btn-danger" style="font-size:11px"
+                    onclick="updatePlanStatus(${p.id},'cancelled');renderCeoPlans()">✕</button>
+                </div>
+              </div>
+            </div>`).join('')}
+          </div>`;
+        }).join('')}
+      ${done.length?`<details style="margin-top:16px">
+        <summary style="font-size:13px;color:var(--hint);cursor:pointer">✅ Выполнено (${done.length})</summary>
+        <div style="margin-top:8px">
+          ${done.map(p=>`<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;color:var(--hint)">
+            ${PLAN_TYPES[p.plan_type]?.icon||'•'} ${p.title}
+          </div>`).join('')}
+        </div>
+      </details>`:''}
+    `;
+  } catch(e) { document.getElementById('ceo-plans-body').innerHTML='<p class="hint">Ошибка</p>'; console.error(e); }
 }
 
 // setClientColor moved to module
