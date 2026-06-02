@@ -1188,8 +1188,9 @@ function calcSalary({workouts=[], duties=[], trainerGroups=[], groupSessions=[],
 // ─── ТЕХНИЧКА ────────────────────────────────
 Object.assign(DB, {
   async getTechEquipment(branch) {
-    const {data,error} = await sb().from('tech_equipment')
-      .select('*').eq('branch',branch).order('category').order('name');
+    let q = sb().from('tech_equipment').select('*').order('category').order('name');
+    if (branch) q = q.eq('branch',branch);
+    const {data,error} = await q;
     if (error) throw error; return data||[];
   },
   async addTechEquipment(fields) {
@@ -1206,10 +1207,9 @@ Object.assign(DB, {
     if (error) throw error;
   },
   async getTechIssues(branch) {
-    const {data,error} = await sb().from('tech_issues')
-      .select('*, tech_equipment(name)')
-      .eq('branch',branch).neq('status','resolved')
-      .order('priority').order('created_at',{ascending:false});
+    let q = sb().from('tech_issues').select('*, tech_equipment(name)').neq('status','resolved').order('priority').order('created_at',{ascending:false});
+    if (branch) q = q.eq('branch',branch);
+    const {data,error} = await q;
     if (error) throw error; return data||[];
   },
   async addTechIssue(fields) {
@@ -1222,9 +1222,9 @@ Object.assign(DB, {
     if (error) throw error;
   },
   async getTechShopping(branch) {
-    const {data,error} = await sb().from('tech_shopping')
-      .select('*').eq('branch',branch).neq('status','received')
-      .order('priority').order('created_at',{ascending:false});
+    let q = sb().from('tech_shopping').select('*').neq('status','received').order('priority').order('created_at',{ascending:false});
+    if (branch) q = q.eq('branch',branch);
+    const {data,error} = await q;
     if (error) throw error; return data||[];
   },
   async addTechShopping(fields) {
@@ -1237,9 +1237,9 @@ Object.assign(DB, {
     if (error) throw error;
   },
   async getTechBills(branch) {
-    const {data,error} = await sb().from('tech_bills')
-      .select('*').eq('branch',branch)
-      .order('bill_date',{ascending:false});
+    let q = sb().from('tech_bills').select('*').order('bill_date',{ascending:false});
+    if (branch) q = q.eq('branch',branch);
+    const {data,error} = await q;
     if (error) throw error; return data||[];
   },
   async addTechBill(fields) {
