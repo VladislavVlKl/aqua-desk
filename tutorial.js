@@ -247,11 +247,4 @@ function resetTutorial() {
 // ─── ИЗМЕНИТЬ enterApp() ──────────────────────
 // ЗАМЕНИ существующую функцию enterApp() на эту:
 
-async function enterApp() {
-  checkShowTutorial(() => {
-    if      (STATE.profile.role === 'admin')          renderAdminApp();
-    else if (STATE.profile.role === 'senior_trainer') renderSeniorApp();
-    else if (STATE.profile.role === 'ceo')            renderCeoApp();
-    else                                              renderTrainerApp();
-  });
-}
+// enterApp определена в app.js — не переопределяем здесь
