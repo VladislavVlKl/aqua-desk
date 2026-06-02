@@ -99,6 +99,14 @@ const DB = {
       .order('last_used',{ascending:false,nullsFirst:false});
     if (error) throw error; return data||[];
   },
+  // Все клиенты всех тренеров за один запрос (для админа)
+  async getAllClients() {
+    const {data,error} = await sb().from('clients')
+      .select('*, profiles!trainer_id(fio,branches)')
+      .eq('is_archived',false)
+      .order('fio');
+    if (error) throw error; return data||[];
+  },
   async addClient(fio, category, trainerId, age, subStart, subEnd) {
     const {data,error} = await sb().from('clients').insert({
       fio:fio.trim(), category, trainer_id:trainerId, balance:0,
@@ -112,10 +120,16 @@ const DB = {
     if (error) throw error; return data;
   },
   async addBalance(clientId, amount) {
-    const {data:cl} = await sb().from('clients').select('balance').eq('id',clientId).single();
-    const {data,error} = await sb().from('clients')
-      .update({balance:(cl?.balance||0)+amount}).eq('id',clientId).select().single();
-    if (error) throw error; return data;
+    // Атомарное обновление через RPC чтобы избежать race condition
+    const {data,error} = await sb().rpc('increment_balance', {client_id: clientId, delta: amount});
+    if (error) {
+      // Fallback если RPC не создана
+      const {data:cl} = await sb().from('clients').select('balance').eq('id',clientId).single();
+      const {data:d2,error:e2} = await sb().from('clients')
+        .update({balance:(cl?.balance||0)+amount}).eq('id',clientId).select().single();
+      if (e2) throw e2; return d2;
+    }
+    return data;
   },
 
   // ─── WORKOUTS ────────────────────────────────
@@ -662,6 +676,26 @@ async unassignTrainerGroup(id) {
       .select('workout_id').in('workout_id',ids).not('accomplishments','is',null);
     const noted = new Set((notes||[]).map(n=>n.workout_id));
     return workouts.filter(w=>!noted.has(w.id));
+  },
+
+  // Батч-версия: все просроченные конспекты по тренеру за один запрос
+  async getOverdueNotesBatch(trainerId) {
+    const cutoff = new Date(Date.now()-48*3600000).toISOString();
+    const {data:workouts} = await sb().from('workouts')
+      .select('id,client_id,workout_date').eq('trainer_id',trainerId)
+      .eq('is_drop_in',false).eq('is_debt',false)
+      .lt('workout_date',cutoff);
+    if (!workouts?.length) return {};
+    const ids = workouts.map(w=>w.id);
+    const {data:notes} = await sb().from('session_notes')
+      .select('workout_id').in('workout_id',ids).not('accomplishments','is',null);
+    const noted = new Set((notes||[]).map(n=>n.workout_id));
+    // Возвращаем Map: client_id → count
+    const result = {};
+    workouts.filter(w=>!noted.has(w.id)).forEach(w=>{
+      result[w.client_id] = (result[w.client_id]||0)+1;
+    });
+    return result;
   },
   async getClientProfile(clientId, viewerRole, viewerBranches) {
     const {data:client,error} = await sb().from('clients')
