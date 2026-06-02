@@ -3880,14 +3880,15 @@ let _techSection = 'chlorine';
 async function renderAdminTech() {
   const allBranches = await cached('branches',()=>DB.getBranches());
   const branches = allBranches.map(b=>b.name);
-  if (!_techBranch) _techBranch = branches[0]||'';
+  // '' = все филиалы, по умолчанию показываем все
   $('#tab-content').innerHTML=`<div class="tab-pad">
     <div class="section-header"><h3>⚙️ Операционка</h3>
-      <span class="hint">${_techBranch}</span></div>
-    ${branches.length>1?`<div class="form-group">
+      <span class="hint">${_techBranch||'Все филиалы'}</span></div>
+    <div class="form-group">
       <select id="tech-branch" onchange="_techBranch=this.value;loadTechSection()">
-        ${branches.map(b=>`<option ${b===_techBranch?'selected':''}>${b}</option>`).join('')}
-      </select></div>`:''}
+        <option value="" ${_techBranch===''?'selected':''}>Все филиалы</option>
+        ${branches.map(b=>`<option value="${b}" ${b===_techBranch?'selected':''}>${b}</option>`).join('')}
+      </select></div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px">
       ${TECH_SECTIONS.map(s=>`<button class="btn btn-sm ${s===_techSection?'btn-primary':''}"
         onclick="_techSection='${s}';renderAdminTech()">
@@ -3928,7 +3929,7 @@ async function renderTechEquipment(body, branch) {
           <div style="display:flex;justify-content:space-between;align-items:center">
             <div>
               <div class="staff-fio">${eq.name}</div>
-              <div class="staff-meta">${EQUIP_STATUS[eq.status]||eq.status}
+              <div class="staff-meta">${!branch?eq.branch+' · ':''}${EQUIP_STATUS[eq.status]||eq.status}
                 ${eq.next_service?` · ТО: ${eq.next_service}`:''}</div>
             </div>
             <div style="display:flex;gap:6px">
@@ -4118,7 +4119,7 @@ async function renderTechBills(body, branch) {
         <div style="display:flex;justify-content:space-between;align-items:center">
           <div>
             <div class="staff-fio">${b.category}${b.description?' — '+b.description:''}</div>
-            <div class="staff-meta">${fmt(b.amount)} сум · ${b.bill_date}</div>
+            <div class="staff-meta">${!branch?b.branch+' · ':''}${fmt(b.amount)} сум · ${b.bill_date}</div>
           </div>
           <div style="display:flex;gap:6px;align-items:center">
             <span style="font-size:11px;padding:3px 8px;border-radius:12px;
@@ -4172,8 +4173,9 @@ async function toggleBillPaid(id, currentPaid) {
 
 // ── ХЛОР ──────────────────────────────────────
 async function renderTechChlorine(body, branch) {
-  const {data:orders} = await sb().from('chlorine_orders')
-    .select('*').eq('branch',branch).order('order_date',{ascending:false});
+  let q = sb().from('chlorine_orders').select('*').order('order_date',{ascending:false});
+  if (branch) q = q.eq('branch',branch);
+  const {data:orders} = await q;
   const totalKg   = (orders||[]).reduce((s,o)=>s+Number(o.quantity_kg),0);
   const totalSum  = (orders||[]).reduce((s,o)=>s+Number(o.price_total),0);
   body.innerHTML=`
@@ -4188,7 +4190,7 @@ async function renderTechChlorine(body, branch) {
         <div style="display:flex;justify-content:space-between;align-items:center">
           <div>
             <div class="staff-fio">${o.quantity_kg} кг · ${fmt(o.price_total)} сум</div>
-            <div class="staff-meta">${fmtDate(o.order_date)}${o.supplier?' · '+o.supplier:''}${o.note?' · '+o.note:''}</div>
+            <div class="staff-meta">${fmtDate(o.order_date)}${!branch?' · '+o.branch:''}${o.supplier?' · '+o.supplier:''}${o.note?' · '+o.note:''}</div>
           </div>
           <button class="btn btn-sm btn-danger" onclick="deleteChlorineOrder(${o.id})">🗑</button>
         </div>
@@ -4240,10 +4242,9 @@ const PLAN_TYPES = {
   task:      {label:'Важная задача', icon:'⚡', color:'rgba(239,68,68,.15)', textColor:'#ef4444'},
 };
 async function renderTechPlans(body, branch) {
-  const {data:plans} = await sb().from('ops_plans')
-    .select('*, profiles!created_by(fio)')
-    .or(`branch.is.null,branch.eq.${branch}`)
-    .neq('status','cancelled').order('due_date',{ascending:true,nullsFirst:false});
+  let pq = sb().from('ops_plans').select('*, profiles!created_by(fio)').neq('status','cancelled').order('due_date',{ascending:true,nullsFirst:false});
+  if (branch) pq = pq.or(`branch.is.null,branch.eq.${branch}`);
+  const {data:plans} = await pq;
   body.innerHTML=`
     <button class="btn btn-sm btn-primary" style="margin-bottom:12px;width:100%"
       onclick="renderAddPlanModal('${branch}')">+ Добавить</button>
@@ -4259,7 +4260,7 @@ async function renderTechPlans(body, branch) {
               <div>
                 <div class="staff-fio">${p.title}</div>
                 ${p.description?`<div class="staff-meta">${p.description}</div>`:''}
-                <div class="staff-meta">${p.due_date?'до '+fmtDate(p.due_date):''}${p.profiles?.fio?' · '+p.profiles.fio:''}</div>
+                <div class="staff-meta">${p.branch&&!branch?p.branch+' · ':''}${p.due_date?'до '+fmtDate(p.due_date):''}${p.profiles?.fio?' · '+p.profiles.fio:''}</div>
               </div>
               <div style="display:flex;gap:4px">
                 ${p.status==='active'?`<button class="btn btn-sm" style="background:rgba(16,185,129,.15);color:#10b981;font-size:11px"
