@@ -9,6 +9,31 @@ const STATE = {
 
 // ── ЗАЩИТА ОТ ДВОЙНЫХ НАЖАТИЙ ────────────────
 const _pending = new Set();
+
+// ── КЕШ (5 минут) ────────────────────────────
+const _cache = {};
+async function cached(key, fn, ttl=300000) {
+  const now = Date.now();
+  if (_cache[key] && now - _cache[key].ts < ttl) return _cache[key].val;
+  const val = await fn();
+  _cache[key] = {val, ts: now};
+  return val;
+}
+function invalidateCache(...keys) {
+  keys.forEach(k => delete _cache[k]);
+}
+
+// ── LAZY LOAD XLSX ────────────────────────────
+let _xlsxLoaded = false;
+async function ensureXlsx() {
+  if (_xlsxLoaded || typeof XLSX !== 'undefined') { _xlsxLoaded=true; return; }
+  await new Promise((res,rej)=>{
+    const s=document.createElement('script');
+    s.src='https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+    s.onload=()=>{_xlsxLoaded=true;res();}; s.onerror=rej;
+    document.head.appendChild(s);
+  });
+}
 function once(key, fn) {
   return async function(...args) {
     if (_pending.has(key)) return;
@@ -207,15 +232,11 @@ function switchTab(tab) {
   if (tab==='groups')   renderSeniorGroups();
 }
 
-// Проверяем наличие незакрытых конспектов и показываем бейдж
+// Проверяем наличие незакрытых конспектов — батч запрос
 async function checkNoteBadge() {
   try {
-    const clients = await DB.getClients(STATE.profile.id);
-    let pending = 0;
-    for (const c of clients.slice(0,15)) {
-      const overdue = await DB.getOverdueNotes(c.id, STATE.profile.id);
-      pending += overdue.length;
-    }
+    const overdueMap = await DB.getOverdueNotesBatch(STATE.profile.id);
+    const pending = Object.values(overdueMap).reduce((s,n)=>s+n, 0);
     const badge = document.getElementById('note-badge');
     if (badge) {
       badge.style.display = pending > 0 ? '' : 'none';
@@ -297,7 +318,7 @@ async function renderHomeTab() {
           <input id="wk-sub-fio" type="text" placeholder="Иванов Иван Иванович"
             list="trainers-datalist" autocomplete="off">
           <datalist id="trainers-datalist">
-            ${(await DB.getAllProfiles()).filter(p=>p.role!=='admin'&&p.id!==STATE.profile.id)
+            ${(await cached('profiles',()=>DB.getAllProfiles())).filter(p=>p.role!=='admin'&&p.id!==STATE.profile.id)
               .map(p=>`<option value="${p.fio}">`).join('')}
           </datalist>
         </div>
@@ -358,14 +379,12 @@ end_time:   new Date(end).toISOString(),
 // ── ТАБ: КЛИЕНТЫ ──────────────────────────────
 async function renderClientsTab() {
   $('#tab-content').innerHTML=`<div class="center-screen"><div class="spinner"></div></div>`;
-  const clients = await DB.getClients(STATE.profile.id);
-
-  // Считаем незакрытые конспекты
-  let pendingNotes = 0;
-  for (const c of clients.slice(0,10)) {
-    const overdue = await DB.getOverdueNotes(c.id, STATE.profile.id);
-    pendingNotes += overdue.length;
-  }
+  // Параллельно: клиенты + батч конспектов
+  const [clients, overdueMap] = await Promise.all([
+    DB.getClients(STATE.profile.id),
+    DB.getOverdueNotesBatch(STATE.profile.id).catch(()=>({})),
+  ]);
+  const pendingNotes = Object.values(overdueMap).reduce((s,n)=>s+n, 0);
 
   const renderList = (filter='') => {
     const body = document.getElementById('cl-list');
@@ -514,7 +533,7 @@ async function doLogWorkout() {
   if (isSubstitute) {
     const subFio = document.getElementById('wk-sub-fio')?.value.trim();
     if (!subFio) return toast('Введите ФИО тренера для замены','error');
-    const allP = await DB.getAllProfiles();
+    const allP = await cached('profiles',()=>DB.getAllProfiles());
     const found = allP.find(p=>p.fio.toLowerCase()===subFio.toLowerCase());
     if (!found) return toast(`Тренер «${subFio}» не найден`,'error');
     subTrainerId = found.id;
@@ -1493,7 +1512,7 @@ async function doInitiateTransfer(clientId, fromTrainerId) {
   const fio  = document.getElementById('transfer-fio')?.value.trim();
   const note = document.getElementById('transfer-note')?.value.trim()||'';
   if (!fio) return toast('Введите ФИО тренера','error');
-  const profiles = await DB.getAllProfiles();
+  const profiles = await cached('profiles',()=>DB.getAllProfiles());
   const found = profiles.find(p=>p.fio.toLowerCase()===fio.toLowerCase());
   if (!found) return toast(`Тренер «${fio}» не найден`,'error');
   try {
@@ -1627,7 +1646,7 @@ async function doEditClient(clientId, oldBalance) {
 
 // Административная передача (координатор)
 async function renderAdminTransferModal(clientId, clientFio) {
-  const profiles = await DB.getAllProfiles();
+  const profiles = await cached('profiles',()=>DB.getAllProfiles());
   const trainers = profiles.filter(p=>['trainer','senior_trainer'].includes(p.role));
   const m=el('div','modal-overlay');
   m.innerHTML=`<div class="modal">
@@ -1909,6 +1928,7 @@ async function doSaveNote(workoutId,clientId) {
 async function doExportTrainer(trainerId,fioEnc,year,month) {
   const fio=decodeURIComponent(fioEnc);
   if (!window.Telegram?.WebApp?.initData) {
+    await ensureXlsx();
     const d=await DB.getTrainerDetail(trainerId,year,month);
     exportTrainerExcel(fio,year,month,d.workouts,d.duties,d.groupSessions,d.adjustment);
     return;
@@ -1926,6 +1946,7 @@ async function doExportTrainer(trainerId,fioEnc,year,month) {
 }
 async function doExportSummary(year,month,branch) {
   if (!window.Telegram?.WebApp?.initData) {
+    await ensureXlsx();
     const data=await DB.getSummary(year,month,branch||null);
     exportSummaryExcel(year,month,data); return;
   }
@@ -2269,7 +2290,7 @@ function adminTab(tab) {
 // ─ ADMIN: АНАЛИТИКА ──────────────────────────
 async function renderAdminAnalytics() {
   let year=new Date().getFullYear(), month=new Date().getMonth()+1;
-  const branches=await DB.getBranches();
+  const branches=await cached('branches',()=>DB.getBranches());
 
   $('#tab-content').innerHTML=`<div class="tab-pad">
     <div class="section-header"><h3>Аналитика</h3>
@@ -2357,17 +2378,14 @@ async function loadAnalytics(year, month, branch) {
 // ─ ADMIN: КЛИЕНТЫ (все) ──────────────────────
 async function renderAdminClients() {
   $('#tab-content').innerHTML = `<div class="center-screen"><div class="spinner"></div></div>`;
-  const branches = await DB.getBranches();
-  const profiles = await DB.getAllProfiles();
-  const trainers = profiles.filter(p => ['trainer','senior_trainer'].includes(p.role));
+  const branches = await cached('branches', ()=>DB.getBranches());
 
-  // Загружаем всех клиентов
-  let allClients = [];
-  for (const t of trainers) {
-    const c = await DB.getClients(t.id);
-    c.forEach(cl => { cl._trainerFio = t.fio; cl._trainerBranches = t.branches||[]; });
-    allClients = allClients.concat(c);
-  }
+  // Один запрос вместо N по тренерам
+  const allClients = await DB.getAllClients();
+  allClients.forEach(cl=>{
+    cl._trainerFio      = cl.profiles?.fio||'—';
+    cl._trainerBranches = cl.profiles?.branches||[];
+  });
 
   $('#tab-content').innerHTML = `<div class="tab-pad">
     <div class="section-header"><h3>Все клиенты</h3>
@@ -2424,7 +2442,7 @@ function filterAdminClients() {
 async function renderAdminSummary() {
   let year=new Date().getFullYear(),month=new Date().getMonth()+1;
   // Загружаем филиалы из таблицы branches
-  const branches=await DB.getBranches();
+  const branches=await cached('branches',()=>DB.getBranches());
   $('#tab-content').innerHTML=`<div class="tab-pad">
     <div class="section-header"><h3>Сводка</h3>
       <div class="month-nav">
@@ -2588,7 +2606,7 @@ async function loadStaffList() {
   const body=document.getElementById('staff-list'); if (!body) return;
   const role=document.getElementById('role-filter')?.value||'';
   try {
-    let profiles=await DB.getAllProfiles();
+    let profiles=await cached('profiles',()=>DB.getAllProfiles());
     if (role) profiles=profiles.filter(p=>p.role===role);
     body.innerHTML=!profiles.length?'<p class="hint">Нет</p>':
       profiles.map(t=>`<div class="staff-card">
@@ -2630,7 +2648,7 @@ async function doAddTrainer() {
   const brs=(document.getElementById('nt-branches')?.value||'').split(',').map(b=>b.trim()).filter(Boolean);
   if (!fio)        return toast('Введите ФИО','error');
   if (!brs.length) return toast('Укажите филиал','error');
-  try { await DB.addTrainer(fio,brs,role); document.querySelector('.modal-overlay')?.remove(); toast('✅','success'); loadStaffList(); }
+  try { await DB.addTrainer(fio,brs,role); invalidateCache('profiles'); document.querySelector('.modal-overlay')?.remove(); toast('✅','success'); loadStaffList(); }
   catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 function renderEditTrainerModal(id,fioEnc,branches,role) {
@@ -2868,7 +2886,7 @@ async function renderAdminBranches() {
 async function loadBranchesList() {
   const body=document.getElementById('branches-list'); if (!body) return;
   try {
-    const branches=await DB.getBranches();
+    const branches=await cached('branches',()=>DB.getBranches());
     body.innerHTML=!branches.length?'<p class="hint">Нет филиалов</p>':
       branches.map(b=>`<div class="staff-card">
         <div class="staff-info"><div class="staff-fio">🏢 ${b.name}</div></div>
@@ -2892,7 +2910,7 @@ function renderAddBranchModal() {
 async function doAddBranch() {
   const name=document.getElementById('br-name')?.value.trim();
   if (!name) return toast('Введите название','error');
-  try { await DB.addBranch(name); document.querySelector('.modal-overlay')?.remove(); toast('✅','success'); loadBranchesList(); }
+  try { await DB.addBranch(name); invalidateCache('branches'); document.querySelector('.modal-overlay')?.remove(); toast('✅','success'); loadBranchesList(); }
   catch(e) { toast('Такой уже есть','error'); }
 }
 function renderRenameBranchModal(nameEnc) {
@@ -2940,7 +2958,7 @@ async function renderAdminGroups() {
 async function loadGroupsList() {
   const body=document.getElementById('groups-list'); if (!body) return;
   try {
-    const types=await DB.getGroupTypes();
+    const types=await cached('groupTypes',()=>DB.getGroupTypes());
     const allAssigned = await Promise.all(types.map(gt=>
   DB.getAssignedTrainers(gt.id).then(data=>({data}))
 ));
@@ -3018,6 +3036,7 @@ async function doAddGroupType() {
   try {
     await DB.addGroupType({name,type,billing_model:type==='children'?'percentage':'headcount',
       price_per_month:type==='children'?price:0,trainer_percentage:type==='children'?pct:0});
+    invalidateCache('groupTypes');
     document.querySelector('.modal-overlay')?.remove(); toast('✅','success'); loadGroupsList();
   } catch(e) { toast('Ошибка','error'); }
 }
@@ -3446,7 +3465,7 @@ let _techBranch = '';
 let _techSection = 'equipment';
 
 async function renderAdminTech() {
-  const allBranches = await DB.getBranches();
+  const allBranches = await cached('branches',()=>DB.getBranches());
   const branches = allBranches.map(b=>b.name);
   if (!_techBranch) _techBranch = branches[0]||'';
   $('#tab-content').innerHTML=`<div class="tab-pad">
@@ -3796,7 +3815,7 @@ async function renderCeoSummary() {
     if (!body) return;
     body.innerHTML=`<div class="center-screen"><div class="spinner"></div></div>`;
     try {
-      const branches = (await DB.getBranches()).map(b=>b.name);
+      const branches = (await cached('branches',()=>DB.getBranches())).map(b=>b.name);
       const allData  = await Promise.all(branches.map(b=>DB.getSummary(year,month,b)));
 
       let totalPT=0, totalDuty=0, totalSalary=0, totalClients=0;
@@ -3877,38 +3896,44 @@ async function renderCeoGroups() {
     <div id="ceo-groups-body"><div class="center-screen"><div class="spinner"></div></div></div>
   </div>`;
   try {
-    const branches = (await DB.getBranches()).map(b=>b.name);
     const month = new Date().toISOString().slice(0,7)+'-01';
-    let html = '';
-    for (const branch of branches) {
-      const {data:tgs} = await sb().from('trainer_groups')
-        .select('*, group_types(*), profiles(fio)')
-        .eq('branch',branch).is('subscription_end',null);
-      if (!tgs?.length) continue;
-      let branchHtml = '';
-      for (const tg of tgs) {
-        const clients  = await DB.getGroupClients(tg.id);
-        const payments = await DB.getGroupPayments(tg.id, month);
-        const paid     = payments.filter(p=>p.paid).length;
-        const unpaid   = clients.length - paid;
-        branchHtml += `<div class="staff-card" style="flex-direction:column;gap:4px">
-          <div style="display:flex;justify-content:space-between">
-            <div>
-              <div class="staff-fio">${tg.group_types?.name||'Группа'}</div>
-              <div class="staff-meta">${tg.profiles?.fio||'—'}</div>
-            </div>
-            <div style="text-align:right">
-              <div style="font-size:13px;font-weight:600">${clients.length} чел.</div>
-              ${unpaid>0?`<div style="font-size:11px;color:var(--danger)">${unpaid} не оплатили</div>`:'<div style="font-size:11px;color:var(--success)">Все оплатили</div>'}
-            </div>
-          </div>
-        </div>`;
-      }
-      html += `<div style="margin-bottom:16px">
+    // Один запрос вместо N×M
+    const [{data:tgs}, {data:allClients}, {data:allPayments}] = await Promise.all([
+      sb().from('trainer_groups').select('*, group_types(*), profiles(fio)').is('subscription_end',null),
+      sb().from('group_clients').select('id,group_id').eq('is_active',true),
+      sb().from('group_payments').select('group_id,group_client_id,paid').eq('month',month),
+    ]);
+    const clientsByGroup  = {};
+    (allClients||[]).forEach(c=>{ clientsByGroup[c.group_id]=(clientsByGroup[c.group_id]||0)+1; });
+    const paidByGroup = {};
+    (allPayments||[]).filter(p=>p.paid).forEach(p=>{ paidByGroup[p.group_id]=(paidByGroup[p.group_id]||0)+1; });
+
+    // Группируем по филиалам
+    const byBranch = {};
+    (tgs||[]).forEach(tg=>{ if (!byBranch[tg.branch]) byBranch[tg.branch]=[]; byBranch[tg.branch].push(tg); });
+
+    const html = Object.entries(byBranch).map(([branch, list])=>`
+      <div style="margin-bottom:16px">
         <div style="font-weight:700;font-size:13px;color:var(--hint);margin-bottom:8px">${branch}</div>
-        ${branchHtml}
-      </div>`;
-    }
+        ${list.map(tg=>{
+          const total  = clientsByGroup[tg.id]||0;
+          const paid   = paidByGroup[tg.id]||0;
+          const unpaid = total - paid;
+          return `<div class="staff-card" style="flex-direction:column;gap:4px">
+            <div style="display:flex;justify-content:space-between">
+              <div>
+                <div class="staff-fio">${tg.group_types?.name||'Группа'}</div>
+                <div class="staff-meta">${tg.profiles?.fio||'—'}</div>
+              </div>
+              <div style="text-align:right">
+                <div style="font-size:13px;font-weight:600">${total} чел.</div>
+                ${unpaid>0?`<div style="font-size:11px;color:var(--danger)">${unpaid} не оплатили</div>`
+                          :'<div style="font-size:11px;color:var(--success)">Все оплатили</div>'}
+              </div>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>`).join('');
     document.getElementById('ceo-groups-body').innerHTML = html||'<p class="hint">Нет групп</p>';
   } catch(e) { document.getElementById('ceo-groups-body').innerHTML='<p class="hint">Ошибка</p>'; console.error(e); }
 }
@@ -3920,7 +3945,7 @@ async function renderCeoTech() {
     <div id="ceo-tech-body"><div class="center-screen"><div class="spinner"></div></div></div>
   </div>`;
   try {
-    const branches = (await DB.getBranches()).map(b=>b.name);
+    const branches = (await cached('branches',()=>DB.getBranches())).map(b=>b.name);
     let html = '';
     for (const branch of branches) {
       const [issues, bills] = await Promise.all([
@@ -4135,7 +4160,7 @@ async function renderInAppNotifications() {
 
 async function renderGroupSubstitutionModal(groupId) {
   try {
-    const trainers = await DB.getAllProfiles();
+    const trainers = await cached('profiles',()=>DB.getAllProfiles());
     const others = trainers.filter(t=>
       ['trainer','senior_trainer'].includes(t.role) &&
       t.id !== STATE.profile.id && t.tg_id
@@ -4309,7 +4334,7 @@ async function doLogAdultGroupSession(groupId) {
 // ── СВОДНОЕ РАСПИСАНИЕ КООРДИНАТОРА ──────────────────────────────────────────
 
 async function renderCoordinatorSchedule() {
-  const branches = (await DB.getBranches()).map(b=>b.name);
+  const branches = (await cached('branches',()=>DB.getBranches())).map(b=>b.name);
   let selBranch = branches[0]||'';
   
   $('#tab-content').innerHTML=`<div class="tab-pad">
@@ -4344,7 +4369,7 @@ async function renderCoordinatorSchedule() {
     body.innerHTML=`<div class="center-screen"><div class="spinner"></div></div>`;
     try {
       const DAYS = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
-      const trainers = (await DB.getAllProfiles()).filter(t=>
+      const trainers = (await cached('profiles',()=>DB.getAllProfiles())).filter(t=>
         ['trainer','senior_trainer'].includes(t.role) &&
         (t.branches||[]).includes(branch)
       );
