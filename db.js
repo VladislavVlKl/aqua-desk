@@ -12,18 +12,26 @@ const DB = {
 
   // ─── AUTH ───────────────────────────────────
   async getProfileByTgId(id) {
-    const {data,error} = await sb().from('profiles').select('*').eq('tg_id',id).maybeSingle();
+    const {data,error} = await sb().rpc('get_profile_by_tg_id',{p_tg_id:id});
     if (error) throw error; return data;
   },
   async getUnclaimedProfileByFio(fio) {
-    const {data,error} = await sb().from('profiles').select('*')
+    const {data,error} = await sb().from('profiles')
+      .select('id,fio,role,branches')
       .ilike('fio',fio.trim()).is('tg_id',null).maybeSingle();
     if (error) throw error; return data;
   },
-  async claimProfile(profileId, tgId, pincode) {
-    const {data,error} = await sb().from('profiles')
-      .update({tg_id:tgId,pincode}).eq('id',profileId).select().single();
+  async claimProfile(profileId, tgId, pin) {
+    const {data,error} = await sb().rpc('claim_profile',{p_profile_id:profileId,p_tg_id:tgId,p_pin:pin});
     if (error) throw error; return data;
+  },
+  async verifyPin(tgId, pin) {
+    const {data,error} = await sb().rpc('verify_pin',{p_tg_id:tgId,p_pin:pin});
+    if (error) throw error; return data;
+  },
+  async changePin(profileId, pin) {
+    const {error} = await sb().rpc('change_pin',{p_profile_id:profileId,p_pin:pin});
+    if (error) throw error;
   },
 
   // ─── PROFILES ────────────────────────────────
@@ -928,7 +936,7 @@ async unassignTrainerGroup(id) {
     const to      = new Date(year,month,  1).toISOString();
     const fromDay = `${year}-${String(month).padStart(2,'0')}-01`;
     const toDay   = new Date(year,month,1).toISOString().slice(0,10);
-    const [w,d,tg,gs,adj,gp,gsub] = await Promise.all([
+    const [w,d,tg,gs,adj,gp,gsub,notes] = await Promise.all([
       sb().from('workouts').select('*, clients(fio,age), sub_profile:profiles!substitute_for(fio)')
         .eq('trainer_id',trainerId).gte('workout_date',from).lt('workout_date',to)
         .order('workout_date',{ascending:false}),
@@ -948,15 +956,21 @@ async unassignTrainerGroup(id) {
       sb().from('group_substitutions').select('*, trainer_groups(*, group_types(name))')
         .eq('substitute_trainer_id',trainerId)
         .gte('session_date',fromDay).lt('session_date',toDay),
+      // Конспекты тренера за месяц
+      sb().from('session_notes').select('*, clients(fio), workouts(workout_date,category_at_moment)')
+        .eq('trainer_id',trainerId)
+        .gte('created_at',from).lt('created_at',to)
+        .order('created_at',{ascending:false}),
     ]);
     return {
-      workouts:           w.data   ||[],
-      duties:             d.data   ||[],
-      trainerGroups:      tg.data  ||[],
-      groupSessions:      gs.data  ||[],
-      adjustment:         adj.data ||null,
-      groupPayouts:       gp.data  ||[],
-      groupSubstitutions: gsub.data||[],
+      workouts:           w.data     ||[],
+      duties:             d.data     ||[],
+      trainerGroups:      tg.data    ||[],
+      groupSessions:      gs.data    ||[],
+      adjustment:         adj.data   ||null,
+      groupPayouts:       gp.data    ||[],
+      groupSubstitutions: gsub.data  ||[],
+      sessionNotes:       notes.data ||[],
     };
   },
 
