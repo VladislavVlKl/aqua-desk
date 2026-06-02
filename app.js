@@ -614,12 +614,12 @@ function renderAddClientModal() {
             style="${i!==1?'background:var(--card);border:1px solid var(--border)':''}">
             <b>${p.label}</b> · ${p.period}</button>`).join('')}
         </div>
-        <div style="margin-top:8px;display:flex;align-items:center;gap:8px">
-          <input type="checkbox" id="nc-custom-toggle" onchange="toggleNcCustom(this.checked)">
-          <label for="nc-custom-toggle" style="font-size:13px;font-weight:400">Другое количество</label>
-        </div>
+        <label style="display:flex;align-items:center;gap:8px;margin-top:10px;cursor:pointer;font-size:13px;color:var(--hint)">
+          <input type="checkbox" id="nc-custom-toggle" onchange="toggleNcCustom(this.checked)" style="width:16px;height:16px;flex-shrink:0">
+          Другое количество
+        </label>
         <input id="nc-custom-qty" type="number" min="1" placeholder="Введите кол-во ПТ"
-          style="display:none;margin-top:8px" oninput="updateNcEndDate()">
+          style="display:none;margin-top:8px;width:100%;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text);font-size:14px" oninput="updateNcEndDate()">
       </div>
       <div class="form-group"><label>Дата начала</label>
         <input id="nc-start" type="date" value="${todayStr()}" oninput="updateNcEndDate()"></div>
@@ -1540,12 +1540,12 @@ function renderBuyPackageModal(clientId, isChildClient, currentBalance) {
           onclick="selectPkg(this)" style="${i!==1?'background:var(--card);border:1px solid var(--border)':''}">
           <b>${p.label}</b> · ${p.period}</button>`).join('')}
       </div>
-      <div style="margin-top:8px;display:flex;align-items:center;gap:8px">
-        <input type="checkbox" id="pkg-custom-toggle" onchange="togglePkgCustom(this.checked)">
-        <label for="pkg-custom-toggle" style="font-size:13px;font-weight:400">Другое количество</label>
-      </div>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:10px;cursor:pointer;font-size:13px;color:var(--hint)">
+        <input type="checkbox" id="pkg-custom-toggle" onchange="togglePkgCustom(this.checked)" style="width:16px;height:16px;flex-shrink:0">
+        Другое количество
+      </label>
       <input id="pkg-custom-qty" type="number" min="1" placeholder="Введите кол-во ПТ"
-        style="display:none;margin-top:8px" oninput="updatePkgEndDate()">
+        style="display:none;margin-top:8px;width:100%;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text);font-size:14px" oninput="updatePkgEndDate()">
     </div>
     <div class="form-group"><label>Дата начала</label>
       <input id="pkg-start" type="date" value="${todayStr()}" oninput="updatePkgEndDate()"></div>
