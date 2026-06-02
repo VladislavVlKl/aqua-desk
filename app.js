@@ -117,7 +117,7 @@ async function init() {
     const p=await DB.getProfileByTgId(STATE.tgId);
     if (!p) { renderRegister(); return; }
     STATE.profile=p;
-    if (p.pincode) renderPinEntry(); else enterApp();
+    if (p.has_pin) renderPinEntry(); else enterApp();
   } catch(e) { toast('Ошибка подключения','error'); console.error(e); }
 }
 async function enterApp() {
@@ -179,8 +179,12 @@ function pinKey(k) {
   else if (k!==''&&window._pin.length<4)  window._pin+=k;
   $$('#pin-dots span').forEach((d,i)=>d.className=i<window._pin.length?'filled':'');
   if (window._pin.length===4) {
-    if (window._pin===STATE.profile.pincode) { toast('Добро пожаловать! 👋','success'); enterApp(); }
-    else { toast('Неверный PIN','error'); window._pin=''; $$('#pin-dots span').forEach(d=>d.className=''); }
+    const attempt=window._pin; window._pin='';
+    $$('#pin-dots span').forEach(d=>d.className='');
+    DB.verifyPin(STATE.tgId,attempt).then(ok=>{
+      if (ok) { toast('Добро пожаловать! 👋','success'); enterApp(); }
+      else    { toast('Неверный PIN','error'); }
+    }).catch(()=>toast('Ошибка проверки PIN','error'));
   }
 }
 
@@ -2262,18 +2266,15 @@ function renderAdminApp() {
     <button class="nav-btn" onclick="adminTab('analytics')"><span>📈</span>Аналитика</button>
     <button class="nav-btn" onclick="adminTab('clients')"><span>👥</span>Клиенты</button>
     <button class="nav-btn" onclick="adminTab('staff')"><span>🧑‍💼</span>Персонал</button>
-    <button class="nav-btn" onclick="adminTab('branches')"><span>🏢</span>Филиалы</button>
     <button class="nav-btn" onclick="adminTab('groups')"><span>🏊</span>Группы</button>
-    <button class="nav-btn" onclick="adminTab('notifications')"><span>🔔</span>Уведомл.</button>
-    <button class="nav-btn" onclick="adminTab('events')"><span>🏆</span>События</button>
     <button class="nav-btn" onclick="adminTab('control')"><span>🔍</span>Контроль</button>
-    <button class="nav-btn" onclick="adminTab('tech')"><span>🔧</span>Техника</button>
+    <button class="nav-btn" onclick="adminTab('more')"><span>⋯</span>Ещё</button>
   </nav>`);
   adminTab('summary');
 }
 function adminTab(tab) {
   $$('.nav-btn').forEach((b,i)=>b.classList.toggle('active',
-    ['summary','analytics','clients','staff','branches','groups','notifications','events','control','tech'][i]===tab));
+    ['summary','analytics','clients','staff','groups','control','more'][i]===tab));
   if (tab==='summary')       renderAdminSummary();
   if (tab==='analytics')     renderAdminAnalytics();
   if (tab==='clients')       renderAdminClients();
@@ -2285,6 +2286,25 @@ function adminTab(tab) {
   if (tab==='control')       renderAdminControl();
   if (tab==='tech')          renderAdminTech();
   if (tab==='schedule')      renderCoordinatorSchedule();
+  if (tab==='more')          renderAdminMore();
+}
+
+function renderAdminMore() {
+  $('#tab-content').innerHTML=`<div class="tab-pad">
+    <h3 style="margin-bottom:16px">Ещё</h3>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);text-align:left;padding:14px 16px;border-radius:12px"
+        onclick="adminTab('branches')">🏢 Филиалы</button>
+      <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);text-align:left;padding:14px 16px;border-radius:12px"
+        onclick="adminTab('notifications')">🔔 Уведомления</button>
+      <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);text-align:left;padding:14px 16px;border-radius:12px"
+        onclick="adminTab('events')">🏆 События</button>
+      <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);text-align:left;padding:14px 16px;border-radius:12px"
+        onclick="adminTab('tech')">🔧 Техника</button>
+      <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);text-align:left;padding:14px 16px;border-radius:12px"
+        onclick="renderCoordinatorSchedule()">📅 Расписание</button>
+    </div>
+  </div>`;
 }
 
 // ─ ADMIN: АНАЛИТИКА ──────────────────────────
@@ -2412,18 +2432,25 @@ async function renderAdminClients() {
 }
 
 function renderClientList(clients) {
-  if (!clients.length) return '<p class="hint">Нет клиентов</p>';
-  return clients.map(c => `
+  if (!clients.length) return '<p class="hint" style="text-align:center;padding:20px">Не найдено</p>';
+  const today = todayStr();
+  return clients.map(c => {
+    const expired  = c.subscription_end && c.subscription_end < today;
+    const noBalance= c.balance <= 0;
+    const warn     = expired || noBalance;
+    return `
     <div class="client-row" onclick="renderClientProfile('${c.id}','admin-clients')">
-      <div>
-        <div class="cr-name">${c.fio}${c.age?' <span class="hint">('+c.age+' лет)</span>':''}</div>
-        <div class="cr-meta">
-          ${c._trainerFio} · кат.${c.category} · баланс: ${c.balance}
-          ${c.subscription_end?' · до '+c.subscription_end:''}
+      <div style="flex:1;min-width:0">
+        <div class="cr-name" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          ${c.fio}${c.age?` <span class="hint" style="font-weight:400">${c.age}л</span>`:''}
+          ${expired?'<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:rgba(239,68,68,.15);color:#ef4444">истёк</span>':''}
+          ${!expired&&noBalance?'<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:rgba(245,158,11,.15);color:#f59e0b">баланс 0</span>':''}
         </div>
+        <div class="cr-meta">${c._trainerFio} · кат.${c.category} · ${c.balance} ПТ${c.subscription_end?' · до '+fmtDate(c.subscription_end):''}</div>
       </div>
-      <span class="cr-arrow">›</span>
-    </div>`).join('');
+      <span class="cr-arrow" style="color:${warn?'#ef4444':'var(--hint)'}">›</span>
+    </div>`;
+  }).join('');
 }
 
 function filterAdminClients() {
@@ -2466,10 +2493,45 @@ async function loadAdminSummary(year,month,branch) {
   const body=document.getElementById('sum-body'); if (!body) return;
   body.innerHTML=`<div class="center-screen"><div class="spinner"></div></div>`;
   try {
-    const data=await DB.getSummary(year,month,branch||null);
-    body.innerHTML=renderSummaryTable(data,year,month,true);
-    body.innerHTML+=`<button class="btn btn-sm" style="margin-top:12px;width:100%"
-      onclick="doExportSummary(${year},${month},'${branch||''}')">⬇️ Скачать Excel (сводный)</button>`;
+    const [data, allClients] = await Promise.all([
+      DB.getSummary(year,month,branch||null),
+      DB.getAllClients().catch(()=>[]),
+    ]);
+    const filteredClients = branch
+      ? allClients.filter(c=>(c.profiles?.branches||[]).includes(branch))
+      : allClients;
+    const activeClients  = filteredClients.filter(c=>c.balance>0).length;
+    const expiredClients = filteredClients.filter(c=>c.subscription_end && new Date(c.subscription_end)<new Date()).length;
+    const totalSalary    = data.profiles?.length
+      ? (() => {
+          const {groupPayouts=[],groupSubstitutions=[],ptSubstitutions=[]} = data;
+          const adjMap = {}; (data.adjustments||[]).forEach(a=>{adjMap[a.trainer_id]=a;});
+          return (data.profiles||[]).reduce((s,p)=>{
+            const sal = calcSalary({
+              workouts:[...(data.workouts||[]).filter(w=>w.trainer_id===p.id),
+                        ...(ptSubstitutions||[]).filter(w=>w.trainer_id===p.id)],
+              duties:(data.duties||[]).filter(d=>d.trainer_id===p.id),
+              trainerGroups:(data.trainerGroups||[]).filter(tg=>tg.trainer_id===p.id),
+              groupSessions:(data.groupSessions||[]).filter(gs=>gs.trainer_id===p.id),
+              adjustment:adjMap[p.id]||null,
+              groupPayouts:groupPayouts.filter(gp=>gp.trainer_id===p.id),
+              groupSubstitutions, trainerId:p.id,
+            });
+            return s+sal.total;
+          },0);
+        })()
+      : 0;
+
+    body.innerHTML=`
+      <div class="summary-cards" style="margin-bottom:16px">
+        <div class="summary-card"><div class="s-val">${filteredClients.length}</div><div class="s-lbl">Всего клиентов</div></div>
+        <div class="summary-card"><div class="s-val" style="color:var(--success)">${activeClients}</div><div class="s-lbl">Активных</div></div>
+        <div class="summary-card"><div class="s-val" style="color:var(--danger)">${expiredClients}</div><div class="s-lbl">Истёк абон.</div></div>
+        <div class="summary-card accent"><div class="s-val">${fmt(totalSalary)}</div><div class="s-lbl">ФОТ (сум)</div></div>
+      </div>
+      ${renderSummaryTable(data,year,month,true)}
+      <button class="btn btn-sm" style="margin-top:12px;width:100%"
+        onclick="doExportSummary(${year},${month},'${branch||''}')">⬇️ Скачать Excel (сводный)</button>`;
   } catch(e) { body.innerHTML='<p class="hint">Ошибка</p>'; console.error(e); }
 }
 
@@ -2624,12 +2686,13 @@ async function loadStaffList() {
       </div>`).join('');
   } catch(e) { body.innerHTML='<p class="hint">Ошибка</p>'; }
 }
-function renderAddTrainerModal() {
+async function renderAddTrainerModal() {
+  const branches = await cached('branches',()=>DB.getBranches());
   const m=el('div','modal-overlay');
   m.innerHTML=`<div class="modal">
     <div class="modal-header"><h3>Добавить сотрудника</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
-    <div class="form-group"><label>ФИО</label><input id="nt-fio" type="text"></div>
+    <div class="form-group"><label>ФИО</label><input id="nt-fio" type="text" placeholder="Иванов Иван Иванович"></div>
     <div class="form-group"><label>Роль</label>
       <select id="nt-role">
         <option value="trainer">Тренер</option>
@@ -2637,7 +2700,14 @@ function renderAddTrainerModal() {
         <option value="admin">Администратор</option>
         <option value="ceo">Топ-менеджмент</option>
       </select></div>
-    <div class="form-group"><label>Филиалы (через запятую)</label><input id="nt-branches"></div>
+    <div class="form-group"><label>Филиалы</label>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        ${branches.map(b=>`<label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer">
+          <input type="checkbox" class="nt-branch-cb" value="${b.name}" style="width:18px;height:18px">
+          ${b.name}
+        </label>`).join('')}
+      </div>
+    </div>
     <button class="btn btn-primary btn-full" onclick="doAddTrainer()">Добавить</button>
   </div>`;
   document.body.appendChild(m);
@@ -2645,14 +2715,16 @@ function renderAddTrainerModal() {
 async function doAddTrainer() {
   const fio=document.getElementById('nt-fio')?.value.trim();
   const role=document.getElementById('nt-role')?.value;
-  const brs=(document.getElementById('nt-branches')?.value||'').split(',').map(b=>b.trim()).filter(Boolean);
+  const brs=[...document.querySelectorAll('.nt-branch-cb:checked')].map(cb=>cb.value);
   if (!fio)        return toast('Введите ФИО','error');
-  if (!brs.length) return toast('Укажите филиал','error');
+  if (!brs.length) return toast('Выберите хотя бы один филиал','error');
   try { await DB.addTrainer(fio,brs,role); invalidateCache('profiles'); document.querySelector('.modal-overlay')?.remove(); toast('✅','success'); loadStaffList(); }
   catch(e) { toast('Ошибка','error'); console.error(e); }
 }
-function renderEditTrainerModal(id,fioEnc,branches,role) {
+async function renderEditTrainerModal(id,fioEnc,branchesStr,role) {
   const fio=decodeURIComponent(fioEnc);
+  const currentBranches=(branchesStr||'').split(',').filter(Boolean);
+  const allBranches = await cached('branches',()=>DB.getBranches());
   const m=el('div','modal-overlay');
   m.innerHTML=`<div class="modal">
     <div class="modal-header"><h3>Редактировать</h3>
@@ -2665,7 +2737,14 @@ function renderEditTrainerModal(id,fioEnc,branches,role) {
         <option value="admin" ${role==='admin'?'selected':''}>Администратор</option>
         <option value="ceo" ${role==='ceo'?'selected':''}>Топ-менеджмент</option>
       </select></div>
-    <div class="form-group"><label>Филиалы</label><input id="et-branches" value="${branches}"></div>
+    <div class="form-group"><label>Филиалы</label>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        ${allBranches.map(b=>`<label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer">
+          <input type="checkbox" class="et-branch-cb" value="${b.name}" ${currentBranches.includes(b.name)?'checked':''} style="width:18px;height:18px">
+          ${b.name}
+        </label>`).join('')}
+      </div>
+    </div>
     <button class="btn btn-primary btn-full" onclick="doEditTrainer(${id})">Сохранить</button>
   </div>`;
   document.body.appendChild(m);
@@ -2673,9 +2752,10 @@ function renderEditTrainerModal(id,fioEnc,branches,role) {
 async function doEditTrainer(id) {
   const fio=(document.getElementById('et-fio')?.value||'').trim();
   const role=document.getElementById('et-role')?.value;
-  const brs=(document.getElementById('et-branches')?.value||'').split(',').map(b=>b.trim()).filter(Boolean);
+  const brs=[...document.querySelectorAll('.et-branch-cb:checked')].map(cb=>cb.value);
   if (!fio) return toast('Введите ФИО','error');
-  try { await DB.updateProfile(id,{fio,role,branches:brs}); document.querySelector('.modal-overlay')?.remove(); toast('✅','success'); loadStaffList(); }
+  if (!brs.length) return toast('Выберите хотя бы один филиал','error');
+  try { await DB.updateProfile(id,{fio,role,branches:brs}); invalidateCache('profiles'); document.querySelector('.modal-overlay')?.remove(); toast('✅','success'); loadStaffList(); }
   catch(e) { toast('Ошибка','error'); }
 }
 function renderAddGroupClientModal(groupId) {
@@ -4109,7 +4189,7 @@ async function doSaveTrainerProfile() {
   try {
     const fields = {fio};
     if (phone) fields.phone = phone;
-    if (pin) fields.pincode = pin;
+    if (pin) await DB.changePin(STATE.profile.id, pin);
     await DB.updateProfile(STATE.profile.id, fields);
     STATE.profile = {...STATE.profile, ...fields};
     document.querySelector('.modal-overlay')?.remove();
