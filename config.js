@@ -81,9 +81,24 @@ function calcSubEnd(startDate, qty) {
   const d = new Date(startDate);
   if (qty <= 5)       d.setDate(d.getDate() + 14);
   else if (qty <= 10) d.setMonth(d.getMonth() + 1);
-  else                d.setMonth(d.getMonth() + 3);
+  else if (qty <= 25) d.setMonth(d.getMonth() + 3);
+  else                d.setMonth(d.getMonth() + 6); // 50 ПТ = 6 месяцев
   return d.toISOString().slice(0,10);
 }
+
+// Пакеты абонементов
+const SUB_PACKAGES = {
+  child: [
+    {qty:5,  label:'5 ПТ',  period:'2 недели'},
+    {qty:10, label:'10 ПТ', period:'1 месяц'},
+    {qty:25, label:'25 ПТ', period:'3 месяца'},
+    {qty:50, label:'50 ПТ', period:'6 месяцев'},
+  ],
+  adult: [
+    {qty:5,  label:'5 ПТ',  period:'2 недели'},
+    {qty:10, label:'10 ПТ', period:'1 месяц'},
+  ],
+};
 
 function pct(curr, prev) {
   if (!prev) return curr > 0 ? '+100%' : '0%';
