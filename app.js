@@ -1440,9 +1440,9 @@ async function loadTrainerReport(year,month) {
       <div class="summary-cards">
         <div class="summary-card"><div class="s-val">${sal.cat[1]+sal.cat[2]+sal.cat[3]}</div><div class="s-lbl">ПТ</div></div>
         <div class="summary-card"><div class="s-val">${(sal.cat.dropIn1||0)+(sal.cat.dropIn2||0)+(sal.cat.dropIn3||0)}</div><div class="s-lbl">Разовые</div></div>
-        <div class="summary-card"><div class="s-val">${sal.cat.debt}</div><div class="s-lbl">В долг</div></div>
         <div class="summary-card"><div class="s-val">${sal.hours.toFixed(1)}ч</div><div class="s-lbl">Деж.</div></div>
-        <div class="summary-card accent" style="grid-column:span 2">
+        ${sal.adultSum+sal.childSum>0?`<div class="summary-card"><div class="s-val" style="font-size:13px">${fmt(sal.adultSum+sal.childSum)}</div><div class="s-lbl">Группы</div></div>`:''}
+        <div class="summary-card accent" style="grid-column:span ${sal.adultSum+sal.childSum>0?1:2}">
           <div class="s-val">${trainerGroups.some(tg=>tg.group_types?.name?.toLowerCase().includes('art'))?'—':fmt(sal.total)}</div>
           <div class="s-lbl">К выплате (сум)${trainerGroups.some(tg=>tg.group_types?.name?.toLowerCase().includes('art'))?'<br><span style="font-size:9px;opacity:.6">ЗП по запросу у координатора</span>':''}</div>
         </div>
@@ -1468,7 +1468,21 @@ async function loadTrainerReport(year,month) {
             <button class="btn btn-sm" onclick="renderClientProfile('${w.client_id}','report')" style="background:var(--card);border:1px solid var(--border)">
               👤 Профиль</button>
           </div>
-        </div>`).join('')}`;
+        </div>`).join('')}
+      ${groupSessions.length?`
+        <h4 style="margin-top:16px">Групповые занятия</h4>
+        ${groupSessions.map(gs=>{
+          const rate = gs.group_types?.billing_model==='headcount' ? getAdultGroupRate(gs.headcount) : 0;
+          return `<div class="history-item">
+            <div class="hi-main">
+              <span class="hi-client">${gs.group_types?.name||'Группа'}</span>
+              ${rate>0?`<span class="hi-cat" style="background:rgba(16,185,129,.15);color:#10b981">${fmt(rate)} сум</span>`:''}
+              ${gs.headcount?`<span class="hint">${gs.headcount} чел.</span>`:''}
+            </div>
+            <div class="hi-sub">${fmtDate(gs.session_date)} · ${gs.branch||''}</div>
+          </div>`;
+        }).join('')}`:''}
+      `;
   } catch(e) { body.innerHTML='<p class="hint">Ошибка</p>'; console.error(e); }
 }
 async function doConfirmDebt(wid,cid) {
@@ -2566,7 +2580,7 @@ function renderSummaryTable(data,year,month,isAdmin) {
       trainerId:p.id,
     });
     return {p,sal};
-  }).filter(r=>r.sal.cat[1]+r.sal.cat[2]+r.sal.cat[3]+r.sal.hours+(r.sal.cat.dropIn1||0)+(r.sal.cat.dropIn2||0)+(r.sal.cat.dropIn3||0)>0);
+  }).filter(r=>r.sal.total>0);
   if (!rows.length) return '<p class="hint">Нет данных за период</p>';
   const grand=rows.reduce((s,r)=>s+r.sal.total,0);
   return `<div class="admin-table-wrap"><table class="admin-table">
