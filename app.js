@@ -485,6 +485,17 @@ function toggleSubstitute(cb) {
 }
 
 async function doLogWorkout() {
+  if (_pending.has('logWorkout')) return;
+  _pending.add('logWorkout');
+  const btn = document.querySelector('button[onclick="doLogWorkout()"]');
+  if (btn) { btn.disabled=true; btn.textContent='Списываем...'; }
+  try { await _doLogWorkoutInner(); }
+  finally {
+    _pending.delete('logWorkout');
+    if (btn) { btn.disabled=false; btn.textContent='Списать'; }
+  }
+}
+async function _doLogWorkoutInner() {
   const clientSel=$('#wk-client');
   const clientId=clientSel?.value;
   if (!clientId) return toast('Выберите клиента','error');
@@ -2398,10 +2409,12 @@ async function loadAnalytics(year, month, branch) {
 // ─ ADMIN: КЛИЕНТЫ (все) ──────────────────────
 async function renderAdminClients() {
   $('#tab-content').innerHTML = `<div class="center-screen"><div class="spinner"></div></div>`;
-  const branches = await cached('branches', ()=>DB.getBranches());
-
-  // Один запрос вместо N по тренерам
-  const allClients = await DB.getAllClients();
+  const [branches, allProfiles, allClients] = await Promise.all([
+    cached('branches', ()=>DB.getBranches()),
+    cached('profiles', ()=>DB.getAllProfiles()),
+    DB.getAllClients(),
+  ]);
+  const trainers = allProfiles.filter(p=>['trainer','senior_trainer'].includes(p.role));
   allClients.forEach(cl=>{
     cl._trainerFio      = cl.profiles?.fio||'—';
     cl._trainerBranches = cl.profiles?.branches||[];
