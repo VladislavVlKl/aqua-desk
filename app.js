@@ -1241,10 +1241,20 @@ async function renderDutyTab() {
     <h4 style="margin-top:20px">Дежурства в этом месяце</h4>
     ${!duties.length?'<p class="hint">Нет записей</p>':duties.map(d=>{
       const h=hoursFromDuty(d.start_time,d.end_time);
+      const startLocal=new Date(d.start_time).toISOString().slice(0,16);
+      const endLocal  =new Date(d.end_time).toISOString().slice(0,16);
       return `<div class="history-item">
-        <div class="hi-main">
-          <span class="hi-client">${d.branch}</span>
-          <span class="hi-cat">${h.toFixed(2)}ч = ${fmt(Math.round(h*RATES.duty_per_hour))} сум</span>
+        <div class="hi-main" style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <span class="hi-client">${d.branch}</span>
+            <span class="hi-cat">${h.toFixed(2)}ч = ${fmt(Math.round(h*RATES.duty_per_hour))} сум</span>
+          </div>
+          <div style="display:flex;gap:4px">
+            <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
+              onclick="renderEditDutyModal('${d.id}','${startLocal}','${endLocal}','${d.branch}')">✏️</button>
+            <button class="btn btn-sm btn-danger"
+              onclick="doDeleteDuty('${d.id}')">🗑</button>
+          </div>
         </div>
         <div class="hi-sub">${fmtDT(d.start_time)} → ${fmtDT(d.end_time)}</div>
       </div>`;
@@ -1268,6 +1278,45 @@ async function doLogDuty() {
     });
     toast(`✅ ${h.toFixed(1)}ч = ${fmt(Math.round(h*RATES.duty_per_hour))} сум`,'success');
     renderDutyTab();
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+
+function renderEditDutyModal(dutyId, start, end, branch) {
+  const m=el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>Редактировать дежурство</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="form-group" style="display:flex;gap:10px">
+      <div style="flex:1"><label>Начало</label>
+        <input type="datetime-local" id="ed-start" value="${start}"></div>
+      <div style="flex:1"><label>Конец</label>
+        <input type="datetime-local" id="ed-end" value="${end}"></div>
+    </div>
+    <button class="btn btn-primary btn-full" onclick="doEditDuty('${dutyId}')">Сохранить</button>
+  </div>`;
+  document.body.appendChild(m);
+}
+async function doEditDuty(dutyId) {
+  const start = document.getElementById('ed-start')?.value;
+  const end   = document.getElementById('ed-end')?.value;
+  if (!start||!end||start>=end) return toast('Проверьте время','error');
+  const h = hoursFromDuty(new Date(start),new Date(end));
+  if (h>16) return toast('Не более 16 часов','error');
+  try {
+    await sb().from('duties').update({
+      start_time:new Date(start).toISOString(),
+      end_time:new Date(end).toISOString(),
+    }).eq('id',dutyId);
+    document.querySelector('.modal-overlay')?.remove();
+    toast(`✅ ${h.toFixed(1)}ч сохранено`,'success');
+    renderDutyTab();
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+async function doDeleteDuty(dutyId) {
+  if (!confirm('Удалить дежурство?')) return;
+  try {
+    await sb().from('duties').delete().eq('id',dutyId);
+    toast('Удалено','success'); renderDutyTab();
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 
@@ -2380,11 +2429,86 @@ function renderAdminMore() {
       <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);text-align:left;padding:14px 16px;border-radius:12px"
         onclick="adminTab('events')">🏆 События</button>
       <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);text-align:left;padding:14px 16px;border-radius:12px"
-        onclick="adminTab('tech')">🔧 Техника</button>
+        onclick="adminTab('tech')">⚙️ Операционка</button>
       <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);text-align:left;padding:14px 16px;border-radius:12px"
         onclick="renderCoordinatorSchedule()">📅 Расписание</button>
+      <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);text-align:left;padding:14px 16px;border-radius:12px"
+        onclick="renderAdminSessionNotes()">📝 Конспекты и цели</button>
     </div>
   </div>`;
+}
+
+async function renderAdminSessionNotes() {
+  setupBack(()=>{renderAdminApp();adminTab('more');setupBack(null);});
+  $('#tab-content').innerHTML=`<div class="tab-pad">
+    <div class="section-header"><h3>📝 Конспекты и цели</h3></div>
+    <div class="form-group" style="display:flex;gap:8px">
+      <select id="sn-trainer" onchange="loadAdminSessionNotes()" style="flex:2">
+        <option value="">Все тренеры</option>
+      </select>
+      <input type="month" id="sn-month" value="${new Date().toISOString().slice(0,7)}"
+        onchange="loadAdminSessionNotes()" style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text)">
+    </div>
+    <div id="sn-body"><div class="center-screen"><div class="spinner"></div></div></div>
+  </div>`;
+
+  // Загружаем тренеров
+  const profiles = await cached('profiles',()=>DB.getAllProfiles());
+  const trainers = profiles.filter(p=>['trainer','senior_trainer'].includes(p.role));
+  const sel = document.getElementById('sn-trainer');
+  if (sel) sel.innerHTML += trainers.map(t=>`<option value="${t.id}">${t.fio}</option>`).join('');
+
+  await loadAdminSessionNotes();
+}
+
+async function loadAdminSessionNotes() {
+  const body = document.getElementById('sn-body'); if (!body) return;
+  body.innerHTML=`<div class="center-screen"><div class="spinner"></div></div>`;
+  const trainerId = document.getElementById('sn-trainer')?.value||null;
+  const monthVal  = document.getElementById('sn-month')?.value||new Date().toISOString().slice(0,7);
+  const from = new Date(monthVal+'-01').toISOString();
+  const to   = new Date(new Date(monthVal+'-01').getFullYear(), new Date(monthVal+'-01').getMonth()+1, 1).toISOString();
+  try {
+    let q = sb().from('session_notes')
+      .select('*, clients(fio), profiles!trainer_id(fio), workouts(workout_date,category_at_moment)')
+      .gte('created_at',from).lt('created_at',to)
+      .order('created_at',{ascending:false});
+    if (trainerId) q = q.eq('trainer_id', parseInt(trainerId));
+    const {data:notes} = await q;
+
+    // Цели за месяц
+    let gq = sb().from('training_goals')
+      .select('*, clients(fio,profiles!trainer_id(fio))')
+      .gte('created_at',from).lt('created_at',to)
+      .order('created_at',{ascending:false});
+    const {data:goals} = await gq;
+
+    body.innerHTML=`
+      <h4>Конспекты (${(notes||[]).length})</h4>
+      ${!(notes||[]).length?'<p class="hint">Нет</p>':(notes||[]).map(n=>`
+        <div class="history-item">
+          <div class="hi-main">
+            <span class="hi-client">${n.clients?.fio||'—'}</span>
+            <span class="hint" style="font-size:12px">← ${n.profiles?.fio||'—'}</span>
+            ${n.workouts?.category_at_moment?`<span class="hi-cat cat-${n.workouts.category_at_moment}">Кат.${n.workouts.category_at_moment}</span>`:''}
+          </div>
+          ${n.workouts?.workout_date?`<div class="hi-sub">${fmtDate(n.workouts.workout_date)}</div>`:''}
+          ${n.accomplishments?`<div style="font-size:13px;margin-top:4px"><b>Что делали:</b> ${n.accomplishments}</div>`:''}
+          ${n.next_task?`<div style="font-size:13px;color:var(--hint)"><b>Задача:</b> ${n.next_task}</div>`:''}
+        </div>`).join('')}
+
+      <h4 style="margin-top:20px">Цели (${(goals||[]).length})</h4>
+      ${!(goals||[]).length?'<p class="hint">Нет</p>':(goals||[]).map(g=>`
+        <div class="history-item">
+          <div class="hi-main">
+            <span class="hi-client">${g.clients?.fio||'—'}</span>
+            <span class="hint" style="font-size:12px">← ${g.clients?.profiles?.fio||'—'}</span>
+          </div>
+          <div style="font-size:13px;margin-top:4px">${g.text||'—'}</div>
+          <div class="hi-sub">${fmtDate(g.created_at)}</div>
+        </div>`).join('')}
+    `;
+  } catch(e) { body.innerHTML='<p class="hint">Ошибка</p>'; console.error(e); }
 }
 
 // ─ ADMIN: АНАЛИТИКА ──────────────────────────
@@ -3741,9 +3865,9 @@ async function renderAdminControl() {
 }
 // ─── ТЕХНИЧКА ────────────────────────────────────────────────────────────────
 
-const TECH_SECTIONS = ['equipment','issues','shopping','bills'];
-const TECH_LABELS   = {equipment:'Оборудование', issues:'Поломки', shopping:'Закупки', bills:'Счета'};
-const TECH_ICONS    = {equipment:'🔩', issues:'🔴', shopping:'🛒', bills:'💳'};
+const TECH_SECTIONS = ['chlorine','plans','equipment','issues','shopping','bills'];
+const TECH_LABELS   = {chlorine:'Хлор', plans:'Планы', equipment:'Оборудование', issues:'Поломки', shopping:'Закупки', bills:'Счета'};
+const TECH_ICONS    = {chlorine:'🧪', plans:'📋', equipment:'🔩', issues:'🔴', shopping:'🛒', bills:'💳'};
 const EQUIP_CATS    = ['Насосы','Фильтры','Нагреватели','Дорожки','Инвентарь','Электрика','Прочее'];
 const EQUIP_STATUS  = {ok:'✅ Исправно', broken:'🔴 Сломано', maintenance:'🟡 Обслуживание'};
 const PRIORITY_LBL  = {urgent:'🔴 Срочно', normal:'🟡 Обычный', low:'⚪ Низкий'};
@@ -3751,14 +3875,15 @@ const ISSUE_STATUS  = {open:'Открыта', in_progress:'В работе', res
 const BILL_CATS     = ['Химия','Электричество','Вода','Ремонт','Инвентарь','Прочее'];
 
 let _techBranch = '';
-let _techSection = 'equipment';
+let _techSection = 'chlorine';
 
 async function renderAdminTech() {
   const allBranches = await cached('branches',()=>DB.getBranches());
   const branches = allBranches.map(b=>b.name);
   if (!_techBranch) _techBranch = branches[0]||'';
   $('#tab-content').innerHTML=`<div class="tab-pad">
-    <div class="section-header"><h3>🔧 Техника</h3></div>
+    <div class="section-header"><h3>⚙️ Операционка</h3>
+      <span class="hint">${_techBranch}</span></div>
     ${branches.length>1?`<div class="form-group">
       <select id="tech-branch" onchange="_techBranch=this.value;loadTechSection()">
         ${branches.map(b=>`<option ${b===_techBranch?'selected':''}>${b}</option>`).join('')}
@@ -3778,6 +3903,8 @@ async function loadTechSection() {
   const branch = document.getElementById('tech-branch')?.value || _techBranch;
   _techBranch = branch;
   try {
+    if (_techSection==='chlorine')  await renderTechChlorine(body, branch);
+    if (_techSection==='plans')     await renderTechPlans(body, branch);
     if (_techSection==='equipment') await renderTechEquipment(body, branch);
     if (_techSection==='issues')    await renderTechIssues(body, branch);
     if (_techSection==='shopping')  await renderTechShopping(body, branch);
@@ -4041,6 +4168,150 @@ async function toggleBillPaid(id, currentPaid) {
     paid_at: !currentPaid ? new Date().toISOString() : null
   });
   toast('Обновлено','success'); loadTechSection();
+}
+
+// ── ХЛОР ──────────────────────────────────────
+async function renderTechChlorine(body, branch) {
+  const {data:orders} = await sb().from('chlorine_orders')
+    .select('*').eq('branch',branch).order('order_date',{ascending:false});
+  const totalKg   = (orders||[]).reduce((s,o)=>s+Number(o.quantity_kg),0);
+  const totalSum  = (orders||[]).reduce((s,o)=>s+Number(o.price_total),0);
+  body.innerHTML=`
+    <button class="btn btn-sm btn-primary" style="margin-bottom:12px;width:100%"
+      onclick="renderAddChlorineModal('${branch}')">+ Добавить закуп</button>
+    <div class="summary-cards" style="margin-bottom:16px">
+      <div class="summary-card"><div class="s-val">${totalKg.toFixed(1)}</div><div class="s-lbl">кг всего</div></div>
+      <div class="summary-card"><div class="s-val" style="font-size:14px">${fmt(Math.round(totalSum))}</div><div class="s-lbl">потрачено</div></div>
+    </div>
+    ${!(orders||[]).length?'<p class="hint">Закупов нет</p>':(orders||[]).map(o=>`
+      <div class="staff-card" style="flex-direction:column;gap:4px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div class="staff-fio">${o.quantity_kg} кг · ${fmt(o.price_total)} сум</div>
+            <div class="staff-meta">${fmtDate(o.order_date)}${o.supplier?' · '+o.supplier:''}${o.note?' · '+o.note:''}</div>
+          </div>
+          <button class="btn btn-sm btn-danger" onclick="deleteChlorineOrder(${o.id})">🗑</button>
+        </div>
+      </div>`).join('')}`;
+}
+function renderAddChlorineModal(branch) {
+  const m=el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>🧪 Закуп хлора</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="form-group"><label>Дата</label>
+      <input type="date" id="chl-date" value="${todayStr()}"></div>
+    <div class="form-group"><label>Количество (кг)</label>
+      <input type="number" id="chl-qty" min="0.1" step="0.1" placeholder="50"></div>
+    <div class="form-group"><label>Сумма (сум)</label>
+      <input type="number" id="chl-sum" placeholder="500000"></div>
+    <div class="form-group"><label>Поставщик</label>
+      <input id="chl-sup" placeholder="Название компании"></div>
+    <div class="form-group"><label>Примечание</label>
+      <input id="chl-note" placeholder=""></div>
+    <button class="btn btn-primary btn-full" onclick="doAddChlorine('${branch}')">Добавить</button>
+  </div>`;
+  document.body.appendChild(m);
+}
+async function doAddChlorine(branch) {
+  const date = document.getElementById('chl-date')?.value;
+  const qty  = parseFloat(document.getElementById('chl-qty')?.value||0);
+  const sum  = parseFloat(document.getElementById('chl-sum')?.value||0);
+  const sup  = document.getElementById('chl-sup')?.value.trim()||null;
+  const note = document.getElementById('chl-note')?.value.trim()||null;
+  if (!qty||!sum) return toast('Укажите количество и сумму','error');
+  try {
+    await sb().from('chlorine_orders').insert({branch,order_date:date,quantity_kg:qty,price_total:sum,supplier:sup,note});
+    document.querySelector('.modal-overlay')?.remove();
+    toast('✅ Добавлено','success'); loadTechSection();
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+async function deleteChlorineOrder(id) {
+  if (!confirm('Удалить запись?')) return;
+  try { await sb().from('chlorine_orders').delete().eq('id',id); toast('Удалено','success'); loadTechSection(); }
+  catch(e) { toast('Ошибка','error'); }
+}
+
+// ── ПЛАНЫ ─────────────────────────────────────
+const PLAN_TYPES = {
+  strategy: {label:'Стратегия', icon:'🎯', color:'rgba(124,58,237,.15)', textColor:'#a78bfa'},
+  calendar:  {label:'Календарный план', icon:'📅', color:'rgba(59,130,246,.15)', textColor:'#60a5fa'},
+  event:     {label:'Ивент', icon:'🏆', color:'rgba(16,185,129,.15)', textColor:'#10b981'},
+  task:      {label:'Важная задача', icon:'⚡', color:'rgba(239,68,68,.15)', textColor:'#ef4444'},
+};
+async function renderTechPlans(body, branch) {
+  const {data:plans} = await sb().from('ops_plans')
+    .select('*, profiles!created_by(fio)')
+    .or(`branch.is.null,branch.eq.${branch}`)
+    .neq('status','cancelled').order('due_date',{ascending:true,nullsFirst:false});
+  body.innerHTML=`
+    <button class="btn btn-sm btn-primary" style="margin-bottom:12px;width:100%"
+      onclick="renderAddPlanModal('${branch}')">+ Добавить</button>
+    ${!(plans||[]).length?'<p class="hint">Нет планов</p>':
+      Object.keys(PLAN_TYPES).map(type=>{
+        const items = (plans||[]).filter(p=>p.plan_type===type);
+        if (!items.length) return '';
+        const pt = PLAN_TYPES[type];
+        return `<div style="margin-bottom:16px">
+          <div style="font-weight:700;font-size:13px;margin-bottom:8px">${pt.icon} ${pt.label}</div>
+          ${items.map(p=>`<div class="staff-card" style="flex-direction:column;gap:4px;border-left:3px solid ${pt.textColor}">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start">
+              <div>
+                <div class="staff-fio">${p.title}</div>
+                ${p.description?`<div class="staff-meta">${p.description}</div>`:''}
+                <div class="staff-meta">${p.due_date?'до '+fmtDate(p.due_date):''}${p.profiles?.fio?' · '+p.profiles.fio:''}</div>
+              </div>
+              <div style="display:flex;gap:4px">
+                ${p.status==='active'?`<button class="btn btn-sm" style="background:rgba(16,185,129,.15);color:#10b981;font-size:11px"
+                  onclick="updatePlanStatus(${p.id},'done')">✓</button>`:'<span style="font-size:11px;color:#10b981">✓</span>'}
+                <button class="btn btn-sm btn-danger" style="font-size:11px"
+                  onclick="updatePlanStatus(${p.id},'cancelled')">✕</button>
+              </div>
+            </div>
+          </div>`).join('')}
+        </div>`;
+      }).join('')}`;
+}
+function renderAddPlanModal(branch) {
+  const m=el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>📋 Новый план</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="form-group"><label>Тип</label>
+      <select id="pl-type">
+        ${Object.entries(PLAN_TYPES).map(([k,v])=>`<option value="${k}">${v.icon} ${v.label}</option>`).join('')}
+      </select></div>
+    <div class="form-group"><label>Название</label>
+      <input id="pl-title" placeholder="Описание..."></div>
+    <div class="form-group"><label>Подробнее (необязательно)</label>
+      <textarea id="pl-desc" rows="2"></textarea></div>
+    <div class="form-group"><label>Дата (необязательно)</label>
+      <input type="date" id="pl-date"></div>
+    <div class="form-group"><label>Филиал</label>
+      <select id="pl-branch">
+        <option value="">Все филиалы</option>
+        <option value="${branch}" selected>${branch}</option>
+      </select></div>
+    <button class="btn btn-primary btn-full" onclick="doAddPlan()">Добавить</button>
+  </div>`;
+  document.body.appendChild(m);
+}
+async function doAddPlan() {
+  const type  = document.getElementById('pl-type')?.value;
+  const title = document.getElementById('pl-title')?.value.trim();
+  const desc  = document.getElementById('pl-desc')?.value.trim()||null;
+  const date  = document.getElementById('pl-date')?.value||null;
+  const branch= document.getElementById('pl-branch')?.value||null;
+  if (!title) return toast('Введите название','error');
+  try {
+    await sb().from('ops_plans').insert({plan_type:type,title,description:desc,due_date:date,branch:branch||null,created_by:STATE.profile.id});
+    document.querySelector('.modal-overlay')?.remove();
+    toast('✅ Добавлено','success'); loadTechSection();
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+async function updatePlanStatus(id, status) {
+  try { await sb().from('ops_plans').update({status}).eq('id',id); toast('Обновлено','success'); loadTechSection(); }
+  catch(e) { toast('Ошибка','error'); }
 }
 
 // ── ОБЩЕЕ УДАЛЕНИЕ ────────────────────────────
