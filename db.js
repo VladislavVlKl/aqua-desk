@@ -91,6 +91,21 @@ const DB = {
     const {error} = await sb().from('branches').delete().eq('id',id);
     if (error) throw error;
   },
+  // ─── BRANCH ACCESS (субпанель) ───────────────
+  async getBranchAccess(trainerId) {
+    const {data,error} = await sb().from('branch_access')
+      .select('branch').eq('trainer_id',trainerId);
+    if (error) throw error; return (data||[]).map(r=>r.branch);
+  },
+  async setBranchAccess(trainerId, branches) {
+    // Удаляем старые и вставляем новые
+    await sb().from('branch_access').delete().eq('trainer_id',trainerId);
+    if (branches.length) {
+      await sb().from('branch_access').insert(
+        branches.map(b=>({trainer_id:trainerId, branch:b}))
+      );
+    }
+  },
   async renameBranch(oldName, newName) {
     const {error:e1} = await sb().from('branches')
       .update({name:newName.trim()}).eq('name',oldName);
