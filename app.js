@@ -2089,7 +2089,7 @@ async function doExportSummary(year,month,branch) {
   if (!window.Telegram?.WebApp?.initData) {
     await ensureXlsx();
     const data=await DB.getSummary(year,month,branch||null);
-    exportSummaryExcel(year,month,data); return;
+    exportSummaryExcel(year,month,data,branch||''); return;
   }
   const m=el('div','modal-overlay');
   m.innerHTML=`<div class="modal">

@@ -950,7 +950,7 @@ async unassignTrainerGroup(id) {
     const toDay   = new Date(year,month,1).toISOString().slice(0,10);
 
     let wq  = sb().from('workouts')
-      .select('trainer_id,category_at_moment,branch,is_debt,debt_confirmed_at,is_drop_in,drop_in_category')
+      .select('trainer_id,category_at_moment,branch,is_debt,debt_confirmed_at,is_drop_in,drop_in_category,workout_date,clients!client_id(age)')
       .gte('workout_date',from).lt('workout_date',to);
     if (branch) wq = wq.eq('branch',branch);
 
@@ -966,7 +966,7 @@ async unassignTrainerGroup(id) {
     if (branch) tgq = tgq.eq('branch',branch);
 
     let gsq = sb().from('group_sessions')
-      .select('trainer_id,group_type_id,headcount,group_types(billing_model)')
+      .select('trainer_id,group_type_id,headcount,session_date,group_types(billing_model)')
       .gte('session_date',fromDay).lt('session_date',toDay);
     if (branch) gsq = gsq.eq('branch',branch);
 
