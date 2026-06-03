@@ -1499,8 +1499,8 @@ async function loadTrainerReport(year,month) {
         <div class="summary-card"><div class="s-val">${sal.hours.toFixed(1)}ч</div><div class="s-lbl">Деж.</div></div>
         ${sal.adultSum+sal.childSum>0?`<div class="summary-card"><div class="s-val" style="font-size:13px">${fmt(sal.adultSum+sal.childSum)}</div><div class="s-lbl">Группы</div></div>`:''}
         <div class="summary-card accent" style="grid-column:span ${sal.adultSum+sal.childSum>0?1:2}">
-          <div class="s-val">${trainerGroups.some(tg=>tg.group_types?.name?.toLowerCase().includes('art'))?'—':fmt(sal.total)}</div>
-          <div class="s-lbl">К выплате (сум)${trainerGroups.some(tg=>tg.group_types?.name?.toLowerCase().includes('art'))?'<br><span style="font-size:9px;opacity:.6">ЗП по запросу у координатора</span>':''}</div>
+          <div class="s-val">${fmt(sal.total)}</div>
+          <div class="s-lbl">К выплате (сум)</div>
         </div>
       </div>
       <h4>Тренировки за месяц</h4>
