@@ -467,7 +467,7 @@ async unassignTrainerGroup(id) {
     const nextMonth = new Date(month); nextMonth.setMonth(nextMonth.getMonth()+1);
     const nextMonthStr = nextMonth.toISOString().slice(0,10);
     const [clients, payments, notes, attendance, payout, trainers] = await Promise.all([
-      sb().from('group_clients').select('*').eq('group_id',groupId),
+      sb().from('group_clients').select('*').eq('group_id',groupId).eq('is_active',true).order('name'),
       sb().from('group_payments').select('*').eq('group_id',groupId).eq('month',month),
       sb().from('group_progress_notes').select('*').eq('group_id',groupId).eq('month',month),
       sb().from('group_attendance').select('*').eq('group_id',groupId)
@@ -628,18 +628,44 @@ async unassignTrainerGroup(id) {
   // ─── TODAY / CONFIRMATIONS ───────────────────
   async getTodaySlots(trainerId, dateStr) {
     const dow = (new Date(dateStr+'T12:00:00').getDay()+6) % 7;
-    const {data:slots,error:e1} = await sb().from('schedule_slots')
+
+    // Повторяющиеся слоты на этот день недели
+    const {data:recurring, error:e1} = await sb().from('schedule_slots')
       .select('*, clients(fio,balance,category,age,drop_in_used), group_types(name,type,billing_model)')
       .eq('trainer_id',trainerId).eq('day_of_week',dow).eq('active',true)
+      .is('specific_date',null)
       .order('start_time');
     if (e1) throw e1;
-    if (!slots?.length) return [];
-    const slotIds = slots.map(s=>s.id);
+
+    // Разовые слоты именно на эту дату
+    const {data:oneTime} = await sb().from('schedule_slots')
+      .select('*, clients(fio,balance,category,age,drop_in_used), group_types(name,type,billing_model)')
+      .eq('trainer_id',trainerId).eq('active',true)
+      .eq('specific_date',dateStr)
+      .order('start_time');
+
+    const allSlots = [...(recurring||[]), ...(oneTime||[])];
+    if (!allSlots.length) return [];
+
+    const recurringIds = (recurring||[]).map(s=>s.id);
+
+    // Проверяем отменённые повторяющиеся
+    const {data:cancels} = recurringIds.length
+      ? await sb().from('schedule_cancellations')
+          .select('slot_id').in('slot_id',recurringIds).eq('cancel_date',dateStr)
+      : {data:[]};
+    const cancelledSet = new Set((cancels||[]).map(c=>c.slot_id));
+
+    // Подтверждения
+    const slotIds = allSlots.map(s=>s.id);
     const {data:confs} = await sb().from('schedule_confirmations')
       .select('*').in('slot_id',slotIds).eq('session_date',dateStr);
     const confMap = {};
     (confs||[]).forEach(c=>{ confMap[c.slot_id]=c; });
-    return slots.map(s=>({...s, confirmation:confMap[s.id]||null}));
+
+    return allSlots
+      .filter(s=>!cancelledSet.has(s.id))
+      .map(s=>({...s, confirmation:confMap[s.id]||null}));
   },
   async upsertConfirmation(slotId, date, fields) {
     const {data,error} = await sb().from('schedule_confirmations')

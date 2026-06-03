@@ -5855,7 +5855,7 @@ async function renderCoordinatorSchedule() {
       </div>
     </div>
     ${branches.length>1?`<select id="cs-branch" style="width:100%;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text);margin-bottom:12px"
-      onchange="selBranch=this.value;loadCoordSchedule(selBranch,weekOffset)">
+      onchange="selBranch=this.value;window._csLoad&&window._csLoad()">
       ${branches.map(b=>`<option>${b}</option>`).join('')}
     </select>`:''}
     <div id="cs-body"><div class="center-screen"><div class="spinner"></div></div></div>
@@ -5864,6 +5864,7 @@ async function renderCoordinatorSchedule() {
   let weekOffset = 0;
 
   const load = async () => {
+    window._csLoad = load; // делаем доступной из onchange
     const body = document.getElementById('cs-body'); if (!body) return;
     const branch = document.getElementById('cs-branch')?.value || selBranch;
     const now = new Date();
