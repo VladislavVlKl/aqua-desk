@@ -550,3 +550,124 @@ function exportChildGroupExcel(groupId, monthStr, report, groupInfo) {
   const safeName = groupName.replace(/[\\/:*?"<>|]/g,'').slice(0,20);
   XLSX.writeFile(wb, `ГП_${safeName}_${branch}_${monthLabel}.xlsx`);
 }
+
+// ─────────────────────────────────────────────
+// ФИЛИАЛЬНАЯ ВЫГРУЗКА ДЕТСКИХ ГП
+// Один файл = один филиал, лист на каждую группу + сводный
+// ─────────────────────────────────────────────
+function exportBranchChildGroupsExcel(branch, monthStr, groupReports) {
+  const XLSX = window.XLSX;
+  const wb   = XLSX.utils.book_new();
+  const monthLabel = new Date(monthStr).toLocaleDateString('ru-RU',{month:'long',year:'numeric'});
+
+  // ── Сводный лист ──
+  const summaryRows = [];
+  summaryRows.push([tc(`Детские группы — ${branch} — ${monthLabel}`, titleStyle())]);
+  summaryRows.push([]);
+  summaryRows.push(sr(['Группа','Тренер','Детей','Занятий','Оплатили','Не оплатили','Сумма оплат','Задолженность'], hStyle()));
+
+  let totKids=0, totPaid=0, totUnpaid=0, totSum=0, totDebt=0;
+
+  groupReports.forEach(({tg, report}, i) => {
+    const {clients, payments, attendance} = report;
+    const active = (clients||[]).filter(c=>c.is_active!==false);
+    const sessionDates = [...new Set((attendance||[]).map(a=>a.session_date))];
+    const paid   = (payments||[]).filter(p=>p.paid).length;
+    const unpaid = active.length - paid;
+    const sumPaid = (payments||[]).filter(p=>p.paid).reduce((s,p)=>s+Number(p.amount||0),0);
+    const debt    = (payments||[]).filter(p=>!p.paid).reduce((s,p)=>s+Number(p.amount||0),0);
+
+    summaryRows.push(sr([
+      tg.group_types?.name||'—',
+      tg.profiles?.fio||'—',
+      active.length, sessionDates.length,
+      paid, unpaid,
+      mc(sumPaid), mc(debt),
+    ], rStyle(i%2===0)));
+
+    totKids   += active.length;
+    totPaid   += paid;
+    totUnpaid += unpaid;
+    totSum    += sumPaid;
+    totDebt   += debt;
+  });
+
+  summaryRows.push(sr(['ИТОГО:','', totKids,'', totPaid, totUnpaid, mc(totSum), mc(totDebt)], gStyle()));
+
+  const wsSum = buildSheet(summaryRows);
+  wsSum['!cols'] = [{wch:22},{wch:22},{wch:8},{wch:8},{wch:10},{wch:12},{wch:14},{wch:14}];
+  XLSX.utils.book_append_sheet(wb, wsSum, 'Сводка');
+
+  // ── Лист на каждую группу ──
+  groupReports.forEach(({tg, report}) => {
+    const {clients, payments, notes, attendance, payouts} = report;
+    const groupName  = tg.group_types?.name || 'Группа';
+    const trainerFio = tg.profiles?.fio || '—';
+    const groupInfo  = { branch, group_types:{name:groupName}, profiles:{fio:trainerFio} };
+
+    // Переиспользуем логику из exportChildGroupExcel — строим листы вручную
+    const active = (clients||[]).filter(c=>c.is_active!==false);
+    const payMap  = Object.fromEntries((payments||[]).map(p=>[p.group_client_id, p]));
+    const noteMap = Object.fromEntries((notes||[]).map(n=>[n.group_client_id, n]));
+    const sessionDates = [...new Set((attendance||[]).map(a=>a.session_date))].sort();
+    const attByClient = {};
+    (attendance||[]).forEach(a=>{
+      if (!attByClient[a.group_client_id]) attByClient[a.group_client_id]=0;
+      if (a.attended) attByClient[a.group_client_id]++;
+    });
+    const totalPaid   = (payments||[]).filter(p=>p.paid).reduce((s,p)=>s+Number(p.amount||0),0);
+    const totalUnpaid = (payments||[]).filter(p=>!p.paid).reduce((s,p)=>s+Number(p.amount||0),0);
+
+    const rows = [];
+    rows.push([tc(`${groupName} — ${branch} — ${monthLabel}`, titleStyle())]);
+    rows.push([tc(`Тренер: ${trainerFio}`, {font:{sz:11,name:'Arial',color:{rgb:XL.TEXT_DARK}}})]);
+    rows.push([tc(`Занятий: ${sessionDates.length}`, {font:{sz:11,name:'Arial',color:{rgb:XL.TEXT_DARK}}})]);
+    rows.push([]);
+    rows.push(sr(['N','Имя','Возраст','Явка','%','Сумма','Оплачено','Дата оплаты','Долг','Заметка'], hStyle()));
+
+    active.forEach((c,i)=>{
+      const pay  = payMap[c.id];
+      const note = noteMap[c.id];
+      const att  = attByClient[c.id]||0;
+      const pctV = sessionDates.length ? Math.round(att/sessionDates.length*100) : 0;
+      const isPaid = pay?.paid||false;
+      const amount = pay?.amount ? Number(pay.amount) : 0;
+      const debt   = isPaid ? 0 : amount;
+      const rs = rStyle(i%2===0);
+      const paidStyle = {...rs, font:{...rs.font, color:{rgb: isPaid?XL.GREEN_DARK:'DC2626'}}};
+      rows.push([
+        tc(i+1,rs), tc(c.name||'—',rs), tc(c.age||'—',rs),
+        tc(`${att}/${sessionDates.length}`,rs),
+        {v:pctV,t:'n',z:'0"%"',s:rs},
+        mc(amount,rs),
+        tc(isPaid?'✅ Оплачено':'❌ Не оплачено', paidStyle),
+        tc(pay?.paid_at?new Date(pay.paid_at).toLocaleDateString('ru-RU'):'—',rs),
+        mc(debt,{...rs,font:{...rs.font,color:{rgb:debt>0?'DC2626':XL.TEXT_DARK}}}),
+        tc(note?.accomplishments||'—',rs),
+      ]);
+    });
+
+    rows.push([]);
+    rows.push(sr(['','Сумма оплат:','','','',mc(totalPaid),'','','',''], gStyle()));
+    if (totalUnpaid>0)
+      rows.push(sr(['','Задолженность:','','','',mc(totalUnpaid),'','','',''],{
+        ...rStyle(false),fill:{fgColor:{rgb:'FEE2E2'}},font:{color:{rgb:'DC2626'},bold:true,sz:10,name:'Arial'}
+      }));
+
+    if (payouts?.length) {
+      rows.push([]);
+      rows.push(sr(['── Выплата тренеру ──'], hStyle(XL.BLUE_DARK)));
+      payouts.forEach((p,i)=>{
+        rows.push(sr([trainerFio, p.payout_type==='fixed'?'Фикс.':'Процент',
+          mc(p.payout_value),'','','','','','',''], rStyle(i%2===0)));
+      });
+    }
+
+    const ws = buildSheet(rows);
+    ws['!cols'] = [{wch:4},{wch:20},{wch:7},{wch:10},{wch:6},{wch:12},{wch:14},{wch:12},{wch:10},{wch:28}];
+    const sheetName = groupName.replace(/[\\/:*?"<>|]/g,'').slice(0,31);
+    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  });
+
+  XLSX.writeFile(wb, `Дет_ГП_${branch}_${monthLabel}.xlsx`);
+}

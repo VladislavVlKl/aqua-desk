@@ -2085,6 +2085,56 @@ async function doExportTrainer(trainerId,fioEnc,year,month) {
   </div>`;
   document.body.appendChild(m);
 }
+// Для координатора: выбрать филиал → скачать все детские группы
+function renderPickBranchForChildGP(monthStr, branches) {
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>Детские ГП — выбор филиала</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <p class="hint" style="margin-bottom:12px">${new Date(monthStr).toLocaleDateString('ru-RU',{month:'long',year:'numeric'})}</p>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      ${branches.map(b=>`<button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px;text-align:left"
+        onclick="this.closest('.modal-overlay').remove();doExportBranchChildGroups('${monthStr}',['${b}'])">
+        🏢 ${b}
+      </button>`).join('')}
+    </div>
+  </div>`;
+  document.body.appendChild(m);
+}
+
+// Скачать Excel всех детских групп по филиалу
+async function doExportBranchChildGroups(monthStr, branches) {
+  if (window.Telegram?.WebApp?.initData) {
+    const m=el('div','modal-overlay');
+    m.innerHTML=`<div class="modal"><div class="modal-header"><h3>Скачать Excel</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+      <p style="line-height:1.6">Откройте приложение в браузере для скачивания файла.</p>
+      <button class="btn btn-primary btn-full" onclick="window.Telegram.WebApp.openLink(''+APP_URL+'',{try_instant_view:false});this.closest('.modal-overlay').remove()">Открыть в браузере</button>
+    </div>`;
+    document.body.appendChild(m); return;
+  }
+  toast('Формируем файл...','success');
+  await ensureXlsx();
+  try {
+    const branch = branches[0];
+    // Все детские группы по филиалу
+    const {data:tgs} = await sb().from('trainer_groups')
+      .select('id, group_types(name,type), profiles(fio)')
+      .eq('branch', branch).is('subscription_end', null)
+      .eq('group_types.type', 'children');
+
+    const childGroups = (tgs||[]).filter(tg=>tg.group_types?.type==='children');
+    if (!childGroups.length) { toast('Нет детских групп в этом филиале','error'); return; }
+
+    // Загружаем отчёты всех групп параллельно
+    const reports = await Promise.all(
+      childGroups.map(tg => DB.getGroupMonthReport(tg.id, monthStr).then(r=>({tg, report:r})))
+    );
+
+    exportBranchChildGroupsExcel(branch, monthStr, reports);
+  } catch(e) { toast('Ошибка экспорта','error'); console.error(e); }
+}
+
 async function doExportChildGroupExcel(groupId, monthStr) {
   if (window.Telegram?.WebApp?.initData) {
     const m=el('div','modal-overlay');
@@ -2185,6 +2235,7 @@ async function renderSeniorGroups() {
       <div style="display:flex;gap:6px">
         ${isSenior?`<button class="btn btn-sm" onclick="renderSubstitutionsApproval()">🔄 Замены</button>`:''}
         ${isSenior?`<button class="btn btn-sm btn-primary" onclick="renderSeniorPayoutsModal('${monthStr}')">💰 Ставки</button>`:''}
+        ${isSenior?`<button class="btn btn-sm" style="background:rgba(16,185,129,.15);color:#059669" onclick="doExportBranchChildGroups('${monthStr}',${JSON.stringify(branches)})">⬇️ Дет.ГП</button>`:''}
       </div>
     </div>
     ${isSenior?'<div id="pending-subs"></div>':''}
@@ -3415,6 +3466,7 @@ async function renderAdminGroups() {
         <div style="display:flex;gap:6px;flex-wrap:wrap">
           <button class="btn btn-sm" onclick="renderSubstitutionsApproval()">🔄 Замены</button>
           <button class="btn btn-sm btn-primary" id="admin-payouts-btn">💰 Ставки</button>
+          <button class="btn btn-sm" style="background:rgba(16,185,129,.15);color:#059669" id="admin-childgp-btn">⬇️ Дет.ГП</button>
           <button class="btn btn-sm" onclick="renderAddGroupTypeModal()">+ Тип</button>
         </div>
       </div>
@@ -3430,6 +3482,8 @@ async function renderAdminGroups() {
 
     document.getElementById('admin-payouts-btn')?.addEventListener('click',()=>
       renderSeniorPayoutsModal(gMonth, allBranches));
+    document.getElementById('admin-childgp-btn')?.addEventListener('click',()=>
+      renderPickBranchForChildGP(gMonth, allBranches));
     document.getElementById('gm-prev')?.addEventListener('click',()=>{
       gMonth=prevMonthStr(gMonth);
       document.getElementById('gm-label').textContent=new Date(gMonth).toLocaleDateString('ru-RU',{month:'long',year:'numeric'});
@@ -3656,7 +3710,7 @@ async function renderGroupMonthReport(groupId, monthStr) {
     setScreen(`<div class="app-header">
       <button class="btn-icon" onclick="${backFn}">←</button>
       <div class="app-title">Отчёт группы</div>
-      ${['admin','senior_trainer'].includes(STATE.profile.role)?`<button class="btn btn-sm btn-primary" onclick="doExportChildGroupExcel('${groupId}','${monthStr}')">⬇️ Excel</button>`:''}
+      <button class="btn btn-sm btn-primary" onclick="doExportChildGroupExcel('${groupId}','${monthStr}')">⬇️ Excel</button>
     </div>
     <div class="tab-content"><div class="tab-pad">
       <div class="section-header">
