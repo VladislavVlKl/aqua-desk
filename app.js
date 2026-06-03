@@ -29,7 +29,7 @@ async function ensureXlsx() {
   if (_xlsxLoaded || typeof XLSX !== 'undefined') { _xlsxLoaded=true; return; }
   await new Promise((res,rej)=>{
     const s=document.createElement('script');
-    s.src='https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+    s.src='https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js';
     s.onload=()=>{_xlsxLoaded=true;res();}; s.onerror=rej;
     document.head.appendChild(s);
   });
@@ -3891,6 +3891,8 @@ async function renderAdminControl() {
     const {data:activeIds}=await sb().from('workouts').select('trainer_id').gte('workout_date',from).lt('workout_date',to);
     const activeSet=new Set((activeIds||[]).map(x=>x.trainer_id));
     const inactive=data.inactiveTrainers.filter(t=>!activeSet.has(t.id));
+    // Загружаем статистику активности тренеров
+    const activityStats = await DB.getTrainersActivityStats(y, mo).catch(()=>[]);
     const sections=[];
     if (data.expiringClients.length) sections.push(`<div class="control-section">
       <div class="control-title warn">⚠️ Абонементы истекают (${data.expiringClients.length})</div>
@@ -3922,6 +3924,33 @@ async function renderAdminControl() {
         <div class="ci-main">${t.fio}</div>
         <div class="ci-sub">${(t.branches||[]).join(', ')}</div>
       </div>`).join('')}</div>`);
+    // Блок активности тренеров
+    if (activityStats.length) {
+      const withProblems = activityStats.filter(t=>t.overdueNotes>0||t.monthWorkouts===0);
+      const allSorted = [...activityStats].sort((a,b)=>b.overdueNotes-a.overdueNotes||b.monthWorkouts-a.monthWorkouts);
+      const daysSince = (dateStr) => {
+        if (!dateStr) return '∞';
+        const d = Math.floor((Date.now()-new Date(dateStr))/(86400000));
+        return d===0?'сегодня':d===1?'вчера':`${d} дн. назад`;
+      };
+      sections.push(`<div class="control-section">
+        <div class="control-title" style="background:rgba(99,102,241,.15);color:#6366f1">📋 Активность тренеров (${new Date(y,mo-1).toLocaleString('ru-RU',{month:'long'})})</div>
+        ${allSorted.map(t=>{
+          const hasIssue = t.overdueNotes>0||t.monthWorkouts===0;
+          const borderColor = t.overdueNotes>0?'var(--danger)':t.monthWorkouts===0?'var(--warn)':'var(--success)';
+          return `<div class="control-item" style="border-left:3px solid ${borderColor}">
+            <div class="ci-main" style="display:flex;justify-content:space-between;align-items:center">
+              <span>${t.fio}</span>
+              <div style="display:flex;gap:6px;font-size:12px">
+                ${t.overdueNotes>0?`<span style="background:rgba(239,68,68,.15);color:var(--danger);padding:2px 6px;border-radius:8px">⚠️ ${t.overdueNotes} конспект${t.overdueNotes>1?'ов':''}</span>`:''}
+                <span style="background:rgba(59,130,246,.1);color:#3b82f6;padding:2px 6px;border-radius:8px">${t.monthWorkouts} ПТ</span>
+              </div>
+            </div>
+            <div class="ci-sub">${(t.branches||[]).join(', ')} · последняя ПТ: ${daysSince(t.lastWorkout)}${!t.tg_id?' · ⏳ не входил':''}</div>
+          </div>`;
+        }).join('')}
+      </div>`);
+    }
     // Add delete requests
     const deleteReqs = await DB.getAllDeleteRequests().catch(()=>[]);
     if (deleteReqs.length) sections.unshift(`<div class="control-section">

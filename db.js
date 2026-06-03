@@ -720,6 +720,60 @@ async unassignTrainerGroup(id) {
     });
     return result;
   },
+  // Статистика активности всех тренеров (для координатора)
+  async getTrainersActivityStats(year, month) {
+    const from = `${year}-${String(month).padStart(2,'0')}-01`;
+    const to   = new Date(year, month, 1).toISOString().slice(0,10);
+    const cutoff48 = new Date(Date.now()-48*3600000).toISOString();
+
+    const [profilesR, workoutsR, dutiesR, notesR, workoutsAllR] = await Promise.all([
+      sb().from('profiles').select('id,fio,role,branches,tg_id').in('role',['trainer','senior_trainer']),
+      // Тренировки за текущий месяц
+      sb().from('workouts').select('trainer_id,workout_date,created_at,is_debt,debt_confirmed_at')
+        .gte('workout_date', from).lt('workout_date', to),
+      // Дежурства за месяц
+      sb().from('duties').select('trainer_id,start_time').gte('start_time',from).lt('start_time',to),
+      // Все тренировки старше 48ч без конспекта
+      sb().from('workouts').select('id,trainer_id,workout_date')
+        .eq('is_drop_in',false).eq('is_debt',false).lt('workout_date', cutoff48),
+      // Последняя тренировка каждого тренера (вообще)
+      sb().from('workouts').select('trainer_id,workout_date').order('workout_date',{ascending:false}),
+    ]);
+
+    const profiles  = profilesR.data||[];
+    const workouts  = workoutsR.data||[];
+    const duties    = dutiesR.data||[];
+    const allOld    = notesR.data||[];
+    const allW      = workoutsAllR.data||[];
+
+    // Получаем id тренировок у которых есть конспект
+    const oldIds = allOld.map(w=>w.id);
+    let notedSet = new Set();
+    if (oldIds.length) {
+      const {data:notes} = await sb().from('session_notes')
+        .select('workout_id').in('workout_id', oldIds).not('accomplishments','is',null);
+      notedSet = new Set((notes||[]).map(n=>n.workout_id));
+    }
+
+    // Строим карту последних тренировок
+    const lastWorkoutMap = {};
+    allW.forEach(w => {
+      if (!lastWorkoutMap[w.trainer_id]) lastWorkoutMap[w.trainer_id] = w.workout_date;
+    });
+
+    return profiles.map(p => {
+      const pw = workouts.filter(w=>w.trainer_id===p.id && (!w.is_debt||w.debt_confirmed_at));
+      const pd = duties.filter(d=>d.trainer_id===p.id);
+      const overdueCount = allOld.filter(w=>w.trainer_id===p.id && !notedSet.has(w.id)).length;
+      return {
+        ...p,
+        monthWorkouts: pw.length,
+        monthDuties:   pd.length,
+        overdueNotes:  overdueCount,
+        lastWorkout:   lastWorkoutMap[p.id]||null,
+      };
+    });
+  },
   async getClientProfile(clientId, viewerRole, viewerBranches) {
     const {data:client,error} = await sb().from('clients')
       .select('*, profiles!trainer_id(fio,branches)').eq('id',clientId).single();
