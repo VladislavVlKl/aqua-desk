@@ -2358,7 +2358,7 @@ async function loadSeniorGroupsList() {
           <div style="display:flex;gap:6px">
             <button class="btn btn-sm btn-primary"
               onclick="${g.group_types?.type==='children'?`renderGroupDetail('${g.id}')`:`renderAdultGroupDetail('${g.id}')`}">Открыть</button>
-            ${g.group_types?.type==='children'&&STATE.profile.role!=='trainer'?`<button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
+            ${g.group_types?.type==='children'?`<button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
               onclick="renderGroupMonthReport('${g.id}','${new Date().toISOString().slice(0,7)+'-01'}')">📊 Отчёт</button>`:''}
           </div>
         </div>
@@ -3656,7 +3656,7 @@ async function renderGroupMonthReport(groupId, monthStr) {
     setScreen(`<div class="app-header">
       <button class="btn-icon" onclick="${backFn}">←</button>
       <div class="app-title">Отчёт группы</div>
-      <button class="btn btn-sm btn-primary" onclick="doExportChildGroupExcel('${groupId}','${monthStr}')">⬇️ Excel</button>
+      ${['admin','senior_trainer'].includes(STATE.profile.role)?`<button class="btn btn-sm btn-primary" onclick="doExportChildGroupExcel('${groupId}','${monthStr}')">⬇️ Excel</button>`:''}
     </div>
     <div class="tab-content"><div class="tab-pad">
       <div class="section-header">
