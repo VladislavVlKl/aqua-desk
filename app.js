@@ -3349,6 +3349,17 @@ async function adminDetail(trainerId,fioEnc,year,month) {
         </div>`;
       }).join('')}
 
+      ${(d.trialSessions||[]).length?`
+        <h4 style="margin-top:16px">🆕 Пробные тренировки (${d.trialSessions.length})</h4>
+        ${d.trialSessions.map(t=>`<div class="history-item">
+          <div class="hi-main">
+            <span class="hi-client">${t.first_name}${t.last_name?' '+t.last_name:''}</span>
+            <span class="hi-cat cat-${t.category}">Кат.${t.category}</span>
+            <span style="font-size:11px;background:rgba(139,92,246,.15);color:#7c3aed;padding:2px 6px;border-radius:6px">${fmt(RATES.pt[t.category])} сум</span>
+          </div>
+          <div class="hi-sub">${fmtDate(t.session_date)} · ${t.branch}${t.phone?' · '+t.phone:''}${t.age?' · '+t.age+' лет':''}</div>
+        </div>`).join('')}`:''}
+
       <h4 style="margin-top:16px">Конспекты (${(d.sessionNotes||[]).length})</h4>
       ${!(d.sessionNotes||[]).length?'<p class="hint">Нет конспектов за этот период</p>':
         (d.sessionNotes||[]).map(n=>`

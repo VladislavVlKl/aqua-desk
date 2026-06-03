@@ -1037,7 +1037,9 @@ async unassignTrainerGroup(id) {
 
     let wq  = sb().from('workouts')
       .select('trainer_id,category_at_moment,branch,is_debt,debt_confirmed_at,is_drop_in,drop_in_category,workout_date,clients!client_id(age)')
-      .gte('workout_date',from).lt('workout_date',to);
+      .gte('workout_date',from).lt('workout_date',to)
+      .eq('pending_confirmation',false)   // исключаем незаконфирмированные замены
+      .is('substitute_for',null);         // обычные ПТ; замены с ставкой — отдельно в ptSubstitutions
     if (branch) wq = wq.eq('branch',branch);
 
     let dq = sb().from('duties')
@@ -1099,6 +1101,7 @@ async unassignTrainerGroup(id) {
     const [w,d,tg,gs,adj,gp,gsub,notes,trials] = await Promise.all([
       sb().from('workouts').select('*, clients(fio,age), sub_profile:profiles!substitute_for(fio)')
         .eq('trainer_id',trainerId).gte('workout_date',from).lt('workout_date',to)
+        .eq('pending_confirmation',false)
         .order('workout_date',{ascending:false}),
       sb().from('duties').select('*').eq('trainer_id',trainerId)
         .gte('start_time',from).lt('start_time',to)
@@ -1291,6 +1294,8 @@ function calcSalary({workouts=[], duties=[], trainerGroups=[], groupSessions=[],
                      groupPayouts=[], groupSubstitutions=[], trainerId=null, trialSessions=[]}) {
   const cat={1:0,2:0,3:0,debt:0,dropIn1:0,dropIn2:0,dropIn3:0,trial1:0,trial2:0,trial3:0};
   workouts.forEach(w=>{
+    // Замены с кастомной ставкой идут только в ptSubSum — не двойной счёт
+    if (w.substitute_for!=null && w.substitute_rate!=null) return;
     if (w.is_drop_in) {
       const dc = w.drop_in_category||1;
       cat[`dropIn${dc}`]++;
