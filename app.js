@@ -2598,15 +2598,36 @@ async function renderAdminAnalytics() {
         <button id="next-an">›</button>
       </div>
     </div>
-    <div class="form-group"><select id="an-branch">
-      <option value="">Все филиалы</option>
-      ${branches.map(b=>`<option>${b.name}</option>`).join('')}
-    </select></div>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
+      <select id="an-branch" style="flex:1">
+        <option value="">Все филиалы</option>
+        ${branches.map(b=>`<option>${b.name}</option>`).join('')}
+      </select>
+      <button id="an-export-btn" class="btn btn-sm btn-primary" style="display:none;white-space:nowrap"
+        onclick="doAnExport()">⬇️ Excel</button>
+    </div>
     <div id="an-body"><div class="center-screen"><div class="spinner"></div></div></div>
   </div>`;
 
   const getBr=()=>document.getElementById('an-branch')?.value||null;
-  const load=()=>loadAnalytics(year,month,getBr());
+
+  // Обновляем кнопку при смене филиала
+  const updateExportBtn=()=>{
+    const br=getBr();
+    const btn=document.getElementById('an-export-btn');
+    if (!btn) return;
+    if (br) { btn.style.display=''; btn.textContent=`⬇️ ${br}`; }
+    else      btn.style.display='none';
+  };
+
+  // Глобальная функция для кнопки (захватываем year/month через closure)
+  window.doAnExport = () => {
+    const br = getBr();
+    if (!br) return;
+    doExportSummary(year, month, br);
+  };
+
+  const load=()=>{ loadAnalytics(year,month,getBr()); updateExportBtn(); };
   document.getElementById('prev-an')?.addEventListener('click',()=>{if(month===1){year--;month=12;}else month--;document.getElementById('an-month').textContent=fmtMY(year,month);load();});
   document.getElementById('next-an')?.addEventListener('click',()=>{if(month===12){year++;month=1;}else month++;document.getElementById('an-month').textContent=fmtMY(year,month);load();});
   document.getElementById('an-branch')?.addEventListener('change',load);
