@@ -196,6 +196,38 @@ const DB = {
       .order('workout_date',{ascending:false});
     if (error) throw error; return data||[];
   },
+  // ─── ПРОБНЫЕ ТРЕНИРОВКИ ──────────────────────
+  async addTrialSession(trainerId, branch, firstName, lastName, phone, age, category) {
+    const {data,error} = await sb().from('trial_sessions')
+      .insert({trainer_id:trainerId, branch, first_name:firstName.trim(),
+               last_name:lastName?.trim()||null, phone:phone?.trim()||null,
+               age:age||null, category, session_date:new Date().toISOString()})
+      .select().single();
+    if (error) throw error; return data;
+  },
+  async getTrialSessions(trainerId, year, month) {
+    const from = new Date(year,month-1,1).toISOString();
+    const to   = new Date(year,month,  1).toISOString();
+    const {data,error} = await sb().from('trial_sessions')
+      .select('*').eq('trainer_id',trainerId)
+      .gte('session_date',from).lt('session_date',to)
+      .order('session_date',{ascending:false});
+    if (error) throw error; return data||[];
+  },
+  async getAllTrialSessions(year, month, branch) {
+    const from = new Date(year,month-1,1).toISOString();
+    const to   = new Date(year,month,  1).toISOString();
+    let q = sb().from('trial_sessions')
+      .select('*, profiles!trainer_id(fio)')
+      .gte('session_date',from).lt('session_date',to);
+    if (branch) q = q.eq('branch',branch);
+    const {data,error} = await q;
+    if (error) throw error; return data||[];
+  },
+  async deleteTrialSession(id) {
+    const {error} = await sb().from('trial_sessions').delete().eq('id',id);
+    if (error) throw error;
+  },
   async deleteWorkout(id) {
     const {error} = await sb().from('workouts').delete().eq('id',id);
     if (error) throw error;
@@ -1005,7 +1037,7 @@ async unassignTrainerGroup(id) {
     const to      = new Date(year,month,  1).toISOString();
     const fromDay = `${year}-${String(month).padStart(2,'0')}-01`;
     const toDay   = new Date(year,month,1).toISOString().slice(0,10);
-    const [w,d,tg,gs,adj,gp,gsub,notes] = await Promise.all([
+    const [w,d,tg,gs,adj,gp,gsub,notes,trials] = await Promise.all([
       sb().from('workouts').select('*, clients(fio,age), sub_profile:profiles!substitute_for(fio)')
         .eq('trainer_id',trainerId).gte('workout_date',from).lt('workout_date',to)
         .order('workout_date',{ascending:false}),
@@ -1025,21 +1057,24 @@ async unassignTrainerGroup(id) {
       sb().from('group_substitutions').select('*, trainer_groups(*, group_types(name))')
         .eq('substitute_trainer_id',trainerId)
         .gte('session_date',fromDay).lt('session_date',toDay),
-      // Конспекты тренера за месяц
       sb().from('session_notes').select('*, clients(fio), workouts(workout_date,category_at_moment)')
         .eq('trainer_id',trainerId)
         .gte('created_at',from).lt('created_at',to)
         .order('created_at',{ascending:false}),
+      sb().from('trial_sessions').select('*').eq('trainer_id',trainerId)
+        .gte('session_date',from).lt('session_date',to)
+        .order('session_date',{ascending:false}),
     ]);
     return {
-      workouts:           w.data     ||[],
-      duties:             d.data     ||[],
-      trainerGroups:      tg.data    ||[],
-      groupSessions:      gs.data    ||[],
-      adjustment:         adj.data   ||null,
-      groupPayouts:       gp.data    ||[],
-      groupSubstitutions: gsub.data  ||[],
-      sessionNotes:       notes.data ||[],
+      workouts:           w.data      ||[],
+      duties:             d.data      ||[],
+      trainerGroups:      tg.data     ||[],
+      groupSessions:      gs.data     ||[],
+      adjustment:         adj.data    ||null,
+      groupPayouts:       gp.data     ||[],
+      groupSubstitutions: gsub.data   ||[],
+      sessionNotes:       notes.data  ||[],
+      trialSessions:      trials.data ||[],
     };
   },
 
@@ -1194,8 +1229,8 @@ async unassignTrainerGroup(id) {
 
 // ─── РАСЧЁТ ЗП ───────────────────────────────
 function calcSalary({workouts=[], duties=[], trainerGroups=[], groupSessions=[], adjustment=null,
-                     groupPayouts=[], groupSubstitutions=[], trainerId=null}) {
-  const cat={1:0,2:0,3:0,debt:0,dropIn1:0,dropIn2:0,dropIn3:0};
+                     groupPayouts=[], groupSubstitutions=[], trainerId=null, trialSessions=[]}) {
+  const cat={1:0,2:0,3:0,debt:0,dropIn1:0,dropIn2:0,dropIn3:0,trial1:0,trial2:0,trial3:0};
   workouts.forEach(w=>{
     if (w.is_drop_in) {
       const dc = w.drop_in_category||1;
@@ -1203,8 +1238,12 @@ function calcSalary({workouts=[], duties=[], trainerGroups=[], groupSessions=[],
     } else if (w.is_debt&&!w.debt_confirmed_at) cat.debt++;
     else cat[w.category_at_moment]++;
   });
-  const ptSum     = cat[1]*RATES.pt[1]+cat[2]*RATES.pt[2]+cat[3]*RATES.pt[3];
-  const dropInSum = cat.dropIn1*RATES.pt[1]+cat.dropIn2*RATES.pt[2]+cat.dropIn3*RATES.pt[3];
+  // Пробные — та же ставка что и разовые
+  (trialSessions||[]).forEach(t=>{ cat[`trial${t.category}`]++; });
+
+  const ptSum      = cat[1]*RATES.pt[1]+cat[2]*RATES.pt[2]+cat[3]*RATES.pt[3];
+  const dropInSum  = cat.dropIn1*RATES.pt[1]+cat.dropIn2*RATES.pt[2]+cat.dropIn3*RATES.pt[3];
+  const trialSum   = cat.trial1*RATES.pt[1]+cat.trial2*RATES.pt[2]+cat.trial3*RATES.pt[3];
 
   // ПТ-замены: суммируем только записи где substitute_for != null и есть ставка
   const ptSubSum = workouts
@@ -1235,8 +1274,8 @@ function calcSalary({workouts=[], duties=[], trainerGroups=[], groupSessions=[],
 
   const bonus   = adjustment?.bonus  ||0;
   const penalty = adjustment?.penalty||0;
-  const total   = ptSum+dropInSum+ptSubSum+dutySum+childSum+adultSum+groupSubSum+bonus-penalty;
-  return {cat,hours,ptSum,dropInSum,ptSubSum,dutySum,childSum,adultSum,groupSubSum,bonus,penalty,total};
+  const total   = ptSum+dropInSum+trialSum+ptSubSum+dutySum+childSum+adultSum+groupSubSum+bonus-penalty;
+  return {cat,hours,ptSum,dropInSum,trialSum,ptSubSum,dutySum,childSum,adultSum,groupSubSum,bonus,penalty,total};
 }
 
 // ─── ТЕХНИЧКА ────────────────────────────────

@@ -295,6 +295,7 @@ async function renderHomeTab() {
           <option value="dropin1">Разовое 1кт (${fmt(RATES.pt[1])} сум)</option>
           <option value="dropin2">Разовое 2кт (${fmt(RATES.pt[2])} сум)</option>
           <option value="dropin3">Разовое 3кт (${fmt(RATES.pt[3])} сум)</option>
+          <option value="trial">🆕 Пробная тренировка</option>
           <option value="debt">В долг</option>
         </select>
       </div>
@@ -439,7 +440,13 @@ async function renderWorkoutsTab() {
 function onWkTypeChange(sel) {
   const reg=document.getElementById('wk-regular-opts');
   const isDropIn=sel.value.startsWith('dropin');
-  if (reg) reg.style.display=isDropIn?'none':'';
+  const isTrial=sel.value==='trial';
+  if (reg) reg.style.display=(isDropIn||isTrial)?'none':'';
+  // При выборе "Пробная" — сразу открываем модал ввода данных
+  if (isTrial) {
+    sel.value='regular'; // сбрасываем обратно чтобы не ломать форму
+    renderTrialSessionModal();
+  }
 }
 function onClientChange(sel) {
   const opt=sel.options[sel.selectedIndex];
@@ -1284,6 +1291,50 @@ async function doLogDuty() {
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 
+// ── ПРОБНЫЕ ТРЕНИРОВКИ ────────────────────────
+function renderTrialSessionModal() {
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header">
+      <h3>🆕 Пробная тренировка</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button>
+    </div>
+    <p class="hint" style="margin-bottom:12px">ЗП начисляется как за разовое посещение</p>
+    <div class="form-group"><label>Имя <span style="color:var(--danger)">*</span></label>
+      <input id="tr-fname" type="text" placeholder="Анна"></div>
+    <div class="form-group"><label>Фамилия</label>
+      <input id="tr-lname" type="text" placeholder="Иванова"></div>
+    <div class="form-group"><label>Телефон</label>
+      <input id="tr-phone" type="tel" placeholder="+998 90 000 00 00"></div>
+    <div class="form-group"><label>Возраст</label>
+      <input id="tr-age" type="number" min="3" max="99" placeholder="—"></div>
+    <div class="form-group"><label>Категория <span style="color:var(--danger)">*</span></label>
+      <div class="cat-picker">
+        ${[1,2,3].map(n=>`<button class="cat-btn ${n===1?'active':''}" data-cat="${n}"
+          onclick="selectCat(this)">Кат.${n}<br><small>${fmt(RATES.pt[n])} сум</small></button>`).join('')}
+      </div>
+    </div>
+    <button class="btn btn-primary btn-full" onclick="doAddTrialSession()">Записать</button>
+  </div>`;
+  document.body.appendChild(m);
+}
+
+async function doAddTrialSession() {
+  const fname = document.getElementById('tr-fname')?.value.trim();
+  const lname = document.getElementById('tr-lname')?.value.trim();
+  const phone = document.getElementById('tr-phone')?.value.trim();
+  const age   = parseInt(document.getElementById('tr-age')?.value)||null;
+  const cat   = parseInt(document.querySelector('.cat-btn.active')?.dataset.cat||'1');
+  const branch = getBranch();
+  if (!fname) return toast('Введите имя','error');
+  if (!branch) return toast('Выберите филиал','error');
+  try {
+    await DB.addTrialSession(STATE.profile.id, branch, fname, lname, phone, age, cat);
+    document.querySelector('.modal-overlay')?.remove();
+    toast(`✅ Пробная записана — ${fname}${lname?' '+lname:''}  · ${fmt(RATES.pt[cat])} сум`,'success');
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+
 function renderEditDutyModal(dutyId, start, end, branch) {
   const m=el('div','modal-overlay');
   m.innerHTML=`<div class="modal">
@@ -1445,16 +1496,17 @@ async function loadTrainerReport(year,month) {
   body.innerHTML=`<div class="center-screen"><div class="spinner"></div></div>`;
   try {
     const fromDay = `${year}-${String(month).padStart(2,'0')}-01`;
-    const [workouts,duties,trainerGroups,groupSessions,groupPayouts,groupSubstitutions]=await Promise.all([
+    const [workouts,duties,trainerGroups,groupSessions,groupPayouts,groupSubstitutions,trialSessions]=await Promise.all([
       DB.getWorkouts(STATE.profile.id,year,month),
       DB.getDuties(STATE.profile.id,year,month),
       DB.getTrainerGroups(STATE.profile.id),
       DB.getGroupSessions(STATE.profile.id,year,month),
       sb().from('group_trainer_payouts').select('*').eq('trainer_id',STATE.profile.id).eq('month',fromDay).then(r=>r.data||[]),
       sb().from('group_substitutions').select('*, trainer_groups(*, group_types(name))').eq('substitute_trainer_id',STATE.profile.id).gte('session_date',fromDay).lt('session_date',new Date(year,month,1).toISOString().slice(0,10)).then(r=>r.data||[]),
+      DB.getTrialSessions(STATE.profile.id,year,month),
     ]);
     const adjustment=await DB.getAdjustment(STATE.profile.id,year,month);
-    const sal=calcSalary({workouts,duties,trainerGroups,groupSessions,adjustment,groupPayouts,groupSubstitutions,trainerId:STATE.profile.id});
+    const sal=calcSalary({workouts,duties,trainerGroups,groupSessions,adjustment,groupPayouts,groupSubstitutions,trialSessions,trainerId:STATE.profile.id});
 
     // Ожидающие подтверждения (замены)
     const pending = await DB.getPendingConfirmations(STATE.profile.id);
@@ -1496,6 +1548,7 @@ async function loadTrainerReport(year,month) {
       <div class="summary-cards">
         <div class="summary-card"><div class="s-val">${sal.cat[1]+sal.cat[2]+sal.cat[3]}</div><div class="s-lbl">ПТ</div></div>
         <div class="summary-card"><div class="s-val">${(sal.cat.dropIn1||0)+(sal.cat.dropIn2||0)+(sal.cat.dropIn3||0)}</div><div class="s-lbl">Разовые</div></div>
+        ${trialSessions.length?`<div class="summary-card"><div class="s-val">${trialSessions.length}</div><div class="s-lbl">Пробные</div></div>`:''}
         <div class="summary-card"><div class="s-val">${sal.hours.toFixed(1)}ч</div><div class="s-lbl">Деж.</div></div>
         ${sal.adultSum+sal.childSum>0?`<div class="summary-card"><div class="s-val" style="font-size:13px">${fmt(sal.adultSum+sal.childSum)}</div><div class="s-lbl">Группы</div></div>`:''}
         <div class="summary-card accent" style="grid-column:span ${sal.adultSum+sal.childSum>0?1:2}">
@@ -1528,6 +1581,16 @@ async function loadTrainerReport(year,month) {
               👤 Профиль</button>
           </div>
         </div>`).join('')}
+      ${trialSessions.length?`
+        <h4 style="margin-top:16px">🆕 Пробные тренировки</h4>
+        ${trialSessions.map(t=>`<div class="history-item">
+          <div class="hi-main">
+            <span class="hi-client">${t.first_name}${t.last_name?' '+t.last_name:''}</span>
+            <span class="hi-cat cat-${t.category}">Кат.${t.category}</span>
+            <span style="font-size:11px;background:rgba(139,92,246,.15);color:#7c3aed;padding:2px 6px;border-radius:6px">Пробная</span>
+          </div>
+          <div class="hi-sub">${fmtDT(t.session_date)} · ${t.branch}${t.phone?' · '+t.phone:''}${t.age?' · '+t.age+' лет':''}</div>
+        </div>`).join('')}`:''}
       ${groupSessions.length?`
         <h4 style="margin-top:16px">Групповые занятия</h4>
         ${groupSessions.map(gs=>{
@@ -4019,6 +4082,8 @@ async function renderAdminControl() {
     const inactive=data.inactiveTrainers.filter(t=>!activeSet.has(t.id));
     // Загружаем статистику активности тренеров
     const activityStats = await DB.getTrainersActivityStats(y, mo).catch(()=>[]);
+    // Пробные тренировки за месяц
+    const allTrials = await DB.getAllTrialSessions(y, mo, null).catch(()=>[]);
     const sections=[];
     if (data.expiringClients.length) sections.push(`<div class="control-section">
       <div class="control-title warn">⚠️ Абонементы истекают (${data.expiringClients.length})</div>
@@ -4050,6 +4115,34 @@ async function renderAdminControl() {
         <div class="ci-main">${t.fio}</div>
         <div class="ci-sub">${(t.branches||[]).join(', ')}</div>
       </div>`).join('')}</div>`);
+    // Пробные тренировки — алерт если >5 у одного тренера
+    if (allTrials.length) {
+      const trialByTrainer = {};
+      allTrials.forEach(t=>{
+        const fio = t.profiles?.fio||'?';
+        if (!trialByTrainer[fio]) trialByTrainer[fio]=[];
+        trialByTrainer[fio].push(t);
+      });
+      const heavy = Object.entries(trialByTrainer).filter(([,arr])=>arr.length>=5);
+      if (heavy.length) {
+        sections.push(`<div class="control-section">
+          <div class="control-title warn">🆕 Много пробных (${heavy.map(([f,a])=>f+': '+a.length).join(', ')})</div>
+          ${heavy.map(([fio,arr])=>`<div class="control-item">
+            <div class="ci-main">${fio} — <b>${arr.length}</b> пробных за месяц</div>
+            <div class="ci-sub">${arr.slice(0,3).map(t=>`${t.first_name}${t.last_name?' '+t.last_name:''}`).join(', ')}${arr.length>3?` и ещё ${arr.length-3}`:''}</div>
+          </div>`).join('')}
+        </div>`);
+      }
+      // Все пробные — информационный блок
+      sections.push(`<div class="control-section">
+        <div class="control-title" style="background:rgba(139,92,246,.15);color:#7c3aed">🆕 Пробные за месяц (${allTrials.length})</div>
+        ${allTrials.map(t=>`<div class="control-item">
+          <div class="ci-main">${t.first_name}${t.last_name?' '+t.last_name:''} · Кат.${t.category}${t.phone?' · '+t.phone:''}</div>
+          <div class="ci-sub">${t.profiles?.fio||'?'} · ${fmtDate(t.session_date)}</div>
+        </div>`).join('')}
+      </div>`);
+    }
+
     // Блок активности тренеров
     if (activityStats.length) {
       const withProblems = activityStats.filter(t=>t.overdueNotes>0||t.monthWorkouts===0);
