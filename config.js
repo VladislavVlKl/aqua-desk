@@ -29,7 +29,7 @@ const RATES = {
 // ─── КОНСТАНТЫ ───────────────────────────────
 const CHILD_MAX_AGE          = 17;
 const EDIT_WINDOW_MIN        = 30;
-const MAX_BACKDATE_HOURS     = 24;
+const MAX_BACKDATE_HOURS     = 48;
 const SUBSCRIPTION_WARN_DAYS = 7;
 const NOTE_DEADLINE_HOURS    = 48;
 
