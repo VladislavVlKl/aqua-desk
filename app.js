@@ -3386,27 +3386,53 @@ async function doDeleteBranch(id,name) {
 
 // ─ ADMIN: ГРУППЫ
 async function renderAdminGroups() {
-  $('#tab-content').innerHTML=`<div class="tab-pad">
-    <div class="section-header"><h3>Группы</h3>
-      <div style="display:flex;gap:6px">
-        <button class="btn btn-sm" onclick="renderSubstitutionsApproval()">🔄 Замены</button>
-        <button class="btn btn-sm" onclick="renderAddGroupTypeModal()">+ Тип</button>
+  let gMonth = new Date().toISOString().slice(0,7)+'-01';
+  const allBranches = (await cached('branches',()=>DB.getBranches())).map(b=>b.name);
+
+  const render = () => {
+    $('#tab-content').innerHTML=`<div class="tab-pad">
+      <div class="section-header"><h3>Группы</h3>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn btn-sm" onclick="renderSubstitutionsApproval()">🔄 Замены</button>
+          <button class="btn btn-sm btn-primary" id="admin-payouts-btn">💰 Ставки</button>
+          <button class="btn btn-sm" onclick="renderAddGroupTypeModal()">+ Тип</button>
+        </div>
       </div>
-    </div>
-    <div id="groups-list"><div class="center-screen"><div class="spinner"></div></div></div>
-    <h4 style="margin-top:20px">Назначить группу тренеру</h4>
-    <div id="assign-form"></div>
-  </div>`;
-  await loadGroupsList();
-  await renderAssignGroupForm();
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+        <button class="btn btn-sm" id="gm-prev">‹</button>
+        <span style="font-weight:600;font-size:14px" id="gm-label">${new Date(gMonth).toLocaleDateString('ru-RU',{month:'long',year:'numeric'})}</span>
+        <button class="btn btn-sm" id="gm-next">›</button>
+      </div>
+      <div id="groups-list"><div class="center-screen"><div class="spinner"></div></div></div>
+      <h4 style="margin-top:20px">Назначить группу тренеру</h4>
+      <div id="assign-form"></div>
+    </div>`;
+
+    document.getElementById('admin-payouts-btn')?.addEventListener('click',()=>
+      renderSeniorPayoutsModal(gMonth, allBranches));
+    document.getElementById('gm-prev')?.addEventListener('click',()=>{
+      gMonth=prevMonthStr(gMonth);
+      document.getElementById('gm-label').textContent=new Date(gMonth).toLocaleDateString('ru-RU',{month:'long',year:'numeric'});
+      loadGroupsList(gMonth);
+    });
+    document.getElementById('gm-next')?.addEventListener('click',()=>{
+      gMonth=nextMonthStr(gMonth);
+      document.getElementById('gm-label').textContent=new Date(gMonth).toLocaleDateString('ru-RU',{month:'long',year:'numeric'});
+      loadGroupsList(gMonth);
+    });
+    loadGroupsList(gMonth);
+    renderAssignGroupForm();
+  };
+  render();
 }
-async function loadGroupsList() {
+async function loadGroupsList(monthStr) {
   const body=document.getElementById('groups-list'); if (!body) return;
+  const ms = monthStr || new Date().toISOString().slice(0,7)+'-01';
   try {
     const types=await cached('groupTypes',()=>DB.getGroupTypes());
     const allAssigned = await Promise.all(types.map(gt=>
-  DB.getAssignedTrainers(gt.id).then(data=>({data}))
-));
+      DB.getAssignedTrainers(gt.id).then(data=>({data}))
+    ));
     body.innerHTML=types.map((gt,i)=>{
       const assigned = allAssigned[i]?.data||[];
       return `<div class="staff-card" style="flex-direction:column;align-items:flex-start;gap:8px">
@@ -3426,8 +3452,8 @@ async function loadGroupsList() {
           <div style="display:flex;justify-content:space-between;align-items:center;width:100%;padding:4px 0;border-top:1px solid var(--border)">
             <span style="font-size:13px">${a.profiles?.fio||'—'} · ${a.branch}${a.role?' · '+a.role:''}</span>
             <div style="display:flex;gap:4px">
-              ${gt.type==='children'?`<button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
-                onclick="renderGroupMonthReport('${a.id}','${new Date().toISOString().slice(0,7)+'-01'}')">📊</button>`:''}
+              ${gt.type==='children'?`<button class="btn btn-sm btn-primary" style="font-size:11px"
+                onclick="renderGroupMonthReport('${a.id}','${ms}')">📊 Отчёт</button>`:''}
               <button class="btn btn-sm" style="background:rgba(239,68,68,.15);color:#ef4444"
                 onclick="doUnassignGroup(${a.id})">Открепить</button>
             </div>
@@ -3723,8 +3749,8 @@ async function doApproveGroupPayout(groupId, trainerId, monthStr) {
 }
 
 // ── СТАВКИ ЗП ПО ГРУППАМ ─────────────────────────────────────
-async function renderSeniorPayoutsModal(monthStr) {
-  const branches = STATE.profile.branches||[];
+async function renderSeniorPayoutsModal(monthStr, branches) {
+  branches = branches || STATE.profile.branches||[];
   const m = el('div','modal-overlay');
   m.innerHTML=`<div class="modal">
     <div class="modal-header"><h3>💰 Ставки за ${new Date(monthStr).toLocaleDateString('ru-RU',{month:'long',year:'numeric'})}</h3>
