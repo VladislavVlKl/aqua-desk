@@ -228,6 +228,60 @@ const DB = {
     const {error} = await sb().from('trial_sessions').delete().eq('id',id);
     if (error) throw error;
   },
+
+  // ─── ЗАПРОСЫ НА ПОЗДНИЕ ТРЕНИРОВКИ ──────────
+  async addLateRequest(trainerId, clientId, branch, workoutDate, category, reason) {
+    const {data,error} = await sb().from('late_workout_requests')
+      .insert({trainer_id:trainerId, client_id:clientId, branch,
+               workout_date:workoutDate, category, reason: reason.trim()})
+      .select().single();
+    if (error) throw error; return data;
+  },
+  async getPendingLateRequests(branch) {
+    let q = sb().from('late_workout_requests')
+      .select('*, profiles!trainer_id(fio,branches), clients(fio,category)')
+      .eq('status','pending').order('created_at',{ascending:false});
+    if (branch) q = q.eq('branch', branch);
+    const {data,error} = await q;
+    if (error) throw error; return data||[];
+  },
+  async getMyLateRequests(trainerId) {
+    const {data,error} = await sb().from('late_workout_requests')
+      .select('*, clients(fio)')
+      .eq('trainer_id',trainerId).order('created_at',{ascending:false}).limit(20);
+    if (error) throw error; return data||[];
+  },
+  async approveLateRequest(requestId, reviewerId) {
+    // Получаем данные запроса
+    const {data:req,error:re} = await sb().from('late_workout_requests')
+      .select('*').eq('id',requestId).single();
+    if (re) throw re;
+    // Создаём тренировку
+    const {error:we} = await sb().from('workouts').insert({
+      trainer_id:   req.trainer_id,
+      client_id:    req.client_id,
+      branch:       req.branch,
+      workout_date: req.workout_date,
+      category_at_moment: req.category,
+      is_debt: false, is_drop_in: false,
+      pending_confirmation: false,
+    });
+    if (we) throw we;
+    // Списываем баланс клиента
+    await sb().rpc('increment_balance', {client_id: req.client_id, delta: -1}).catch(()=>{});
+    // Обновляем статус запроса
+    const {error:ue} = await sb().from('late_workout_requests')
+      .update({status:'approved', reviewed_by:reviewerId, reviewed_at:new Date().toISOString()})
+      .eq('id',requestId);
+    if (ue) throw ue;
+  },
+  async rejectLateRequest(requestId, reviewerId, note='') {
+    const {error} = await sb().from('late_workout_requests')
+      .update({status:'rejected', reviewed_by:reviewerId,
+               reviewed_at:new Date().toISOString(), reject_note:note||null})
+      .eq('id',requestId);
+    if (error) throw error;
+  },
   async deleteWorkout(id) {
     const {error} = await sb().from('workouts').delete().eq('id',id);
     if (error) throw error;

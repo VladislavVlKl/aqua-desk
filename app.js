@@ -296,6 +296,7 @@ async function renderHomeTab() {
           <option value="dropin2">Разовое 2кт (${fmt(RATES.pt[2])} сум)</option>
           <option value="dropin3">Разовое 3кт (${fmt(RATES.pt[3])} сум)</option>
           <option value="trial">🆕 Пробная тренировка</option>
+          <option value="late_request">⏰ Старше 48ч — запросить одобрение</option>
           <option value="debt">В долг</option>
         </select>
       </div>
@@ -444,8 +445,13 @@ function onWkTypeChange(sel) {
   if (reg) reg.style.display=(isDropIn||isTrial)?'none':'';
   // При выборе "Пробная" — сразу открываем модал ввода данных
   if (isTrial) {
-    sel.value='regular'; // сбрасываем обратно чтобы не ломать форму
+    sel.value='regular';
     renderTrialSessionModal();
+  }
+  const isLate = sel.value==='late_request';
+  if (isLate) {
+    sel.value='regular';
+    renderLateRequestModal();
   }
 }
 function onClientChange(sel) {
@@ -1291,6 +1297,90 @@ async function doLogDuty() {
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 
+// ── ПОЗДНИЕ ТРЕНИРОВКИ (>48ч) ─────────────────
+async function renderLateRequestModal() {
+  const clients = await DB.getClients(STATE.profile.id);
+  if (!clients.length) return toast('Нет клиентов','error');
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header">
+      <h3>⏰ Запрос на позднюю тренировку</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button>
+    </div>
+    <div style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:8px;padding:10px;margin-bottom:14px;font-size:13px;color:var(--text)">
+      Тренировка будет внесена только после одобрения координатора или старшего тренера
+    </div>
+    <div class="form-group"><label>Клиент</label>
+      <select id="lr-client">
+        <option value="">— выберите —</option>
+        ${clients.map(c=>`<option value="${c.id}" data-cat="${c.category}">${c.fio} (кат.${c.category}, баланс:${c.balance})</option>`).join('')}
+      </select></div>
+    <div class="form-group"><label>Дата и время тренировки</label>
+      <input type="datetime-local" id="lr-date"></div>
+    <div class="form-group"><label>Причина <span style="color:var(--danger)">*</span></label>
+      <textarea id="lr-reason" rows="3" placeholder="Объясните почему тренировка не была внесена вовремя..." style="width:100%;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text);font-size:14px;resize:none"></textarea></div>
+    <button class="btn btn-primary btn-full" onclick="doSendLateRequest()">Отправить запрос</button>
+  </div>`;
+  document.body.appendChild(m);
+}
+
+async function doSendLateRequest() {
+  const clientId = document.getElementById('lr-client')?.value;
+  const dateVal  = document.getElementById('lr-date')?.value;
+  const reason   = document.getElementById('lr-reason')?.value.trim();
+  const clientOpt= document.getElementById('lr-client');
+  const cat      = parseInt(clientOpt?.options[clientOpt.selectedIndex]?.dataset.cat||'1');
+  const branch   = getBranch();
+  if (!clientId) return toast('Выберите клиента','error');
+  if (!dateVal)  return toast('Укажите дату тренировки','error');
+  if (!reason)   return toast('Напишите причину','error');
+  if (!branch)   return toast('Выберите филиал','error');
+  // Проверяем что дата действительно старше 48ч
+  if (Date.now() - new Date(dateVal).getTime() < 48*3600000)
+    return toast('Дата должна быть старше 48 часов. Обычные тренировки вносите стандартным способом.','error');
+  try {
+    await DB.addLateRequest(STATE.profile.id, clientId, branch, new Date(dateVal).toISOString(), cat, reason);
+    document.querySelector('.modal-overlay')?.remove();
+    toast('✅ Запрос отправлен координатору','success');
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+
+// Одобрение / отклонение (для координатора и старшего тренера)
+async function doApproveLateRequest(id) {
+  if (!confirm('Одобрить тренировку и списать с баланса клиента?')) return;
+  try {
+    await DB.approveLateRequest(id, STATE.profile.id);
+    toast('✅ Тренировка добавлена','success');
+    renderAdminControl();
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+async function doRejectLateRequest(id) {
+  const note = prompt('Причина отказа (опционально):');
+  if (note === null) return; // отмена
+  try {
+    await DB.rejectLateRequest(id, STATE.profile.id, note);
+    toast('Запрос отклонён','success');
+    renderAdminControl();
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+async function doApproveLateRequestSenior(id) {
+  if (!confirm('Одобрить тренировку и списать с баланса клиента?')) return;
+  try {
+    await DB.approveLateRequest(id, STATE.profile.id);
+    toast('✅ Тренировка добавлена','success');
+    renderSeniorAnalytics();
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+async function doRejectLateRequestSenior(id) {
+  const note = prompt('Причина отказа (опционально):');
+  if (note === null) return;
+  try {
+    await DB.rejectLateRequest(id, STATE.profile.id, note);
+    toast('Запрос отклонён','success');
+    renderSeniorAnalytics();
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+
 // ── ПРОБНЫЕ ТРЕНИРОВКИ ────────────────────────
 function renderTrialSessionModal() {
   const m = el('div','modal-overlay');
@@ -1581,6 +1671,23 @@ async function loadTrainerReport(year,month) {
               👤 Профиль</button>
           </div>
         </div>`).join('')}
+      ${await DB.getMyLateRequests(STATE.profile.id).then(reqs=>reqs.length?`
+        <h4 style="margin-top:16px">⏰ Мои запросы на поздние тренировки</h4>
+        ${reqs.map(r=>{
+          const statusBadge = r.status==='pending'
+            ? '<span style="background:rgba(245,158,11,.2);color:#b45309;padding:2px 8px;border-radius:6px;font-size:11px">⏳ Ожидает</span>'
+            : r.status==='approved'
+            ? '<span style="background:rgba(16,185,129,.2);color:#065f46;padding:2px 8px;border-radius:6px;font-size:11px">✅ Одобрено</span>'
+            : '<span style="background:rgba(239,68,68,.2);color:#991b1b;padding:2px 8px;border-radius:6px;font-size:11px">❌ Отклонено</span>';
+          return `<div class="history-item">
+            <div class="hi-main">
+              <span class="hi-client">${r.clients?.fio||'?'}</span>
+              <span class="hi-cat cat-${r.category}">Кат.${r.category}</span>
+              ${statusBadge}
+            </div>
+            <div class="hi-sub">${fmtDT(r.workout_date)}${r.reject_note?` · ❌ ${r.reject_note}`:''}</div>
+          </div>`;
+        }).join('')}`:'').catch(()=>'')}
       ${trialSessions.length?`
         <h4 style="margin-top:16px">🆕 Пробные тренировки</h4>
         ${trialSessions.map(t=>`<div class="history-item">
@@ -2261,6 +2368,42 @@ async function renderSeniorApp() {
   </nav>`);
   seniorTab('home');
 }
+async function renderSeniorAnalytics() {
+  $('#tab-content').innerHTML=`<div class="tab-pad">
+    <div class="section-header">
+      <h3>⏰ Поздние тренировки</h3>
+      <button class="btn btn-sm" onclick="seniorTab('more')">← Назад</button>
+    </div>
+    <div id="late-body"><div class="center-screen"><div class="spinner"></div></div></div>
+  </div>`;
+  try {
+    const branches = STATE.profile.branches||[];
+    // Показываем запросы по своим филиалам
+    const allReqs = await Promise.all(branches.map(b=>DB.getPendingLateRequests(b)));
+    const reqs = allReqs.flat().filter((r,i,a)=>a.findIndex(x=>x.id===r.id)===i); // дедупликация
+    const body = document.getElementById('late-body');
+    if (!reqs.length) {
+      body.innerHTML='<div class="empty-state">✅<p>Нет запросов на одобрение</p></div>'; return;
+    }
+    body.innerHTML = reqs.map(r=>`<div class="staff-card" style="flex-direction:column;gap:8px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <div class="staff-fio">${r.clients?.fio||'?'} · кат.${r.category}</div>
+          <div class="staff-meta">${r.profiles?.fio||'?'} · ${r.branch}</div>
+          <div class="staff-meta">📅 ${fmtDT(r.workout_date)}</div>
+        </div>
+      </div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:13px">
+        💬 ${r.reason}
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-sm btn-primary" style="flex:1" onclick="doApproveLateRequestSenior(${r.id})">✓ Одобрить</button>
+        <button class="btn btn-sm btn-danger" style="flex:1" onclick="doRejectLateRequestSenior(${r.id})">✗ Отклонить</button>
+      </div>
+    </div>`).join('');
+  } catch(e) { document.getElementById('late-body').innerHTML='<p class="hint">Ошибка</p>'; console.error(e); }
+}
+
 function seniorTab(tab) {
   const tabs=['home','clients','today','report','groups','more'];
   $$('.nav-btn').forEach((b,i)=>b.classList.toggle('active',tabs[i]===tab));
@@ -2271,8 +2414,9 @@ function seniorTab(tab) {
   if (tab==='report')   renderReportTab();
   if (tab==='events')   renderEventsTab();
   if (tab==='branch')   renderBranchReport();
-  if (tab==='groups')   renderSeniorGroups();
-  if (tab==='more')     renderSeniorMore();
+  if (tab==='groups')       renderSeniorGroups();
+  if (tab==='late_requests') renderSeniorAnalytics();
+  if (tab==='more')         renderSeniorMore();
 }
 
 function renderSeniorMore() {
@@ -2287,6 +2431,8 @@ function renderSeniorMore() {
         onclick="seniorTab('events')">🏆 События</button>
       <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);text-align:left;padding:14px 16px;border-radius:12px"
         onclick="renderSubstitutionsApproval()">🔄 Замены</button>
+      <button class="btn btn-full" style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);text-align:left;padding:14px 16px;border-radius:12px"
+        onclick="seniorTab('late_requests')" id="late-req-btn">⏰ Поздние тренировки</button>
       <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);text-align:left;padding:14px 16px;border-radius:12px"
         onclick="renderAdminSessionNotes()">📝 Конспекты и цели</button>
     </div>
@@ -4115,6 +4261,21 @@ async function renderAdminControl() {
         <div class="ci-main">${t.fio}</div>
         <div class="ci-sub">${(t.branches||[]).join(', ')}</div>
       </div>`).join('')}</div>`);
+    // Запросы на поздние тренировки
+    const lateRequests = await DB.getPendingLateRequests(null).catch(()=>[]);
+    if (lateRequests.length) sections.unshift(`<div class="control-section">
+      <div class="control-title danger">⏰ Запросы на поздние тренировки (${lateRequests.length})</div>
+      ${lateRequests.map(r=>`<div class="control-item">
+        <div class="ci-main"><b>${r.clients?.fio||'?'}</b> · кат.${r.category} · ${r.profiles?.fio||'?'}</div>
+        <div class="ci-sub">📅 ${fmtDT(r.workout_date)} · ${r.branch}</div>
+        <div class="ci-sub" style="margin-top:4px;color:var(--text)">💬 ${r.reason}</div>
+        <div style="display:flex;gap:6px;margin-top:8px">
+          <button class="btn btn-sm btn-primary" onclick="doApproveLateRequest(${r.id})">✓ Одобрить</button>
+          <button class="btn btn-sm btn-danger" onclick="doRejectLateRequest(${r.id})">✗ Отклонить</button>
+        </div>
+      </div>`).join('')}
+    </div>`);
+
     // Пробные тренировки — алерт если >5 у одного тренера
     if (allTrials.length) {
       const trialByTrainer = {};
