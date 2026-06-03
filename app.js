@@ -2853,8 +2853,8 @@ function adminTab(tab) {
 }
 
 async function renderAdminMore() {
-  const branches = (await cached('branches',()=>DB.getBranches())).map(b=>b.name);
-  const baseUrl = location.origin + location.pathname.replace('index.html','') + 'schedule.html';
+  const branches = await cached('branches',()=>DB.getBranches()).then(r=>r.map(b=>b.name)).catch(()=>[]);
+  const baseUrl = (location.origin + location.pathname).replace(/\/[^/]*$/, '/') + 'schedule.html';
 
   $('#tab-content').innerHTML=`<div class="tab-pad">
     <h3 style="margin-bottom:16px">Ещё</h3>
