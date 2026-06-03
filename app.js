@@ -1425,8 +1425,11 @@ async function renderReportTab() {
   const now=new Date(); let year=now.getFullYear(), month=now.getMonth()+1;
   $('#tab-content').innerHTML=`<div class="tab-pad">
     <div class="section-header"><h3>Мой отчёт</h3>
-      <div class="month-nav">
-        <button id="prev-m">‹</button><span id="rep-month">${fmtMY(year,month)}</span><button id="next-m">›</button>
+      <div style="display:flex;align-items:center;gap:6px">
+        <div class="month-nav">
+          <button id="prev-m">‹</button><span id="rep-month">${fmtMY(year,month)}</span><button id="next-m">›</button>
+        </div>
+        <button id="rep-excel" class="btn btn-sm" style="background:rgba(16,185,129,.15);color:#059669">⬇️ Excel</button>
       </div>
     </div>
     <div id="rep-body"><div class="center-screen"><div class="spinner"></div></div></div>
@@ -1434,6 +1437,7 @@ async function renderReportTab() {
   const load=()=>loadTrainerReport(year,month);
   document.getElementById('prev-m')?.addEventListener('click',()=>{if(month===1){year--;month=12;}else month--;document.getElementById('rep-month').textContent=fmtMY(year,month);load();});
   document.getElementById('next-m')?.addEventListener('click',()=>{if(month===12){year++;month=1;}else month++;document.getElementById('rep-month').textContent=fmtMY(year,month);load();});
+  document.getElementById('rep-excel')?.addEventListener('click',()=>doExportTrainer(STATE.profile.id,encodeURIComponent(STATE.profile.fio),year,month));
   await load();
 }
 async function loadTrainerReport(year,month) {
@@ -2120,8 +2124,7 @@ async function doExportBranchChildGroups(monthStr, branches) {
     // Все детские группы по филиалу
     const {data:tgs} = await sb().from('trainer_groups')
       .select('id, group_types(name,type), profiles(fio)')
-      .eq('branch', branch).is('subscription_end', null)
-      .eq('group_types.type', 'children');
+      .eq('branch', branch).is('subscription_end', null);
 
     const childGroups = (tgs||[]).filter(tg=>tg.group_types?.type==='children');
     if (!childGroups.length) { toast('Нет детских групп в этом филиале','error'); return; }
