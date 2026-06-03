@@ -22,6 +22,10 @@ const XL = {
 function nc(v, s={}) {
   return { v: Number(v)||0, t:'n', s };
 }
+// Ячейка с денежной суммой (числовое значение + формат "400 000")
+function mc(v, s={}) {
+  return { v: Number(v)||0, t:'n', z: '# ##0', s };
+}
 // Ячейка с текстом
 function tc(v, s={}) {
   return { v: String(v??''), t:'s', s };
@@ -177,25 +181,25 @@ function exportTrainerExcel(trainerFio, year, month, workouts, duties, groupSess
   rows.push(styledRow(['── Расчёт зарплаты ──'], headerStyle(XL.BLUE_DARK)));
 
   const salRows = [
-    ['ПТ кат.1',   tot1,           RATES.pt[1],            tot1*RATES.pt[1]],
-    ['ПТ кат.2',   tot2,           RATES.pt[2],            tot2*RATES.pt[2]],
-    ['ПТ кат.3',   tot3,           RATES.pt[3],            tot3*RATES.pt[3]],
-    ['Разовые 1кт',totDI1,         RATES.pt[1],            totDI1*RATES.pt[1]],
-    ['Разовые 2кт',totDI2,         RATES.pt[2],            totDI2*RATES.pt[2]],
-    ['Разовые 3кт',totDI3,         RATES.pt[3],            totDI3*RATES.pt[3]],
-    ['Дежурство',  +totH.toFixed(2),RATES.duty_per_hour,   sal.dutySum],
+    ['ПТ кат.1',    tot1,            mc(RATES.pt[1]),         mc(tot1*RATES.pt[1])],
+    ['ПТ кат.2',    tot2,            mc(RATES.pt[2]),         mc(tot2*RATES.pt[2])],
+    ['ПТ кат.3',    tot3,            mc(RATES.pt[3]),         mc(tot3*RATES.pt[3])],
+    ['Разовые 1кт', totDI1,          mc(RATES.pt[1]),         mc(totDI1*RATES.pt[1])],
+    ['Разовые 2кт', totDI2,          mc(RATES.pt[2]),         mc(totDI2*RATES.pt[2])],
+    ['Разовые 3кт', totDI3,          mc(RATES.pt[3]),         mc(totDI3*RATES.pt[3])],
+    ['Дежурство',   +totH.toFixed(2),mc(RATES.duty_per_hour), mc(sal.dutySum)],
   ];
-  if (sal.childSum)  salRows.push(['Детские группы','','',sal.childSum]);
-  if (sal.adultSum)  salRows.push(['Взрослые группы','','',sal.adultSum]);
-  if (sal.bonus)     salRows.push(['Премия','','',sal.bonus]);
-  if (sal.penalty)   salRows.push(['Штраф','','',-sal.penalty]);
+  if (sal.childSum)  salRows.push(['Детские группы', '', '', mc(sal.childSum)]);
+  if (sal.adultSum)  salRows.push(['Взрослые группы','', '', mc(sal.adultSum)]);
+  if (sal.bonus)     salRows.push(['Премия',         '', '', mc(sal.bonus)]);
+  if (sal.penalty)   salRows.push(['Штраф',          '', '', mc(-sal.penalty)]);
 
   salRows.forEach((r, i) => {
     rows.push(styledRow(r, rowStyle(i%2===0)));
   });
 
   // Финальный итог
-  rows.push(styledRow(['ИТОГО К ВЫПЛАТЕ', '', '', sal.total], grandTotalStyle()));
+  rows.push(styledRow(['ИТОГО К ВЫПЛАТЕ', '', '', mc(sal.total)], grandTotalStyle()));
 
   const ws = buildSheet(rows);
   ws['!cols'] = [{wch:14},{wch:8},{wch:8},{wch:8},{wch:12},{wch:12},{wch:12},{wch:10},{wch:16}];
@@ -256,12 +260,12 @@ function exportSummaryExcel(year, month, summaryData) {
     const totDI = (sal.cat.dropIn1||0)+(sal.cat.dropIn2||0)+(sal.cat.dropIn3||0);
     rows.push(styledRow([
       n++, p.fio,
-      +sal.hours.toFixed(2), sal.dutySum,
-      sal.childSum + sal.adultSum,
+      +sal.hours.toFixed(2), mc(sal.dutySum),
+      mc(sal.childSum + sal.adultSum),
       sal.cat[1], sal.cat[2], sal.cat[3], totDI,
-      sal.ptSum + sal.dropInSum,
-      sal.bonus, sal.penalty,
-      sal.total,
+      mc(sal.ptSum + sal.dropInSum),
+      mc(sal.bonus), mc(sal.penalty),
+      mc(sal.total),
     ], rowStyle(i%2===0)));
 
     totals.dh  += sal.hours;
@@ -280,12 +284,12 @@ function exportSummaryExcel(year, month, summaryData) {
   // Строка итогов
   rows.push(styledRow([
     '', 'ИТОГО:',
-    +totals.dh.toFixed(2), totals.ds,
-    totals.gs,
+    +totals.dh.toFixed(2), mc(totals.ds),
+    mc(totals.gs),
     totals.p1, totals.p2, totals.p3, totals.di,
-    totals.ps,
-    totals.bon, totals.pen,
-    totals.tot,
+    mc(totals.ps),
+    mc(totals.bon), mc(totals.pen),
+    mc(totals.tot),
   ], grandTotalStyle()));
 
   const ws = buildSheet(rows);
