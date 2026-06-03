@@ -10,6 +10,19 @@ const STATE = {
 // ── ЗАЩИТА ОТ ДВОЙНЫХ НАЖАТИЙ ────────────────
 const _pending = new Set();
 
+// ── RATE LIMITING ─────────────────────────────
+// Ограничивает вызовы: не чаще 1 раза в ms миллисекунд
+const _rateLimits = {};
+function rateLimit(key, ms=2000) {
+  const now = Date.now();
+  if (_rateLimits[key] && now - _rateLimits[key] < ms) return false;
+  _rateLimits[key] = now;
+  return true;
+}
+// Для PIN-входа: блокируем после 5 неверных попыток на 30 сек
+let _pinFailCount = 0;
+let _pinBlockedUntil = 0;
+
 // ── КЕШ (5 минут) ────────────────────────────
 const _cache = {};
 async function cached(key, fn, ttl=300000) {
@@ -120,7 +133,9 @@ async function init() {
     const p=await DB.getProfileByTgId(STATE.tgId);
     if (!p) { renderRegister(); return; }
     STATE.profile=p;
-    if (p.has_pin) renderPinEntry(); else enterApp();
+    if (p.has_pin) renderPinEntry();
+    else if (!p.has_pin && p.tg_id) renderForcePinSetup(); // профиль привязан, но PIN не создан
+    else enterApp();
   } catch(e) { toast('Ошибка подключения','error'); console.error(e); }
 }
 async function enterApp() {
@@ -161,6 +176,59 @@ async function doRegister() {
   } catch(e) { renderRegister(); toast('Ошибка регистрации','error'); console.error(e); }
 }
 
+// ── PIN — принудительная установка ───────────
+function renderForcePinSetup() {
+  setupBack(null); window._newPin=''; window._newPin2=''; window._pinStep=1;
+  setScreen(`<div class="screen-pad center-screen">
+    <div style="font-size:40px;margin-bottom:12px">🔐</div>
+    <h2 style="margin-bottom:8px">Создайте PIN-код</h2>
+    <p class="hint" style="margin-bottom:24px;text-align:center">Для защиты вашего аккаунта необходимо установить 4-значный PIN. Без него вход в приложение будет закрыт.</p>
+    <div id="pin-step-label" style="font-size:14px;font-weight:600;margin-bottom:16px">Введите новый PIN</div>
+    <div id="pin-dots" style="display:flex;gap:12px;margin-bottom:24px">
+      ${[0,1,2,3].map(()=>'<span style="width:16px;height:16px;border-radius:50%;border:2px solid var(--accent);display:inline-block"></span>').join('')}
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;max-width:220px;margin:0 auto">
+      ${[1,2,3,4,5,6,7,8,9,'',0,'←'].map(k=>`<button
+        style="height:56px;border-radius:12px;background:var(--card);border:1px solid var(--border);
+               color:var(--text);font-size:20px;font-weight:600;cursor:pointer;${k===''?'visibility:hidden':''}"
+        onclick="forcePinKey('${k}')">
+        ${k}
+      </button>`).join('')}
+    </div>
+  </div>`);
+}
+function forcePinKey(k) {
+  if (k==='←') { if(window._pinStep===1)window._newPin=window._newPin.slice(0,-1); else window._newPin2=window._newPin2.slice(0,-1); }
+  else if (k!==''&&(window._pinStep===1?window._newPin:window._newPin2).length<4) {
+    if(window._pinStep===1)window._newPin+=k; else window._newPin2+=k;
+  }
+  const cur = window._pinStep===1?window._newPin:window._newPin2;
+  $$('#pin-dots span').forEach((d,i)=>d.style.background=i<cur.length?'var(--accent)':'transparent');
+
+  if (cur.length===4) {
+    if (window._pinStep===1) {
+      // Переходим к подтверждению
+      window._pinStep=2; window._newPin2='';
+      document.getElementById('pin-step-label').textContent='Повторите PIN';
+      $$('#pin-dots span').forEach(d=>d.style.background='transparent');
+    } else {
+      // Проверяем совпадение
+      if (window._newPin!==window._newPin2) {
+        toast('PIN не совпадает, попробуйте снова','error');
+        window._pinStep=1; window._newPin=''; window._newPin2='';
+        document.getElementById('pin-step-label').textContent='Введите новый PIN';
+        $$('#pin-dots span').forEach(d=>d.style.background='transparent');
+        return;
+      }
+      DB.changePin(STATE.profile.id, window._newPin).then(()=>{
+        STATE.profile.has_pin = true;
+        toast('✅ PIN установлен!','success');
+        enterApp();
+      }).catch(()=>toast('Ошибка создания PIN','error'));
+    }
+  }
+}
+
 // ── PIN ───────────────────────────────────────
 function renderPinEntry() {
   setupBack(null); window._pin='';
@@ -184,9 +252,18 @@ function pinKey(k) {
   if (window._pin.length===4) {
     const attempt=window._pin; window._pin='';
     $$('#pin-dots span').forEach(d=>d.className='');
+    // Rate limiting: блокировка после 5 неверных попыток
+    if (Date.now() < _pinBlockedUntil) {
+      const sec = Math.ceil((_pinBlockedUntil-Date.now())/1000);
+      toast(`Слишком много попыток. Подождите ${sec} сек.`,'error'); return;
+    }
     DB.verifyPin(STATE.tgId,attempt).then(ok=>{
-      if (ok) { toast('Добро пожаловать! 👋','success'); enterApp(); }
-      else    { toast('Неверный PIN','error'); }
+      if (ok) { _pinFailCount=0; toast('Добро пожаловать! 👋','success'); enterApp(); }
+      else {
+        _pinFailCount++;
+        if (_pinFailCount>=5) { _pinBlockedUntil=Date.now()+30000; _pinFailCount=0; toast('5 неверных попыток. Блокировка на 30 сек.','error'); }
+        else toast(`Неверный PIN (${_pinFailCount}/5)`,'error');
+      }
     }).catch(()=>toast('Ошибка проверки PIN','error'));
   }
 }
@@ -2775,7 +2852,10 @@ function adminTab(tab) {
   if (tab==='more')          renderAdminMore();
 }
 
-function renderAdminMore() {
+async function renderAdminMore() {
+  const branches = (await cached('branches',()=>DB.getBranches())).map(b=>b.name);
+  const baseUrl = location.origin + location.pathname.replace('index.html','') + 'schedule.html';
+
   $('#tab-content').innerHTML=`<div class="tab-pad">
     <h3 style="margin-bottom:16px">Ещё</h3>
     <div style="display:flex;flex-direction:column;gap:10px">
@@ -2792,7 +2872,37 @@ function renderAdminMore() {
       <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);text-align:left;padding:14px 16px;border-radius:12px"
         onclick="renderAdminSessionNotes()">📝 Конспекты и цели</button>
     </div>
+
+    <!-- Ссылки расписания для ОП -->
+    <div style="margin-top:20px">
+      <h4 style="margin-bottom:10px">🔗 Ссылки расписания для ОП</h4>
+      <p class="hint" style="margin-bottom:10px">Отправьте ОП ссылку на расписание только его филиала. Только просмотр — редактировать нельзя.</p>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px;display:flex;justify-content:space-between;align-items:center">
+          <span style="font-size:13px">📋 Все филиалы</span>
+          <button class="btn btn-sm" onclick="copyScheduleLink('${baseUrl}')">📋 Копировать</button>
+        </div>
+        ${branches.map(b=>`
+        <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px;display:flex;justify-content:space-between;align-items:center">
+          <span style="font-size:13px">📍 ${b}</span>
+          <button class="btn btn-sm btn-primary" onclick="copyScheduleLink('${baseUrl}?branch=${encodeURIComponent(b)}')">📋 Копировать</button>
+        </div>`).join('')}
+      </div>
+    </div>
   </div>`;
+}
+
+function copyScheduleLink(url) {
+  navigator.clipboard?.writeText(url).then(()=>{
+    toast('✅ Ссылка скопирована','success');
+  }).catch(()=>{
+    // Fallback для Telegram WebApp
+    const inp = document.createElement('input');
+    inp.value = url; document.body.appendChild(inp);
+    inp.select(); document.execCommand('copy');
+    document.body.removeChild(inp);
+    toast('✅ Ссылка скопирована','success');
+  });
 }
 
 async function renderAdminSessionNotes() {

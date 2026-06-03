@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Общее расписание</title>
+  <title>Расписание — AquaDesk</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <style>
     :root {
@@ -26,10 +26,15 @@
       position: sticky; top: 0; z-index: 10;
     }
     .header h1 { font-size: 18px; font-weight: 700; }
-    .header p  { font-size: 12px; color: var(--hint); }
+    .header p  { font-size: 12px; color: var(--hint); margin-top: 2px; }
+    .branch-badge {
+      display: inline-block; background: rgba(124,58,237,.25); color: #a78bfa;
+      border: 1px solid rgba(124,58,237,.4); border-radius: 20px;
+      padding: 3px 10px; font-size: 12px; font-weight: 600; margin-top: 4px;
+    }
 
     .controls {
-      padding: 12px 16px; display: flex; gap: 10px; flex-wrap: wrap;
+      padding: 10px 16px; display: flex; gap: 10px; flex-wrap: wrap;
       border-bottom: 1px solid var(--border); background: var(--bg2);
     }
     .controls select {
@@ -37,17 +42,15 @@
       color: var(--text); padding: 8px 12px; font-size: 13px; outline: none;
       font-family: inherit;
     }
-    .controls select option { background: #1a1a2e; }
 
     .legend {
-      padding: 10px 16px; display: flex; gap: 10px; flex-wrap: wrap;
+      padding: 8px 16px; display: flex; gap: 8px; flex-wrap: wrap;
       background: var(--bg2); border-bottom: 1px solid var(--border);
     }
-    .legend-item {
-      font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 20px;
-    }
+    .legend-item { font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 20px; }
     .leg-pt    { background: rgba(124,58,237,.2); color: #a78bfa; }
-    .leg-group { background: rgba(16,185,129,.2); color: #10b981; }
+    .leg-group { background: rgba(16,185,129,.2);  color: #10b981; }
+    .leg-duty  { background: rgba(245,158,11,.2);  color: #f59e0b; }
 
     .scroll-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 
@@ -59,7 +62,8 @@
       white-space: nowrap;
     }
     .time-col { width: 48px; position: sticky; left: 0; z-index: 3; background: var(--bg2); }
-    td { padding: 3px 4px; min-width: 100px; vertical-align: top; border-bottom: 1px solid rgba(255,255,255,.03); }
+    td { padding: 3px 4px; min-width: 100px; vertical-align: top;
+         border-bottom: 1px solid rgba(255,255,255,.03); }
     td.time-cell {
       font-size: 11px; color: var(--hint); text-align: right; padding: 5px 8px;
       white-space: nowrap; font-variant-numeric: tabular-nums;
@@ -73,6 +77,7 @@
     }
     .slot-pt    { background: rgba(124,58,237,.18); color: #a78bfa; border-left: 3px solid #7c3aed; }
     .slot-group { background: rgba(16,185,129,.15);  color: #10b981; border-left: 3px solid #10b981; }
+    .slot-duty  { background: rgba(245,158,11,.15);  color: #f59e0b; border-left: 3px solid #f59e0b; }
     .slot-name  { font-weight: 700; }
     .slot-sub   { font-weight: 400; opacity: .8; font-size: 10px; margin-top: 1px; }
 
@@ -80,11 +85,12 @@
       border-radius:50%;animation:spin .7s linear infinite;margin:60px auto; }
     @keyframes spin{to{transform:rotate(360deg)}}
 
-    .empty-hour { opacity: .15; font-size: 10px; color: var(--hint); }
-
     .updated { font-size: 11px; color: var(--hint); padding: 10px 16px; text-align: center; }
-    .slot-duty { background: rgba(245,158,11,.15); color: #f59e0b; border-left: 3px solid #f59e0b; }
-    .leg-duty  { background: rgba(245,158,11,.2);  color: #f59e0b; }
+    .readonly-note {
+      font-size: 11px; color: var(--hint); text-align: center;
+      padding: 6px; background: rgba(255,255,255,.03);
+      border-top: 1px solid var(--border);
+    }
 
     @media (max-width: 480px) {
       th, td { min-width: 70px; }
@@ -95,12 +101,13 @@
 <body>
   <div class="header">
     <div>
-      <h1>🏊 Общее расписание</h1>
+      <h1>🏊 Расписание AquaDesk</h1>
+      <div id="branch-badge"></div>
       <p id="sub-title">Загрузка...</p>
     </div>
   </div>
 
-  <div class="controls">
+  <div class="controls" id="controls-bar">
     <select id="branch-filter" onchange="render()">
       <option value="">Все филиалы</option>
     </select>
@@ -113,12 +120,13 @@
 
   <div class="legend">
     <span class="legend-item leg-pt">ПТ (персональные)</span>
-    <span class="legend-item leg-group">Групповые занятия</span>
+    <span class="legend-item leg-group">Групповые</span>
     <span class="legend-item leg-duty" id="duty-legend" style="display:none">Дежурства</span>
   </div>
 
   <div id="content"><div class="spinner"></div></div>
   <div class="updated" id="updated-at"></div>
+  <div class="readonly-note">🔒 Только просмотр</div>
 
   <script>
     const SUPABASE_URL      = 'https://nkwfvuhtpaoxsaczwsrg.supabase.co';
@@ -127,13 +135,25 @@
     const HOURS = Array.from({length:17},(_,i)=>`${String(i+7).padStart(2,'0')}:00`);
 
     const _sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    let allSlots = [];
-
+    let allSlots  = [];
     let allDuties = [];
+
+    // Читаем branch из URL-параметра (?branch=ChekovLight)
+    const urlBranch = new URLSearchParams(location.search).get('branch') || '';
+
+    // Если branch зафиксирован — скрываем селектор и показываем бейдж
+    if (urlBranch) {
+      document.getElementById('controls-bar').style.display = 'none';
+      document.getElementById('duty-legend').style.display = '';
+    }
+
+    function getActiveBranch() {
+      return urlBranch || document.getElementById('branch-filter')?.value || '';
+    }
 
     async function load() {
       const { data, error } = await _sb.from('schedule_slots')
-        .select('*, profiles!trainer_id(fio), clients(fio), group_types(name)')
+        .select('*, profiles!trainer_id(fio), group_types(name)')
         .eq('active', true)
         .in('slot_type', ['pt','group'])
         .order('day_of_week').order('start_time');
@@ -143,10 +163,9 @@
           '<p style="color:#ef4444;text-align:center;padding:40px">Ошибка загрузки</p>';
         return;
       }
-
       allSlots = data || [];
 
-      // Load duties for current week
+      // Дежурства текущей недели
       const now = new Date();
       const mon = new Date(now);
       mon.setDate(now.getDate() - (now.getDay()+6)%7);
@@ -159,29 +178,34 @@
         .not('end_time','is',null);
       allDuties = duties || [];
 
-      // Populate branch filter
-      const branches = [...new Set(allSlots.map(s => s.branch).filter(Boolean))].sort();
-      const bf = document.getElementById('branch-filter');
-      if (bf.options.length <= 1) {
-        branches.forEach(b => {
-          const o = document.createElement('option'); o.value = b; o.textContent = b;
-          bf.appendChild(o);
-        });
+      // Заполняем селектор филиалов (только если нет URL-параметра)
+      if (!urlBranch) {
+        const branches = [...new Set(allSlots.map(s=>s.branch).filter(Boolean))].sort();
+        const bf = document.getElementById('branch-filter');
+        if (bf && bf.options.length <= 1) {
+          branches.forEach(b => {
+            const o = document.createElement('option');
+            o.value = b; o.textContent = b;
+            bf.appendChild(o);
+          });
+        }
+      } else {
+        // Показываем бейдж с названием филиала
+        document.getElementById('branch-badge').innerHTML =
+          `<span class="branch-badge">📍 ${decodeURIComponent(urlBranch)}</span>`;
+        document.title = `Расписание — ${decodeURIComponent(urlBranch)}`;
       }
 
       document.getElementById('sub-title').textContent =
         `Обновлено: ${new Date().toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}`;
-      document.getElementById('updated-at').textContent =
-        'ПТ и групповые занятия. При выборе филиала — также дежурства текущей недели.';
 
       render();
     }
 
     function render() {
-      const branch = document.getElementById('branch-filter')?.value || '';
-      const type   = document.getElementById('type-filter')?.value   || '';
+      const branch = getActiveBranch();
+      const type   = document.getElementById('type-filter')?.value || '';
 
-      // Show/hide duty legend
       const dutyLegend = document.getElementById('duty-legend');
       if (dutyLegend) dutyLegend.style.display = branch ? '' : 'none';
 
@@ -189,81 +213,80 @@
       if (branch) slots = slots.filter(s => s.branch === branch);
       if (type)   slots = slots.filter(s => s.slot_type === type);
 
-      // Build grid: dow → hour → [slots]
+      // Сетка слотов
       const grid = {};
-      for (let d = 0; d < 7; d++) grid[d] = {};
-
+      for (let d=0;d<7;d++) grid[d]={};
       slots.forEach(s => {
-        const hKey = s.start_time.slice(0,2) + ':00';
-        if (!grid[s.day_of_week][hKey]) grid[s.day_of_week][hKey] = [];
+        const hKey = s.start_time.slice(0,2)+':00';
+        if (!grid[s.day_of_week][hKey]) grid[s.day_of_week][hKey]=[];
         grid[s.day_of_week][hKey].push(s);
       });
 
-      // Add duties to grid when branch is selected
+      // Сетка дежурств
       const dutyGrid = {};
-      for (let d = 0; d < 7; d++) dutyGrid[d] = {};
+      for (let d=0;d<7;d++) dutyGrid[d]={};
       if (branch) {
         const mon = new Date();
-        mon.setDate(mon.getDate() - (mon.getDay()+6)%7);
+        mon.setDate(mon.getDate()-(mon.getDay()+6)%7);
         mon.setHours(0,0,0,0);
-        allDuties.filter(d => d.branch === branch).forEach(duty => {
+        allDuties.filter(d=>d.branch===branch).forEach(duty=>{
           const dt = new Date(duty.start_time);
           const dow = (dt.getDay()+6)%7;
-          const hKey = String(dt.getHours()).padStart(2,'0') + ':00';
-          if (!dutyGrid[dow][hKey]) dutyGrid[dow][hKey] = [];
+          const hKey = String(dt.getHours()).padStart(2,'0')+':00';
+          if (!dutyGrid[dow][hKey]) dutyGrid[dow][hKey]=[];
           dutyGrid[dow][hKey].push(duty);
         });
       }
 
       const content = document.getElementById('content');
-      if (!slots.length) {
-        content.innerHTML = '<p style="text-align:center;color:#888;padding:40px">Нет занятий по выбранным фильтрам</p>';
+      if (!slots.length && !Object.values(dutyGrid).some(h=>Object.keys(h).length)) {
+        content.innerHTML = '<p style="text-align:center;color:#888;padding:40px">Нет занятий</p>';
         return;
       }
 
-      // Find rows that have at least one slot
-      const activeHours = HOURS.filter(h => [0,1,2,3,4,5,6].some(d => grid[d][h]?.length));
+      const activeHours = HOURS.filter(h =>
+        [0,1,2,3,4,5,6].some(d => grid[d][h]?.length || dutyGrid[d][h]?.length)
+      );
+
+      const mon = new Date();
+      mon.setDate(mon.getDate()-(mon.getDay()+6)%7);
 
       content.innerHTML = `
         <div class="scroll-wrap">
           <table>
-            <thead>
-              <tr>
-                <th class="time-col"></th>
-                ${(() => {
-  const mon = new Date();
-  mon.setDate(mon.getDate() - (mon.getDay()+6)%7);
-  return DAYS.map((d,i) => {
-    const dt = new Date(mon); dt.setDate(mon.getDate()+i);
-    return `<th>${d}<br><span style="font-size:11px;font-weight:400;opacity:.6">${dt.getDate()}.${String(dt.getMonth()+1).padStart(2,'0')}</span></th>`;
-  }).join('');
-})()}
-              </tr>
-            </thead>
+            <thead><tr>
+              <th class="time-col"></th>
+              ${DAYS.map((d,i)=>{
+                const dt=new Date(mon); dt.setDate(mon.getDate()+i);
+                return `<th>${d}<br><span style="font-size:11px;font-weight:400;opacity:.6">${dt.getDate()}.${String(dt.getMonth()+1).padStart(2,'0')}</span></th>`;
+              }).join('')}
+            </tr></thead>
             <tbody>
-              ${activeHours.map(h => `
+              ${activeHours.map(h=>`
                 <tr>
                   <td class="time-cell">${h}</td>
-                  ${[0,1,2,3,4,5,6].map(dow => {
-                    const daySlots  = grid[dow][h] || [];
-                    const dayDuties = dutyGrid[dow][h] || [];
-                    const allItems  = [
-                      ...daySlots.map(s => {
-                        const isPt = s.slot_type === 'pt';
-                        const name = isPt ? (s.clients?.fio||'ПТ') : (s.group_types?.name||'Группа');
-                        const sub  = isPt
-                          ? `${s.profiles?.fio?.split(' ')[0]||''} · ${s.start_time.slice(0,5)}`
-                          : `${s.avg_headcount?s.avg_headcount+'чел.':''} · ${s.start_time.slice(0,5)}`;
+                  ${[0,1,2,3,4,5,6].map(dow=>{
+                    const daySlots  = grid[dow][h]||[];
+                    const dayDuties = dutyGrid[dow][h]||[];
+                    const items = [
+                      ...daySlots.map(s=>{
+                        const isPt = s.slot_type==='pt';
+                        // PT: показываем только тренера (не имя клиента — конфиденциально)
+                        const name = isPt
+                          ? (s.profiles?.fio?.split(' ')[0]||'Тренер')+' · ПТ'
+                          : (s.group_types?.name||'Группа');
+                        const sub = isPt
+                          ? s.start_time.slice(0,5)
+                          : `${s.avg_headcount?s.avg_headcount+' чел. · ':''}${s.start_time.slice(0,5)}`;
                         return `<div class="slot slot-${s.slot_type}"><div class="slot-name">${name}</div><div class="slot-sub">${sub}</div></div>`;
                       }),
-                      ...dayDuties.map(d => {
-                        const start = new Date(d.start_time).toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit'});
-                        const end   = new Date(d.end_time).toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit'});
-                        const hrs   = ((new Date(d.end_time)-new Date(d.start_time))/3600000).toFixed(1);
-                        return `<div class="slot slot-duty"><div class="slot-name">${d.profiles?.fio?.split(' ')[0]||'?'}</div><div class="slot-sub">Деж. ${start}–${end} · ${hrs}ч</div></div>`;
-                      })
+                      ...dayDuties.map(d=>{
+                        const start=new Date(d.start_time).toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit'});
+                        const end  =new Date(d.end_time).toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit'});
+                        return `<div class="slot slot-duty"><div class="slot-name">${d.profiles?.fio?.split(' ')[0]||'?'}</div><div class="slot-sub">Деж. ${start}–${end}</div></div>`;
+                      }),
                     ];
-                    return `<td>${allItems.join('')}</td>`;
+                    return `<td>${items.join('')}</td>`;
                   }).join('')}
                 </tr>`).join('')}
             </tbody>
@@ -272,8 +295,7 @@
     }
 
     load();
-    // Автообновление каждые 5 минут
-    setInterval(load, 5 * 60 * 1000);
+    setInterval(load, 5*60*1000);
   </script>
 </body>
 </html>
