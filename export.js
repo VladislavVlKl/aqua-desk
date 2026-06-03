@@ -86,7 +86,7 @@ function exportSummaryExcel(year, month, summaryData, branch) {
   const monthName = new Date(year,month-1).toLocaleDateString('ru-RU',{month:'long',year:'numeric'});
   const daysInMonth = new Date(year,month,0).getDate();
 
-  const {workouts,duties,groupSessions,profiles,adjustments,groupPayouts,groupSubstitutions,ptSubstitutions} = summaryData;
+  const {workouts,duties,groupSessions,profiles,adjustments,groupPayouts,groupSubstitutions,ptSubstitutions,trialSessions:allTrials} = summaryData;
   const adjMap = {};
   (adjustments||[]).forEach(a => { adjMap[a.trainer_id] = a; });
 
@@ -121,9 +121,10 @@ function exportSummaryExcel(year, month, summaryData, branch) {
     const pd  = (duties||[]).filter(d=>d.trainer_id===p.id);
     const pgs = (groupSessions||[]).filter(gs=>gs.trainer_id===p.id && gs.group_types?.billing_model==='headcount');
     const adj = adjMap[p.id]||null;
+    const pts = (allTrials||[]).filter(t=>t.trainer_id===p.id);
     const sal = calcSalary({workouts:pw, duties:pd, groupSessions:pgs, adjustment:adj,
                              groupPayouts:(groupPayouts||[]), groupSubstitutions:(groupSubstitutions||[]),
-                             ptSubstitutions:(ptSubstitutions||[]), trainerId:p.id});
+                             ptSubstitutions:(ptSubstitutions||[]), trialSessions:pts, trainerId:p.id});
     const ptCount = sal.cat[1]+sal.cat[2]+sal.cat[3]+(sal.cat.dropIn1||0)+(sal.cat.dropIn2||0)+(sal.cat.dropIn3||0);
     const adultGP = sal.adultSum;
 
@@ -297,9 +298,10 @@ function exportSummaryExcel(year, month, summaryData, branch) {
 
     // ── Расчёт ЗП ──
     const pgs = (groupSessions||[]).filter(gs=>gs.trainer_id===p.id && gs.group_types?.billing_model==='headcount');
+    const pts = (allTrials||[]).filter(t=>t.trainer_id===p.id);
     const sal = calcSalary({workouts:pw, duties:pd, groupSessions:pgs, adjustment:adj,
                              groupPayouts:(groupPayouts||[]), groupSubstitutions:(groupSubstitutions||[]),
-                             ptSubstitutions:(ptSubstitutions||[]), trainerId:p.id});
+                             ptSubstitutions:(ptSubstitutions||[]), trialSessions:pts, trainerId:p.id});
 
     rows.push(sr(['── Расчёт зарплаты ──'], hStyle(XL.BLUE_DARK)));
 

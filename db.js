@@ -1072,7 +1072,11 @@ async unassignTrainerGroup(id) {
       .eq('pending_confirmation',false);
     if (branch) ptsub = ptsub.eq('branch',branch);
 
-    const [w,d,tg,gs,p,adj,gp,gsubR,ptsubR] = await Promise.all([wq,dq,tgq,gsq,pq,aq,gpq,gsub,ptsub]);
+    let trialq = sb().from('trial_sessions')
+      .select('trainer_id,category').gte('session_date',from).lt('session_date',to);
+    if (branch) trialq = trialq.eq('branch',branch);
+
+    const [w,d,tg,gs,p,adj,gp,gsubR,ptsubR,trialR] = await Promise.all([wq,dq,tgq,gsq,pq,aq,gpq,gsub,ptsub,trialq]);
     return {
       workouts:            w.data      ||[],
       duties:              d.data      ||[],
@@ -1083,6 +1087,7 @@ async unassignTrainerGroup(id) {
       groupPayouts:        gp.data     ||[],
       groupSubstitutions:  gsubR.data  ||[],
       ptSubstitutions:     ptsubR.data ||[],
+      trialSessions:       trialR.data ||[],
     };
   },
 
