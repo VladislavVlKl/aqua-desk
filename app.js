@@ -5952,11 +5952,3 @@ async function doDeleteGroupType(id, nameEnc) {
   } catch(e) { toast('Ошибка — возможно есть назначенные тренеры','error'); console.error(e); }
 }
 window.addEventListener('DOMContentLoaded', init);
-async function doDeleteDuty(id) {
-  if (!confirm('Удалить это дежурство?')) return;
-  try {
-    await DB.deleteDuty(id);
-    toast('Дежурство удалено','success');
-    renderHomeTab();
-  } catch(e) { toast('Ошибка','error'); console.error(e); }
-}
