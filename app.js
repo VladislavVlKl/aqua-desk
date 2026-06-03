@@ -123,53 +123,13 @@ async function init() {
     if (p.has_pin) renderPinEntry(); else enterApp();
   } catch(e) { toast('Ошибка подключения','error'); console.error(e); }
 }
-async function enterApp(forceRole=null) {
-  const role = forceRole || STATE.profile.role;
-  const allRoles = [STATE.profile.role, ...(STATE.profile.extra_roles||[])];
-  // Показываем выбор панели если несколько ролей
-  if (!forceRole && allRoles.length > 1) {
-    checkShowTutorial(() => renderPanelSelector(allRoles));
-    return;
-  }
-  checkShowTutorial(() => launchPanel(role));
-}
-
-function launchPanel(role) {
-  if      (role==='admin')          renderAdminApp();
-  else if (role==='senior_trainer') renderSeniorApp();
-  else if (role==='ceo')            renderCeoApp();
-  else                              renderTrainerApp();
-}
-
-const PANEL_INFO = {
-  ceo:            {icon:'👑', label:'Топ-менеджмент', desc:'Дашборд, ЗП, группы, планы'},
-  admin:          {icon:'⚙️', label:'Координатор',   desc:'Управление, сводка, персонал'},
-  senior_trainer: {icon:'⭐', label:'Старший тренер', desc:'Клиенты, группы, филиал'},
-  trainer:        {icon:'🏊', label:'Тренер',         desc:'Клиенты, тренировки, отчёт'},
-};
-
-function renderPanelSelector(roles) {
-  setScreen(`<div class="screen-pad">
-    <div style="text-align:center;padding:24px 0 16px">
-      <div style="font-size:32px">👋</div>
-      <h2 style="margin:8px 0 4px">Привет, ${STATE.profile.fio.split(' ')[0]}!</h2>
-      <p class="hint">Выберите панель для входа</p>
-    </div>
-    <div style="display:flex;flex-direction:column;gap:12px;padding:0 4px">
-      ${roles.map(role=>{
-        const p = PANEL_INFO[role]||{icon:'📱',label:role,desc:''};
-        return `<button onclick="launchPanel('${role}')"
-          style="background:var(--card);border:1px solid var(--border);border-radius:16px;
-            padding:16px;text-align:left;cursor:pointer;display:flex;align-items:center;gap:14px">
-          <div style="font-size:32px;flex-shrink:0">${p.icon}</div>
-          <div>
-            <div style="font-weight:700;font-size:16px;color:var(--text)">${p.label}</div>
-            <div style="font-size:13px;color:var(--hint);margin-top:2px">${p.desc}</div>
-          </div>
-        </button>`;
-      }).join('')}
-    </div>
-  </div>`);
+async function enterApp() {
+  checkShowTutorial(() => {
+    if      (STATE.profile.role==='admin')          renderAdminApp();
+    else if (STATE.profile.role==='senior_trainer') renderSeniorApp();
+    else if (STATE.profile.role==='ceo')            renderCeoApp();
+    else                                            renderTrainerApp();
+  });
 }
 
 // ── РЕГИСТРАЦИЯ ───────────────────────────────
@@ -575,7 +535,7 @@ async function _doLogWorkoutInner() {
     const t=document.getElementById(`wk-time-${i}`)?.value||'09:00';
     const v = d ? `${d}T${t}:00+05:00` : null;
     if (!v) return toast(`Введите дату для ПТ №${i+1}`,'error');
-    if (!isValidWorkoutDate(v)) return toast(`ПТ №${i+1}: не старше 24 часов`,'error');
+    if (!isValidWorkoutDate(v)) return toast(`ПТ №${i+1}: можно вносить тренировки за последние 48 часов. Если тренировка была раньше — обратитесь к координатору.`,'error');
     dates.push(v);
   }
   // Блокирующие события
@@ -2150,7 +2110,6 @@ async function renderSeniorApp() {
     <div><div class="app-title">⭐ AquaDesk</div>
       <div class="app-sub">${STATE.profile.fio}</div></div>
     <div style="display:flex;gap:6px;align-items:center">
-      ${(STATE.profile.extra_roles||[]).length?`<button class="btn-icon" onclick="enterApp()">⇄</button>`:''}
       <button class="btn-icon" onclick="openSchedule()">📅</button>
       <button class="btn-icon" onclick="renderHelpModal()">?</button>
     </div>
@@ -2500,7 +2459,6 @@ function renderAdminApp() {
     <div><div class="app-title">👑 Координатор</div>
       <div class="app-sub">${STATE.profile.fio}</div></div>
     <div style="display:flex;gap:6px;align-items:center">
-      ${(STATE.profile.extra_roles||[]).length?`<button class="btn-icon" onclick="enterApp()" title="Сменить панель">⇄</button>`:''}
       <button class="btn-icon" onclick="openSchedule()">📅</button>
       <button class="btn-icon" onclick="renderHelpModal()">?</button>
     </div>
@@ -3077,33 +3035,18 @@ async function renderEditTrainerModal(id,fioEnc,branchesStr,role) {
   const fio=decodeURIComponent(fioEnc);
   const currentBranches=(branchesStr||'').split(',').filter(Boolean);
   const allBranches = await cached('branches',()=>DB.getBranches());
-  // Загружаем текущие extra_roles
-  const allProfiles = await cached('profiles',()=>DB.getAllProfiles());
-  const profile = allProfiles.find(p=>p.id===id)||{};
-  const currentExtra = profile.extra_roles||[];
-  const allRoles = ['trainer','senior_trainer','admin','ceo'];
-  const roleLabels = {trainer:'Тренер',senior_trainer:'Старший тренер',admin:'Координатор',ceo:'Топ-менеджмент'};
   const m=el('div','modal-overlay');
   m.innerHTML=`<div class="modal">
     <div class="modal-header"><h3>Редактировать</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="form-group"><label>ФИО</label><input id="et-fio" value="${fio}"></div>
-    <div class="form-group"><label>Основная роль</label>
+    <div class="form-group"><label>Роль</label>
       <select id="et-role">
         <option value="trainer" ${role==='trainer'?'selected':''}>Тренер</option>
         <option value="senior_trainer" ${role==='senior_trainer'?'selected':''}>Старший тренер</option>
         <option value="admin" ${role==='admin'?'selected':''}>Координатор</option>
         <option value="ceo" ${role==='ceo'?'selected':''}>Топ-менеджмент</option>
       </select></div>
-    <div class="form-group"><label>Доп. панели (мультидоступ)</label>
-      <p class="hint" style="margin-bottom:8px">Пользователь сможет выбирать панель при входе</p>
-      <div style="display:flex;flex-direction:column;gap:8px">
-        ${allRoles.filter(r=>r!==role).map(r=>`<label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer">
-          <input type="checkbox" class="et-extra-cb" value="${r}" ${currentExtra.includes(r)?'checked':''} style="width:18px;height:18px">
-          ${roleLabels[r]}
-        </label>`).join('')}
-      </div>
-    </div>
     <div class="form-group"><label>Филиалы</label>
       <div style="display:flex;flex-direction:column;gap:8px">
         ${allBranches.map(b=>`<label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer">
@@ -3120,11 +3063,10 @@ async function doEditTrainer(id) {
   const fio=(document.getElementById('et-fio')?.value||'').trim();
   const role=document.getElementById('et-role')?.value;
   const brs=[...document.querySelectorAll('.et-branch-cb:checked')].map(cb=>cb.value);
-  const extra=[...document.querySelectorAll('.et-extra-cb:checked')].map(cb=>cb.value);
   if (!fio) return toast('Введите ФИО','error');
   if (!brs.length) return toast('Выберите хотя бы один филиал','error');
   try {
-    await DB.updateProfile(id,{fio,role,branches:brs,extra_roles:extra});
+    await DB.updateProfile(id,{fio,role,branches:brs});
     invalidateCache('profiles');
     document.querySelector('.modal-overlay')?.remove();
     toast('✅','success'); loadStaffList();
@@ -4473,7 +4415,6 @@ async function renderCeoApp() {
         <div class="app-title">👑 AquaDesk</div>
         <div class="app-sub">${STATE.profile.fio} · Топ-менеджмент</div>
       </div>
-      ${(STATE.profile.extra_roles||[]).length?`<button class="btn-icon" onclick="enterApp()" title="Сменить панель">⇄</button>`:''}
     </div>
     <div id="tab-content" class="tab-content"></div>
     <nav class="bottom-nav">
