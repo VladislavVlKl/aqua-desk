@@ -412,3 +412,141 @@ function exportTrainerExcel(trainerFio, year, month, workouts, duties, groupSess
   XLSX.utils.book_append_sheet(wb,ws,'По дням');
   XLSX.writeFile(wb,`ЗП_${trainerFio.split(' ')[0]}_${monthName}.xlsx`);
 }
+
+// ─────────────────────────────────────────────
+// ЭКСПОРТ ДЕТСКОЙ ГРУППЫ (ведомость за месяц)
+// ─────────────────────────────────────────────
+function exportChildGroupExcel(groupId, monthStr, report, groupInfo) {
+  const XLSX = window.XLSX;
+  const wb   = XLSX.utils.book_new();
+
+  const {clients, payments, notes, attendance, payouts} = report;
+  const monthLabel = new Date(monthStr).toLocaleDateString('ru-RU',{month:'long',year:'numeric'});
+  const groupName  = groupInfo?.group_types?.name || 'Группа';
+  const branch     = groupInfo?.branch || '';
+  const trainerFio = groupInfo?.profiles?.fio || '—';
+
+  // Карты для быстрого доступа
+  const payMap = Object.fromEntries(payments.map(p=>[p.group_client_id, p]));
+  const noteMap = Object.fromEntries(notes.map(n=>[n.group_client_id, n]));
+
+  // Даты занятий и посещаемость
+  const sessionDates = [...new Set(attendance.map(a=>a.session_date))].sort();
+  const attByClient = {};
+  attendance.forEach(a => {
+    if (!attByClient[a.group_client_id]) attByClient[a.group_client_id] = 0;
+    if (a.attended) attByClient[a.group_client_id]++;
+  });
+
+  const activeClients = clients.filter(c=>c.is_active!==false);
+  const totalPaid   = payments.filter(p=>p.paid).reduce((s,p)=>s+Number(p.amount||0),0);
+  const totalUnpaid = payments.filter(p=>!p.paid).reduce((s,p)=>s+Number(p.amount||0),0);
+
+  // ── Лист: Ведомость группы ──
+  const rows = [];
+
+  // Заголовок
+  rows.push([tc(`${groupName} — ${branch} — ${monthLabel}`, titleStyle())]);
+  rows.push([tc(`Тренер: ${trainerFio}`, {font:{sz:11,name:'Arial',color:{rgb:XL.TEXT_DARK}}})]);
+  rows.push([tc(`Занятий в месяце: ${sessionDates.length}`, {font:{sz:11,name:'Arial',color:{rgb:XL.TEXT_DARK}}})]);
+  rows.push([]);
+
+  // Шапка таблицы
+  rows.push(sr(
+    ['N','Имя ребёнка','Возраст','Посещаемость','% явки','Сумма','Оплачено','Дата оплаты','Долг','Прогресс / заметка'],
+    hStyle()
+  ));
+
+  // Строки детей
+  activeClients.forEach((c,i) => {
+    const pay   = payMap[c.id];
+    const note  = noteMap[c.id];
+    const att   = attByClient[c.id]||0;
+    const pct   = sessionDates.length ? Math.round(att/sessionDates.length*100) : 0;
+    const isPaid = pay?.paid || false;
+    const amount = pay?.amount ? Number(pay.amount) : 0;
+    const debt   = isPaid ? 0 : amount;
+
+    const rs = rStyle(i%2===0);
+    const paidStyle = isPaid
+      ? {...rs, font:{...rs.font, color:{rgb:XL.GREEN_DARK}}}
+      : {...rs, font:{...rs.font, color:{rgb:'DC2626'}}};
+
+    rows.push([
+      tc(i+1, rs),
+      tc(c.name||'—', rs),
+      tc(c.age||'—', rs),
+      tc(`${att}/${sessionDates.length}`, rs),
+      {v:pct, t:'n', z:'0"%"', s:rs},
+      mc(amount, rs),
+      tc(isPaid?'✅ Оплачено':'❌ Не оплачено', paidStyle),
+      tc(pay?.paid_at ? new Date(pay.paid_at).toLocaleDateString('ru-RU') : '—', rs),
+      mc(debt, {...rs, font:{...rs.font, color:{rgb:debt>0?'DC2626':XL.TEXT_DARK}}}),
+      tc(note?.accomplishments||'—', rs),
+    ]);
+  });
+
+  rows.push([]);
+
+  // Итоговые строки
+  rows.push(sr(['','ИТОГО:','',`${activeClients.length} детей`,'','','','','',''], tStyle()));
+  rows.push(sr(['','Оплачено:','','','','','','','',`${payments.filter(p=>p.paid).length} чел.`], {
+    ...rStyle(false), font:{...rStyle(false).font, color:{rgb:XL.GREEN_DARK}, bold:true}
+  }));
+  rows.push(sr(['','Не оплатили:','','','','','','','',`${activeClients.length-payments.filter(p=>p.paid).length} чел.`], {
+    ...rStyle(true), font:{...rStyle(true).font, color:{rgb:'DC2626'}, bold:true}
+  }));
+  rows.push(sr(['','Сумма оплат:','','','', mc(totalPaid),'','','',''], gStyle()));
+  if (totalUnpaid > 0)
+    rows.push(sr(['','Задолженность:','','','', mc(totalUnpaid),'','','',''], {
+      ...rStyle(false), fill:{fgColor:{rgb:'FEE2E2'}}, font:{color:{rgb:'DC2626'},bold:true,sz:10,name:'Arial'}
+    }));
+
+  rows.push([]);
+
+  // Блок выплат тренеру
+  if (payouts?.length) {
+    rows.push(sr(['── Выплата тренеру ──'], hStyle(XL.BLUE_DARK)));
+    payouts.forEach((p,i) => {
+      const typeLabel = p.payout_type==='fixed'?'Фиксированная':'Процент';
+      rows.push(sr([trainerFio, typeLabel, p.payout_type==='fixed'?mc(p.payout_value):`${p.payout_value}%`, '', '', mc(p.payout_value),'','','',''], rStyle(i%2===0)));
+    });
+  }
+
+  const ws = buildSheet(rows);
+  ws['!cols'] = [{wch:4},{wch:22},{wch:8},{wch:12},{wch:8},{wch:14},{wch:14},{wch:14},{wch:12},{wch:30}];
+
+  XLSX.utils.book_append_sheet(wb, ws, 'Ведомость');
+
+  // ── Лист: Посещаемость по дням ──
+  if (sessionDates.length) {
+    const attRows = [];
+    attRows.push([tc(`Посещаемость — ${groupName} — ${monthLabel}`, titleStyle())]);
+    attRows.push([]);
+
+    const attHeader = ['Имя', ...sessionDates.map(d=>new Date(d).getDate()), 'Итого'];
+    attRows.push(sr(attHeader, hStyle()));
+
+    activeClients.forEach((c,i) => {
+      const attMap = Object.fromEntries(
+        attendance.filter(a=>a.group_client_id===c.id).map(a=>[a.session_date, a.attended])
+      );
+      const dayCells = sessionDates.map(d => {
+        const val = attMap[d];
+        if (val===undefined) return tc('—', rStyle(i%2===0));
+        return tc(val?'✓':'✗', {
+          ...rStyle(i%2===0),
+          font:{...rStyle(i%2===0).font, color:{rgb: val?XL.GREEN_DARK:'DC2626'}, bold:true}
+        });
+      });
+      attRows.push([tc(c.name, rStyle(i%2===0)), ...dayCells, nc(attByClient[c.id]||0, rStyle(i%2===0))]);
+    });
+
+    const wsAtt = buildSheet(attRows);
+    wsAtt['!cols'] = [{wch:22}, ...sessionDates.map(()=>({wch:5})), {wch:6}];
+    XLSX.utils.book_append_sheet(wb, wsAtt, 'Посещаемость');
+  }
+
+  const safeName = groupName.replace(/[\\/:*?"<>|]/g,'').slice(0,20);
+  XLSX.writeFile(wb, `ГП_${safeName}_${branch}_${monthLabel}.xlsx`);
+}

@@ -2085,6 +2085,26 @@ async function doExportTrainer(trainerId,fioEnc,year,month) {
   </div>`;
   document.body.appendChild(m);
 }
+async function doExportChildGroupExcel(groupId, monthStr) {
+  if (window.Telegram?.WebApp?.initData) {
+    const m=el('div','modal-overlay');
+    m.innerHTML=`<div class="modal"><div class="modal-header"><h3>Скачать Excel</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+      <p style="line-height:1.6">Откройте приложение в браузере для скачивания файла.</p>
+      <button class="btn btn-primary btn-full" onclick="window.Telegram.WebApp.openLink(''+APP_URL+'',{try_instant_view:false});this.closest('.modal-overlay').remove()">Открыть в браузере</button>
+    </div>`;
+    document.body.appendChild(m); return;
+  }
+  await ensureXlsx();
+  try {
+    const report = await DB.getGroupMonthReport(groupId, monthStr);
+    // Дополнительно: информация о группе
+    const {data:groupInfo} = await sb().from('trainer_groups')
+      .select('branch, group_types(name), profiles(fio)').eq('id',groupId).single();
+    exportChildGroupExcel(groupId, monthStr, report, groupInfo);
+  } catch(e) { toast('Ошибка экспорта','error'); console.error(e); }
+}
+
 async function doExportSummary(year,month,branch) {
   if (!window.Telegram?.WebApp?.initData) {
     await ensureXlsx();
@@ -2338,7 +2358,7 @@ async function loadSeniorGroupsList() {
           <div style="display:flex;gap:6px">
             <button class="btn btn-sm btn-primary"
               onclick="${g.group_types?.type==='children'?`renderGroupDetail('${g.id}')`:`renderAdultGroupDetail('${g.id}')`}">Открыть</button>
-            ${g.group_types?.type==='children'?`<button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
+            ${g.group_types?.type==='children'&&STATE.profile.role!=='trainer'?`<button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
               onclick="renderGroupMonthReport('${g.id}','${new Date().toISOString().slice(0,7)+'-01'}')">📊 Отчёт</button>`:''}
           </div>
         </div>
@@ -3635,7 +3655,9 @@ async function renderGroupMonthReport(groupId, monthStr) {
 
     setScreen(`<div class="app-header">
       <button class="btn-icon" onclick="${backFn}">←</button>
-      <div class="app-title">Отчёт группы</div><div></div></div>
+      <div class="app-title">Отчёт группы</div>
+      <button class="btn btn-sm btn-primary" onclick="doExportChildGroupExcel('${groupId}','${monthStr}')">⬇️ Excel</button>
+    </div>
     <div class="tab-content"><div class="tab-pad">
       <div class="section-header">
         <h3>${monthLabel}</h3>
