@@ -978,11 +978,17 @@ async function loadScheduleWeek(offset) {
   const branch = STATE.profile.branches?.[0]||'';
 
   try {
-    const [recurring, oneTime, events] = await Promise.all([
+    const [recurring, oneTime, events, trainerGroups] = await Promise.all([
       DB.getRecurringSlots(STATE.profile.id),
       DB.getOneTimeSlots(STATE.profile.id, monStr, sunStr),
       DB.getEventsForWeek(monStr, sunStr, branch),
+      DB.getTrainerGroups(STATE.profile.id),
     ]);
+    // Карта group_type_id → role для этого тренера
+    window._myGroupRoleMap = {};
+    trainerGroups.forEach(g => {
+      if (g.role) window._myGroupRoleMap[g.group_type_id] = g.role;
+    });
 
     const recurringIds = recurring.map(s=>s.id);
     const cancellations = await DB.getCancellations(recurringIds, monStr, sunStr);
@@ -1094,7 +1100,14 @@ function renderSlotPill(s) {
     return `<div class="slot-pill" style="background:${bg};color:${color}" title="${s.title}">
       📌 ${s.title.slice(0,8)}</div>`;
   }
-  const c=SLOT_COLORS[s.slot_type];
+  // Для групп — определяем цвет по роли тренера
+  let c = SLOT_COLORS[s.slot_type];
+  if (s.slot_type==='group') {
+    const role = (window._myGroupRoleMap||{})[s.group_type_id]||'';
+    if      (role==='суша')      c = {bg:'rgba(234,179,8,.18)',  color:'#ca8a04'};
+    else if (role==='вода')      c = {bg:'rgba(59,130,246,.18)', color:'#3b82f6'};
+    else if (role==='суша+вода') c = {bg:'rgba(124,58,237,.1)',  color:'#a78bfa'};
+  }
   const oneTimeMark = s._oneTime ? '★ ' : '';
   const oneBorder   = s._oneTime ? `border:1px dashed ${c.color};` : '';
 

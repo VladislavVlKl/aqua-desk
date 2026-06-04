@@ -48,9 +48,9 @@
       background: var(--bg2); border-bottom: 1px solid var(--border);
     }
     .legend-item { font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 20px; }
-    .leg-pt    { background: rgba(124,58,237,.2); color: #a78bfa; }
+    .leg-pt    { background: rgba(124,58,237,.2);  color: #a78bfa; }
     .leg-group { background: rgba(16,185,129,.2);  color: #10b981; }
-    .leg-duty  { background: rgba(245,158,11,.2);  color: #f59e0b; }
+    .leg-duty  { background: rgba(120,120,120,.2); color: #999;    }
 
     .scroll-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 
@@ -75,9 +75,12 @@
       font-size: 11px; font-weight: 600; padding: 4px 6px; border-radius: 5px;
       margin-bottom: 3px; line-height: 1.35;
     }
-    .slot-pt    { background: rgba(124,58,237,.18); color: #a78bfa; border-left: 3px solid #7c3aed; }
-    .slot-group { background: rgba(16,185,129,.15);  color: #10b981; border-left: 3px solid #10b981; }
-    .slot-duty  { background: rgba(245,158,11,.15);  color: #f59e0b; border-left: 3px solid #f59e0b; }
+    .slot-pt       { background: rgba(124,58,237,.18); color: #a78bfa; border-left: 3px solid #7c3aed; }
+    .slot-group    { background: rgba(16,185,129,.15);  color: #10b981; border-left: 3px solid #10b981; }
+    .slot-group-susha { background: rgba(234,179,8,.18);  color: #ca8a04; border-left: 3px solid #eab308; }
+    .slot-group-voda  { background: rgba(59,130,246,.18); color: #3b82f6; border-left: 3px solid #3b82f6; }
+    .slot-group-both  { background: rgba(124,58,237,.1);  color: #a78bfa; border-left: 3px solid #eab308; border-right: 3px solid #3b82f6; }
+    .slot-duty  { background: rgba(120,120,120,.15); color: #999; border-left: 3px solid #888; }
     .slot-name  { font-weight: 700; }
     .slot-sub   { font-weight: 400; opacity: .8; font-size: 10px; margin-top: 1px; }
 
@@ -152,17 +155,27 @@
     }
 
     async function load() {
-      const { data, error } = await _sb.from('schedule_slots')
-        .select('*, profiles!trainer_id(fio), group_types(name)')
-        .eq('active', true)
-        .in('slot_type', ['pt','group'])
-        .order('day_of_week').order('start_time');
+      const [{ data, error }, { data: tgData }] = await Promise.all([
+        _sb.from('schedule_slots')
+          .select('*, profiles!trainer_id(fio), group_types(name)')
+          .eq('active', true)
+          .in('slot_type', ['pt','group'])
+          .order('day_of_week').order('start_time'),
+        _sb.from('trainer_groups')
+          .select('trainer_id, group_type_id, role')
+          .is('subscription_end', null),
+      ]);
 
       if (error) {
         document.getElementById('content').innerHTML =
           '<p style="color:#ef4444;text-align:center;padding:40px">Ошибка загрузки</p>';
         return;
       }
+      // Строим карту: trainerId_groupTypeId → role
+      window._trainerRoleMap = {};
+      (tgData||[]).forEach(r => {
+        if (r.role) window._trainerRoleMap[`${r.trainer_id}_${r.group_type_id}`] = r.role;
+      });
       allSlots = data || [];
 
       // Дежурства текущей недели
@@ -271,14 +284,20 @@
                     const items = [
                       ...daySlots.map(s=>{
                         const isPt = s.slot_type==='pt';
-                        // PT: показываем только тренера (не имя клиента — конфиденциально)
                         const name = isPt
                           ? (s.profiles?.fio?.split(' ')[0]||'Тренер')+' · ПТ'
                           : (s.group_types?.name||'Группа');
                         const sub = isPt
                           ? s.start_time.slice(0,5)
                           : `${s.avg_headcount?s.avg_headcount+' чел. · ':''}${s.start_time.slice(0,5)}`;
-                        return `<div class="slot slot-${s.slot_type}"><div class="slot-name">${name}</div><div class="slot-sub">${sub}</div></div>`;
+                        let slotClass = `slot-${s.slot_type}`;
+                        if (s.slot_type==='group') {
+                          const role = (window._trainerRoleMap||{})[`${s.trainer_id}_${s.group_type_id}`]||'';
+                          if (role==='суша') slotClass='slot-group-susha';
+                          else if (role==='вода') slotClass='slot-group-voda';
+                          else if (role==='суша+вода') slotClass='slot-group-both';
+                        }
+                        return `<div class="slot ${slotClass}"><div class="slot-name">${name}</div><div class="slot-sub">${sub}</div></div>`;
                       }),
                       ...dayDuties.map(d=>{
                         const start=new Date(d.start_time).toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit'});
