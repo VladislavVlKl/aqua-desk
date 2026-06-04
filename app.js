@@ -4271,7 +4271,66 @@ async function renderGroupMonthReport(groupId, monthStr) {
       }).join('')}
       `:''}
 
+      <!-- Руководитель группы (только координатор / старший) -->
+      ${(()=>{
+        const canSee = isAdmin || STATE.profile.role==='senior_trainer';
+        if (!canSee) return '';
+        // Ищем запись с leader_name среди trainers (trainer_groups)
+        const tgWithLeader = trainers.find(t=>t.leader_name);
+        const leaderName    = tgWithLeader?.leader_name || '';
+        const leaderPct     = tgWithLeader?.leader_fee_percent || 0;
+        const leaderFee     = leaderPct>0 ? Math.round(totalPaid * leaderPct / 100) : 0;
+        return `<div style="margin-top:20px;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+            <h4 style="margin:0">Руководитель группы</h4>
+            ${isAdmin?`<button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
+              onclick="renderLeaderFeeModal('${groupId}','${encodeURIComponent(leaderName)}',${leaderPct})">✏️</button>`:''}
+          </div>
+          ${leaderName
+            ? `<div style="display:flex;justify-content:space-between;align-items:center">
+                <div>
+                  <div style="font-weight:600;font-size:14px">${leaderName}</div>
+                  <div style="font-size:12px;color:var(--hint)">${leaderPct}% от ${fmt(totalPaid)} сум</div>
+                </div>
+                <div style="font-size:20px;font-weight:700;color:var(--accent)">${fmt(leaderFee)} сум</div>
+              </div>`
+            : `<p class="hint" style="margin:0">${isAdmin?'Нажмите ✏️ чтобы добавить руководителя':'Не указан'}</p>`
+          }
+        </div>`;
+      })()}
+
     </div></div>`);
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+
+function renderLeaderFeeModal(groupId, nameEnc, pct) {
+  const name = decodeURIComponent(nameEnc);
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>Руководитель группы</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <p class="hint" style="margin-bottom:12px">Имя и % отчислений от суммы оплат за месяц. Видно только координатору и старшим.</p>
+    <div class="form-group"><label>Имя руководителя</label>
+      <input id="lf-name" type="text" placeholder="Иванов Иван" value="${name}"></div>
+    <div class="form-group"><label>Процент (%)</label>
+      <input id="lf-pct" type="number" min="0" max="100" value="${pct||10}"></div>
+    <button class="btn btn-primary btn-full" onclick="doSaveLeaderFee('${groupId}')">Сохранить</button>
+    ${name?`<button class="btn btn-full btn-danger" style="margin-top:8px" onclick="doSaveLeaderFee('${groupId}',true)">Удалить руководителя</button>`:''}
+  </div>`;
+  document.body.appendChild(m);
+}
+async function doSaveLeaderFee(groupId, remove=false) {
+  const name = remove ? null : document.getElementById('lf-name')?.value.trim()||null;
+  const pct  = remove ? 0   : parseInt(document.getElementById('lf-pct')?.value)||0;
+  try {
+    await sb().from('trainer_groups')
+      .update({leader_name: name, leader_fee_percent: pct})
+      .eq('id', groupId);
+    document.querySelector('.modal-overlay')?.remove();
+    toast(remove?'Руководитель удалён':'Сохранено ✅','success');
+    // Перезагрузить текущий отчёт
+    const ms = new Date().toISOString().slice(0,7)+'-01';
+    renderGroupMonthReport(groupId, ms);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 

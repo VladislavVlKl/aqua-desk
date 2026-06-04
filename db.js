@@ -506,7 +506,7 @@ async unassignTrainerGroup(id) {
         .gte('session_date',month).lt('session_date',nextMonthStr),
       sb().from('group_trainer_payouts').select('*')
         .eq('group_id',groupId).eq('month',month),
-      sb().from('trainer_groups').select('*, profiles(fio)')
+      sb().from('trainer_groups').select('*, profiles(fio), group_types(name)')
         .eq('id',groupId).is('subscription_end',null),
     ]);
     return {
