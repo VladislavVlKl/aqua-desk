@@ -2772,7 +2772,8 @@ async function loadSeniorGroupsList() {
           <div>
             <div class="staff-fio">
               ${g.role==='суша'?'<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#eab308;margin-right:4px;vertical-align:middle"></span>':
-                g.role==='вода'?'<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#3b82f6;margin-right:4px;vertical-align:middle"></span>':''}
+                g.role==='вода'?'<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#3b82f6;margin-right:4px;vertical-align:middle"></span>':
+                g.role==='суша+вода'?'<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:linear-gradient(90deg,#eab308 50%,#3b82f6 50%);margin-right:4px;vertical-align:middle"></span>':''}
               ${g.group_types?.name||'Группа'}${g.role?' ('+g.role+')':''}
             </div>
             <div class="staff-meta">${g.branch} · с ${g.subscription_start||'—'}</div>
@@ -4087,6 +4088,7 @@ async function renderAddSecondTrainerModal(groupTypeId, groupNameEnc, branch, gr
         <select id="st2-role">
           <option value="суша">Суша</option>
           <option value="вода">Вода</option>
+          <option value="суша+вода">Суша + Вода</option>
         </select></div>`:'<input type="hidden" id="st2-role" value="">'}
       ${isAdult?`<div style="background:rgba(16,185,129,.1);border-radius:8px;padding:10px;font-size:12px;color:var(--hint);margin-bottom:12px">
         ✅ Взрослая группа: ставка по явке</div>`:`
@@ -4143,6 +4145,7 @@ async function renderAssignGroupForm() {
         <select id="ag-role">
           <option value="суша">Суша</option>
           <option value="вода">Вода</option>
+          <option value="суша+вода">Суша + Вода</option>
         </select></div>
       <div id="ag-rate-section">
         <div class="form-group"><label>Тип ставки</label>
