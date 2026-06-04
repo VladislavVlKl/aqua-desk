@@ -4001,9 +4001,11 @@ async function loadGroupsList(monthStr) {
         ${assigned.length?assigned.map(a=>`
           <div style="display:flex;justify-content:space-between;align-items:center;width:100%;padding:4px 0;border-top:1px solid var(--border)">
             <span style="font-size:13px">${a.profiles?.fio||'—'} · ${a.branch}${a.role?' · '+a.role:''}</span>
-            <div style="display:flex;gap:4px">
+            <div style="display:flex;gap:4px;flex-wrap:wrap">
               ${gt.type==='children'?`<button class="btn btn-sm btn-primary" style="font-size:11px"
                 onclick="renderGroupMonthReport('${a.id}','${ms}')">📊 Отчёт</button>`:''}
+              <button class="btn btn-sm" style="font-size:11px;background:rgba(16,185,129,.15);color:#059669"
+                onclick="renderAddSecondTrainerModal(${gt.id},'${encodeURIComponent(gt.name)}','${a.branch}','${gt.type}')">+ 2й тренер</button>
               <button class="btn btn-sm" style="background:rgba(239,68,68,.15);color:#ef4444"
                 onclick="doUnassignGroup(${a.id})">Открепить</button>
             </div>
@@ -4061,6 +4063,56 @@ async function doAddGroupType() {
     document.querySelector('.modal-overlay')?.remove(); toast('✅','success'); loadGroupsList();
   } catch(e) { toast('Ошибка','error'); }
 }
+async function renderAddSecondTrainerModal(groupTypeId, groupNameEnc, branch, groupType) {
+  const groupName = decodeURIComponent(groupNameEnc);
+  const isAdult   = groupType === 'adult';
+  const isArtSwim = groupName.toLowerCase().includes('art');
+  try {
+    const [trainers, seniors] = await Promise.all([
+      DB.getProfilesByRole('trainer'),
+      DB.getProfilesByRole('senior_trainer'),
+    ]);
+    const allT = [...trainers, ...seniors];
+    const m = el('div','modal-overlay');
+    m.innerHTML=`<div class="modal">
+      <div class="modal-header"><h3>Второй тренер — ${groupName}</h3>
+        <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+      <p class="hint" style="margin-bottom:12px">${branch}</p>
+      <div class="form-group"><label>Тренер</label>
+        <select id="st2-trainer">
+          <option value="">— выберите —</option>
+          ${allT.map(t=>`<option value="${t.id}">${t.fio}</option>`).join('')}
+        </select></div>
+      ${isArtSwim?`<div class="form-group"><label>Роль</label>
+        <select id="st2-role">
+          <option value="суша">Суша</option>
+          <option value="вода">Вода</option>
+        </select></div>`:'<input type="hidden" id="st2-role" value="">'}
+      ${isAdult?`<div style="background:rgba(16,185,129,.1);border-radius:8px;padding:10px;font-size:12px;color:var(--hint);margin-bottom:12px">
+        ✅ Взрослая группа: ставка по явке</div>`:`
+      <div class="form-group"><label>Процент тренеру (%)</label>
+        <input id="st2-rate" type="number" value="20" min="0" max="100"></div>`}
+      <button class="btn btn-primary btn-full" onclick="doAddSecondTrainer(${groupTypeId},'${branch}','${groupType}')">Добавить</button>
+    </div>`;
+    document.body.appendChild(m);
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+async function doAddSecondTrainer(groupTypeId, branch, groupType) {
+  const trainerId = parseInt(document.getElementById('st2-trainer')?.value);
+  const role      = document.getElementById('st2-role')?.value||null;
+  const isAdult   = groupType === 'adult';
+  const rateType  = isAdult ? 'headcount' : 'percent';
+  const rateValue = isAdult ? 0 : (parseFloat(document.getElementById('st2-rate')?.value)||20);
+  if (!trainerId) return toast('Выберите тренера','error');
+  try {
+    await DB.addTrainerGroup(trainerId, groupTypeId, branch, todayStr(), rateType, rateValue, role||null);
+    document.querySelector('.modal-overlay')?.remove();
+    toast('✅ Второй тренер добавлен','success');
+    invalidateCache('groupTypes');
+    loadGroupsList(new Date().toISOString().slice(0,7)+'-01');
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+
 async function renderAssignGroupForm() {
   const form=document.getElementById('assign-form'); if (!form) return;
   try {
