@@ -2811,7 +2811,9 @@ async function renderGroupDetail(groupId) {
     const LEVELS = ['Подготовительный','Обучающий','Совершенствование','Спортивный'];
     setScreen(`<div class="app-header">
       <button class="btn-icon" onclick="STATE.profile.role==='trainer'?renderTrainerApp():renderSeniorApp()">←</button>
-      <div class="app-title">Группа</div><div></div></div>
+      <div class="app-title">Группа</div>
+      <button class="btn btn-sm" style="font-size:12px" onclick="renderGroupSubstitutionModal('${groupId}')">🔄 Замена</button>
+    </div>
     <div class="tab-content"><div class="tab-pad">
       <div class="section-header"><h3>Состав группы</h3>
         <button class="btn btn-sm" onclick="renderAddGroupClientModal('${groupId}')">+ Ребёнок</button>
@@ -4149,7 +4151,9 @@ async function renderGroupMonthReport(groupId, monthStr) {
     const payoutMap = Object.fromEntries(payouts.map(p=>[`${p.group_id}_${p.trainer_id}`, p]));
 
     const monthLabel = new Date(monthStr).toLocaleDateString('ru-RU',{month:'long',year:'numeric'});
-    const backFn = isAdmin ? `renderAdminApp();adminTab('groups')` : `renderSeniorApp();seniorTab('groups')`;
+    const backFn = isAdmin ? `renderAdminApp();adminTab('groups')`
+      : STATE.profile.role==='trainer' ? `renderTrainerApp()`
+      : `renderSeniorApp();seniorTab('groups')`;
 
     setScreen(`<div class="app-header">
       <button class="btn-icon" onclick="${backFn}">←</button>
@@ -5698,7 +5702,9 @@ async function renderAdultGroupDetail(groupId, monthStr) {
     const monthLabel = new Date(mYear,mMonth-1,1).toLocaleString('ru-RU',{month:'long',year:'numeric'});
     setScreen(`<div class="app-header">
       <button class="btn-icon" onclick="STATE.profile.role==='trainer'?renderTrainerApp():renderSeniorApp()">←</button>
-      <div class="app-title">${tgInfo?.group_types?.name||'Группа'}</div><div></div></div>
+      <div class="app-title">${tgInfo?.group_types?.name||'Группа'}</div>
+      <button class="btn btn-sm" style="font-size:12px" onclick="renderGroupSubstitutionModal('${groupId}')">🔄 Замена</button>
+    </div>
     <div class="tab-content"><div class="tab-pad">
       <div class="section-header"><h3>Участники</h3>
         <button class="btn btn-sm" onclick="renderAddAdultGroupClientModal('${groupId}')">+ Участник</button>
