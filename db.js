@@ -506,7 +506,7 @@ async unassignTrainerGroup(id) {
         .gte('session_date',month).lt('session_date',nextMonthStr),
       sb().from('group_trainer_payouts').select('*')
         .eq('group_id',groupId).eq('month',month),
-      sb().from('trainer_groups').select('*, profiles(fio), group_types(name,type)')
+      sb().from('trainer_groups').select('*, profiles(fio), group_types(name)')
         .eq('id',groupId).is('subscription_end',null),
     ]);
     return {
@@ -1375,10 +1375,14 @@ function calcSalary({workouts=[], duties=[], trainerGroups=[], groupSessions=[],
   const hours    = duties.reduce((s,d)=>s+(new Date(d.end_time)-new Date(d.start_time))/3600000,0);
   const dutySum  = Math.round(hours*RATES.duty_per_hour);
 
-  // Детские группы: ЗП по утверждённым payout (всегда fixed — авто-расчёт при утверждении)
+  // Детские группы: ЗП только если есть утверждённый payout за месяц
   const childSum = groupPayouts
-    .filter(p=>trainerGroups.some(tg=>tg.id===p.group_id))
-    .reduce((s,p)=>s + Number(p.payout_value), 0);
+    .filter(p=>trainerGroups.some(tg=>tg.id===p.group_id || tg.group_type_id===p.group_id))
+    .reduce((s,p)=>{
+      if (p.payout_type==='fixed') return s + Number(p.payout_value);
+      // percent: от суммы оплат клиентов группы (передаётся снаружи если есть, иначе 0)
+      return s + Number(p.payout_value);
+    },0);
 
   // Взрослые группы: по явке (авто)
   const adultSum = groupSessions

@@ -4389,40 +4389,33 @@ async function renderGroupMonthReport(groupId, monthStr) {
       ${isAdmin||STATE.profile.role==='senior_trainer'?`
       <h4 style="margin-top:20px;margin-bottom:8px">ЗП тренерам за месяц</h4>
       ${trainers.map(t=>{
-        const existing  = payoutMap[`${groupId}_${t.trainer_id}`];
-        const rate      = t.rate_value || 0;   // % из trainer_groups
-        const autoAmt   = Math.round(totalPaid * rate / 100);
-        const prevAdj   = existing ? (Number(existing.payout_value) - Math.round(totalPaid * rate / 100)) : 0;
-        const prevNote  = existing?.note || '';
-        return `<div class="staff-card" style="flex-direction:column;gap:8px">
+        const key = `${t.id}_${t.trainer_id}`;
+        const existing = payoutMap[`${groupId}_${t.trainer_id}`];
+        return `<div class="staff-card" style="flex-direction:column;gap:10px">
           <div style="display:flex;justify-content:space-between;align-items:center">
             <div>
               <div class="staff-fio">${t.profiles?.fio||'—'}</div>
-              <div class="staff-meta">${t.role||'основной'} · ${rate}%</div>
+              <div class="staff-meta">${t.role||'основной'}</div>
             </div>
-            ${existing
-              ? `<span style="font-size:13px;color:#10b981;font-weight:700">${fmt(existing.payout_value)} сум ✓</span>`
-              : `<span style="font-size:12px;color:var(--hint)">Не утверждено</span>`}
+            ${existing?`<span style="font-size:12px;color:#10b981;font-weight:600">
+              ${existing.payout_type==='fixed'?fmt(existing.payout_value)+' сум':existing.payout_value+'%'}
+              ✓</span>`:'<span style="font-size:12px;color:var(--hint)">Не утверждено</span>'}
           </div>
-          <div style="background:rgba(16,185,129,.07);border-radius:8px;padding:10px;font-size:13px">
-            <div style="display:flex;justify-content:space-between">
-              <span style="color:var(--hint)">Авто (${rate}% × ${fmt(totalPaid)})</span>
-              <span style="font-weight:600">${fmt(autoAmt)} сум</span>
-            </div>
-            <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
-              <label style="color:var(--hint);font-size:12px;white-space:nowrap">Корректировка:</label>
-              <input id="adj-${t.trainer_id}" type="number" value="${existing?prevAdj:0}" placeholder="0"
-                oninput="updatePayoutTotal(${t.trainer_id},${autoAmt})"
-                style="flex:1;min-width:0;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:6px 8px;color:var(--text);font-size:13px">
-            </div>
-            <div style="display:flex;justify-content:space-between;margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
-              <span style="font-weight:600">Итого:</span>
-              <span id="total-${t.trainer_id}" style="font-weight:700;color:var(--accent)">${fmt(autoAmt + (existing?prevAdj:0))} сум</span>
-            </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <select id="payout-type-${t.trainer_id}" onchange="onPayoutTypeChange(${t.trainer_id})"
+              style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text);font-size:13px">
+              <option value="fixed" ${existing?.payout_type==='fixed'?'selected':''}>Фикс. сумма</option>
+              <option value="percent" ${existing?.payout_type==='percent'?'selected':''}>Процент (%)</option>
+            </select>
+            <input id="payout-val-${t.trainer_id}" type="number"
+              value="${existing?.payout_value||''}"
+              placeholder="${existing?.payout_type==='percent'?'40':'500000'}"
+              style="width:120px;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text);font-size:13px">
+            <button class="btn btn-sm btn-primary"
+              onclick="doApproveGroupPayout('${groupId}','${t.trainer_id}','${monthStr}')">Утвердить</button>
           </div>
-          <button class="btn btn-sm btn-primary btn-full"
-            onclick="doApproveGroupPayoutAuto('${groupId}','${t.trainer_id}','${monthStr}',${autoAmt},${rate})">
-            Утвердить</button>
+          ${existing?.payout_type==='percent'?`<div style="font-size:11px;color:var(--hint)">
+            ${existing.payout_value}% от ${fmt(totalPaid)} = ${fmt(Math.round(totalPaid*existing.payout_value/100))} сум</div>`:''}
         </div>`;
       }).join('')}
       `:''}
@@ -4503,29 +4496,10 @@ function onPayoutTypeChange(trainerId) {
   const inp  = document.getElementById(`payout-val-${trainerId}`);
   if (inp) inp.placeholder = type==='percent' ? '40' : '500000';
 }
-function updatePayoutTotal(trainerId, autoAmt) {
-  const adj = parseInt(document.getElementById(`adj-${trainerId}`)?.value)||0;
-  const el  = document.getElementById(`total-${trainerId}`);
-  if (el) el.textContent = fmt(autoAmt + adj) + ' сум';
-}
-async function doApproveGroupPayoutAuto(groupId, trainerId, monthStr, autoAmt, rate) {
-  const adj   = parseInt(document.getElementById(`adj-${trainerId}`)?.value)||0;
-  const final = autoAmt + adj;
-  const note  = adj !== 0 ? `${rate}% авто + корр. ${adj > 0 ? '+' : ''}${adj}` : `${rate}% авто`;
-  if (_pending.has(`payout_${groupId}_${trainerId}`)) return;
-  _pending.add(`payout_${groupId}_${trainerId}`);
-  try {
-    await DB.setGroupTrainerPayout(parseInt(groupId), parseInt(trainerId), monthStr, 'fixed', final, STATE.profile.id, note);
-    toast('ЗП утверждена ✅','success');
-    renderGroupMonthReport(groupId, monthStr);
-  } catch(e) { toast('Ошибка','error'); console.error(e); }
-  finally { _pending.delete(`payout_${groupId}_${trainerId}`); }
-}
-// Оставлен для совместимости (вызывается из "Ставки" модалки)
 async function doApproveGroupPayout(groupId, trainerId, monthStr) {
-  const type = document.getElementById(`payout-type-${trainerId}`)?.value||'fixed';
-  const val  = parseFloat(document.getElementById(`payout-val-${trainerId}`)?.value||0);
-  if (!val) return toast('Введите сумму','error');
+  const type  = document.getElementById(`payout-type-${trainerId}`)?.value||'fixed';
+  const val   = parseFloat(document.getElementById(`payout-val-${trainerId}`)?.value||0);
+  if (!val) return toast('Введите сумму или %','error');
   if (_pending.has(`payout_${groupId}_${trainerId}`)) return;
   _pending.add(`payout_${groupId}_${trainerId}`);
   try {
