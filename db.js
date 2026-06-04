@@ -398,6 +398,20 @@ async unassignTrainerGroup(id) {
     if (error) throw error;
   },
 
+  async deleteGroupClient(id) {
+    const {error} = await sb().from('group_clients').delete().eq('id',id);
+    if (error) throw error;
+  },
+  async deleteAdultGroupClient(id) {
+    const {error} = await sb().from('adult_group_clients').delete().eq('id',id);
+    if (error) throw error;
+  },
+  async deleteGroupAttendanceDay(groupId, date) {
+    const {error} = await sb().from('group_attendance')
+      .delete().eq('group_id',groupId).eq('session_date',date);
+    if (error) throw error;
+  },
+
   // ─── GROUP ATTENDANCE ─────────────────────────
   async getGroupAttendance(groupId, date) {
     const {data,error} = await sb().from('group_attendance')

@@ -2859,8 +2859,8 @@ async function renderGroupDetail(groupId) {
                 onclick="renderEditGroupClientModal('${c.id}','${encodeURIComponent(c.name)}',${c.age||0},${c.monthly_price||0},'${groupId}')">
                 ✏️</button>
               <button class="btn btn-sm btn-danger" style="font-size:11px"
-                onclick="archiveGroupClientConfirm('${c.id}','${encodeURIComponent(c.name)}')">
-                Архив</button>
+                onclick="archiveGroupClientConfirm('${c.id}','${encodeURIComponent(c.name)}','${groupId}')">
+                Архив / Удалить</button>
             </div>
           </div>`;
         }).join('')}
@@ -2871,18 +2871,23 @@ async function renderGroupDetail(groupId) {
       ${!sessionHistory.length
         ? '<p class="hint">Занятий пока не записано</p>'
         : sessionHistory.map(s=>`
-          <div class="history-item" style="cursor:pointer" onclick="renderGroupAttendanceEdit('${groupId}','${s.date}')">
+          <div class="history-item">
             <div class="hi-main" style="justify-content:space-between">
               <span class="hi-client">${fmtDate(s.date)}</span>
               <span style="font-size:13px;font-weight:600;color:${s.attended===s.total?'#10b981':'#f59e0b'}">
                 ${s.attended} / ${s.total}
               </span>
             </div>
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">
               <span class="hint" style="font-size:12px">
                 ${s.attended===s.total?'Все присутствовали':s.attended===0?'Никого не было':`${s.total-s.attended} отсутств.`}
               </span>
-              <span style="font-size:12px;color:var(--accent)">✏️ Редактировать</span>
+              <div style="display:flex;gap:6px">
+                <button class="btn btn-sm" style="font-size:11px;background:var(--card);border:1px solid var(--border)"
+                  onclick="renderGroupAttendanceEdit('${groupId}','${s.date}')">✏️ Изменить</button>
+                <button class="btn btn-sm btn-danger" style="font-size:11px"
+                  onclick="doDeleteAttendanceDay('${groupId}','${s.date}')">🗑</button>
+              </div>
             </div>
           </div>`).join('')}
     </div></div>`);
@@ -3703,12 +3708,37 @@ async function doSaveGroupNote(groupId, clientId, month) {
     renderGroupDetail(groupId);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
-async function archiveGroupClientConfirm(clientId, nameEnc) {
+function archiveGroupClientConfirm(clientId, nameEnc, groupId) {
   const name = decodeURIComponent(nameEnc);
-  if (!confirm(`Архивировать «${name}»?`)) return;
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>${name}</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <p class="hint" style="margin-bottom:16px">Архив — скрыть из группы (можно вернуть). Удалить — навсегда.</p>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border)"
+        onclick="doArchiveGroupClient('${clientId}','${groupId}')">📦 Архивировать</button>
+      <button class="btn btn-full btn-danger"
+        onclick="doDeleteGroupClient('${clientId}','${groupId}')">🗑 Удалить навсегда</button>
+    </div>
+  </div>`;
+  document.body.appendChild(m);
+}
+async function doArchiveGroupClient(clientId, groupId) {
+  document.querySelector('.modal-overlay')?.remove();
   try {
     await DB.archiveGroupClient(clientId);
     toast('Архивирован','success');
+    renderGroupDetail(groupId);
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+async function doDeleteGroupClient(clientId, groupId) {
+  document.querySelector('.modal-overlay')?.remove();
+  if (!confirm('Удалить безвозвратно?')) return;
+  try {
+    await DB.deleteGroupClient(clientId);
+    toast('Удалён','success');
+    renderGroupDetail(groupId);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 async function renderGroupAttendance(groupId) {
@@ -5714,7 +5744,7 @@ async function renderAdultGroupDetail(groupId, monthStr) {
       ${!clients.length?'<p class="hint">Участников нет</p>':
         clients.map(c=>`<div class="staff-card" style="justify-content:space-between">
           <span>${c.name}</span>
-          <button class="btn btn-sm btn-danger" onclick="archiveAdultClient('${c.id}','${groupId}')">✕</button>
+          <button class="btn btn-sm btn-danger" onclick="archiveAdultClientConfirm('${c.id}','${encodeURIComponent(c.name)}','${groupId}')">✕</button>
         </div>`).join('')}
 
       <div class="section-header" style="margin-top:20px">
@@ -5932,11 +5962,48 @@ async function doDeleteGroupSession(sessionId, groupId) {
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 
+async function doDeleteAttendanceDay(groupId, date) {
+  if (!confirm(`Удалить запись о занятии ${fmtDate(date)}?`)) return;
+  try {
+    await DB.deleteGroupAttendanceDay(groupId, date);
+    toast('Занятие удалено','success');
+    renderGroupDetail(groupId);
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+
+function archiveAdultClientConfirm(id, nameEnc, groupId) {
+  const name = decodeURIComponent(nameEnc);
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>${name}</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <p class="hint" style="margin-bottom:16px">Архив — скрыть из группы. Удалить — навсегда.</p>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border)"
+        onclick="doArchiveAdultClient('${id}','${groupId}')">📦 Архивировать</button>
+      <button class="btn btn-full btn-danger"
+        onclick="doDeleteAdultGroupClient('${id}','${groupId}')">🗑 Удалить навсегда</button>
+    </div>
+  </div>`;
+  document.body.appendChild(m);
+}
 async function archiveAdultClient(id, groupId) {
-  if (!confirm('Удалить участника?')) return;
+  archiveAdultClientConfirm(id, encodeURIComponent('участник'), groupId);
+}
+async function doArchiveAdultClient(id, groupId) {
+  document.querySelector('.modal-overlay')?.remove();
   try {
     await DB.archiveAdultGroupClient(id);
-    toast('Удалено','success');
+    toast('Архивирован','success');
+    renderAdultGroupDetail(groupId);
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+async function doDeleteAdultGroupClient(id, groupId) {
+  document.querySelector('.modal-overlay')?.remove();
+  if (!confirm('Удалить безвозвратно?')) return;
+  try {
+    await DB.deleteAdultGroupClient(id);
+    toast('Удалён','success');
     renderAdultGroupDetail(groupId);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
