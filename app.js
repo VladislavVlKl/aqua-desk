@@ -366,7 +366,7 @@ async function renderHomeTab() {
               ${c.fio}${warn}</option>`;
           }).join('')}
         </select>
-        <div id="wk-client-chip" style="display:none;padding:10px 12px;background:var(--card);border:1px solid var(--accent);border-radius:8px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;margin-bottom:0">
+        <div id="wk-client-chip" style="display:none;padding:10px 12px;background:var(--card);border:1px solid var(--accent);border-radius:8px;justify-content:space-between;align-items:center;cursor:pointer;margin-bottom:0">
           <span id="wk-client-chip-name" style="font-size:14px;font-weight:500"></span>
           <span style="font-size:16px;color:var(--hint);padding:0 4px" onclick="wkClientClear()">✕</span>
         </div>
@@ -3400,8 +3400,11 @@ async function adminDetail(trainerId,fioEnc,year,month) {
         <div class="summary-card"><div class="s-val">${sal.cat[1]+sal.cat[2]+sal.cat[3]}</div><div class="s-lbl">ПТ</div></div>
         <div class="summary-card"><div class="s-val">${(sal.cat.dropIn1||0)+(sal.cat.dropIn2||0)+(sal.cat.dropIn3||0)}</div><div class="s-lbl">Разовые</div></div>
         <div class="summary-card"><div class="s-val">${sal.hours.toFixed(1)}ч</div><div class="s-lbl">Деж.</div></div>
-        ${sal.adultSum+sal.childSum>0?`<div class="summary-card"><div class="s-val" style="font-size:13px">${fmt(sal.adultSum+sal.childSum)}</div><div class="s-lbl">Группы</div></div>`:''}
-        <div class="summary-card accent" style="grid-column:span ${sal.adultSum+sal.childSum>0?1:2}">
+        <div class="summary-card">
+          <div class="s-val" style="font-size:13px">${sal.adultSum+sal.childSum>0?fmt(sal.adultSum+sal.childSum):'—'}</div>
+          <div class="s-lbl">Группы${sal.adultSum+sal.childSum===0?'<div style="font-size:10px;opacity:.6">ожидает</div>':''}</div>
+        </div>
+        <div class="summary-card accent">
           <div class="s-val">${fmt(sal.total)}</div><div class="s-lbl">К выплате</div>
         </div>
       </div>
