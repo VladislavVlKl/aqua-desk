@@ -2800,10 +2800,11 @@ async function renderGroupDetail(groupId) {
     if (groupInfo?.group_types?.type !== 'children') {
       renderAdultGroupDetail(groupId); return;
     }
-    const [clients, payments, notes] = await Promise.all([
+    const [clients, payments, notes, sessionHistory] = await Promise.all([
       DB.getGroupClients(groupId),
       DB.getGroupPayments(groupId, month),
       DB.getGroupProgressNotes(groupId, month),
+      DB.getGroupSessionHistory(groupId),
     ]);
     const paidMap = Object.fromEntries(payments.map(p=>[p.group_client_id, p]));
     const noteMap = Object.fromEntries(notes.map(n=>[n.group_client_id, n]));
@@ -2861,6 +2862,27 @@ async function renderGroupDetail(groupId) {
             </div>
           </div>`;
         }).join('')}
+
+      <div class="section-header" style="margin-top:24px">
+        <h3>История занятий</h3>
+      </div>
+      ${!sessionHistory.length
+        ? '<p class="hint">Занятий пока не записано</p>'
+        : sessionHistory.map(s=>`
+          <div class="history-item" style="cursor:pointer" onclick="renderGroupAttendanceEdit('${groupId}','${s.date}')">
+            <div class="hi-main" style="justify-content:space-between">
+              <span class="hi-client">${fmtDate(s.date)}</span>
+              <span style="font-size:13px;font-weight:600;color:${s.attended===s.total?'#10b981':'#f59e0b'}">
+                ${s.attended} / ${s.total}
+              </span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+              <span class="hint" style="font-size:12px">
+                ${s.attended===s.total?'Все присутствовали':s.attended===0?'Никого не было':`${s.total-s.attended} отсутств.`}
+              </span>
+              <span style="font-size:12px;color:var(--accent)">✏️ Редактировать</span>
+            </div>
+          </div>`).join('')}
     </div></div>`);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
@@ -5768,6 +5790,30 @@ async function doEditGroupClient(clientId, groupId) {
     toast('✅ Сохранено','success');
     renderGroupDetail(groupId);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+
+// Открыть редактор посещаемости за конкретную дату из истории
+async function renderGroupAttendanceEdit(groupId, date) {
+  const [clients, existing] = await Promise.all([
+    DB.getGroupClients(groupId),
+    DB.getGroupAttendance(groupId, date),
+  ]);
+  const attMap = Object.fromEntries(existing.map(a=>[a.group_client_id, a.attended]));
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>Посещаемость: ${fmtDate(date)}</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div id="att-list">
+      ${clients.map(c=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)">
+        <span style="font-size:14px">${c.name}</span>
+        <input type="checkbox" id="att-${c.id}" ${attMap[c.id]?'checked':''} style="width:22px;height:22px">
+      </div>`).join('')}
+    </div>
+    <input type="hidden" id="att-date" value="${date}">
+    <button class="btn btn-primary btn-full" style="margin-top:12px"
+      onclick="saveAttendanceByDate('${groupId}')">Сохранить</button>
+  </div>`;
+  document.body.appendChild(m);
 }
 
 // Посещаемость за другую дату

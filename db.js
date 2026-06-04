@@ -412,6 +412,24 @@ async unassignTrainerGroup(id) {
     if (error) throw error;
   },
 
+  // Уникальные даты занятий с явкой
+  async getGroupSessionHistory(groupId) {
+    const {data} = await sb().from('group_attendance')
+      .select('session_date, attended')
+      .eq('group_id', groupId)
+      .order('session_date', {ascending:false})
+      .limit(500);
+    const map = {};
+    (data||[]).forEach(r=>{
+      if (!map[r.session_date]) map[r.session_date] = {total:0, attended:0};
+      map[r.session_date].total++;
+      if (r.attended) map[r.session_date].attended++;
+    });
+    return Object.entries(map)
+      .sort((a,b)=>b[0].localeCompare(a[0]))
+      .map(([date,v])=>({date,...v}));
+  },
+
   // ─── GROUP PAYMENTS ───────────────────────────
   async getGroupPayments(groupId, month) {
     const {data,error} = await sb().from('group_payments')
