@@ -449,14 +449,16 @@ async function renderHomeTab() {
 
   </div>`;
   renderDateFields();
-  // Закрывать дропдаун поиска клиента при клике вне
-  document.addEventListener('click', function closeWkDrop(e) {
+  // Закрывать дропдаун при касании/клике вне поля поиска
+  const _closeWkDrop = (e) => {
     const drop = document.getElementById('wk-client-drop');
-    if (!drop) { document.removeEventListener('click',closeWkDrop); return; }
+    if (!drop) { document.removeEventListener('touchstart',_closeWkDrop); document.removeEventListener('mousedown',_closeWkDrop); return; }
     if (!e.target.closest('#wk-client-search') && !e.target.closest('#wk-client-drop')) {
       drop.style.display='none';
     }
-  });
+  };
+  document.addEventListener('touchstart', _closeWkDrop, {passive:true});
+  document.addEventListener('mousedown',  _closeWkDrop);
 }
 
 async function doLogDutyHome() {
@@ -518,7 +520,7 @@ async function renderClientsTab() {
         <div style="flex:1;min-width:0">
           <div class="cr-name" style="font-size:16px;font-weight:600">${dot}${c.fio}</div>
           <div class="cr-meta" style="margin-top:2px;display:flex;flex-wrap:wrap;gap:4px;align-items:center">
-            <span style="background:rgba(16,185,129,.18);color:#10b981;font-size:11px;padding:1px 7px;border-radius:8px;font-weight:600">Кат.${c.category}</span>
+            <span class="hi-cat cat-${c.category}" style="font-size:11px;padding:1px 7px;border-radius:8px;font-weight:600">Кат.${c.category}</span>
             <span style="font-size:12px;color:var(--hint)">${c.balance} ПТ</span>
             ${c.age?`<span style="font-size:12px;color:var(--hint)">${c.age} лет</span>`:''}
             ${c.subscription_end?`<span style="font-size:12px;color:${exp?'#ef4444':warn?'#f59e0b':'var(--hint)'}">до ${c.subscription_end}</span>`:''}
@@ -535,8 +537,8 @@ async function renderClientsTab() {
     </div>
     <input type="text" id="cl-search" placeholder="🔍 Поиск..." oninput="(()=>{const f=this.value;const b=document.getElementById('cl-list');if(b){const arr=${JSON.stringify('clients')};}})()"
       style="width:100%;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text);font-size:14px;margin-bottom:8px;box-sizing:border-box">
-    ${pendingNotes>0?`<div class="warn-banner" style="cursor:pointer">
-      📝 ${pendingNotes} незакрытых конспектов — нажмите на клиента чтобы написать
+    ${pendingNotes>0?`<div class="warn-banner">
+      📝 ${pendingNotes} незакрытых конспектов — нажмите на клиента ниже чтобы написать
     </div>`:''}
     ${!clients.length?'<div class="empty-state">👥<p>Клиентов нет.<br>Нажмите + Клиент чтобы добавить.</p></div>':'<div id="cl-list"></div>'}
   </div>`;
