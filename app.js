@@ -1104,9 +1104,8 @@ function renderSlotPill(s) {
   let c = SLOT_COLORS[s.slot_type];
   if (s.slot_type==='group') {
     const role = (window._myGroupRoleMap||{})[s.group_type_id]||'';
-    if      (role==='суша')      c = {bg:'rgba(234,179,8,.18)',  color:'#ca8a04'};
-    else if (role==='вода')      c = {bg:'rgba(59,130,246,.18)', color:'#3b82f6'};
-    else if (role==='суша+вода') c = {bg:'rgba(124,58,237,.1)',  color:'#a78bfa'};
+    if (role==='суша') c = {bg:'rgba(234,179,8,.18)',  color:'#ca8a04'};
+    else               c = {bg:'rgba(59,130,246,.18)', color:'#3b82f6'};
   }
   const oneTimeMark = s._oneTime ? '★ ' : '';
   const oneBorder   = s._oneTime ? `border:1px dashed ${c.color};` : '';
@@ -3957,6 +3956,7 @@ async function renderAdminGroups() {
           <button class="btn btn-sm" onclick="renderSubstitutionsApproval()">🔄 Замены</button>
           <button class="btn btn-sm btn-primary" id="admin-payouts-btn">💰 Ставки</button>
           <button class="btn btn-sm" style="background:rgba(16,185,129,.15);color:#059669" id="admin-childgp-btn">⬇️ Дет.ГП</button>
+          <button class="btn btn-sm" onclick="renderGroupsStructure()">📋 Структура</button>
           <button class="btn btn-sm" onclick="renderAddGroupTypeModal()">+ Тип</button>
         </div>
       </div>
@@ -3989,6 +3989,87 @@ async function renderAdminGroups() {
   };
   render();
 }
+async function renderGroupsStructure() {
+  setupBack(()=>{ renderAdminApp(); adminTab('groups'); setupBack(null); });
+  $('#tab-content').innerHTML=`<div class="tab-pad">
+    <div class="section-header"><h3>📋 Структура групп</h3></div>
+    <div id="gs-body"><div class="center-screen"><div class="spinner"></div></div></div>
+  </div>`;
+  try {
+    const DOW = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+    const [branches, tgsRes, slotsRes] = await Promise.all([
+      cached('branches', ()=>DB.getBranches()),
+      sb().from('trainer_groups')
+        .select('trainer_id, group_type_id, branch, role, group_types(name,type), profiles(fio)')
+        .is('subscription_end', null).order('branch'),
+      sb().from('schedule_slots')
+        .select('trainer_id, group_type_id, branch, day_of_week, start_time')
+        .eq('active', true).eq('slot_type','group').is('specific_date',null)
+        .order('day_of_week').order('start_time'),
+    ]);
+    const tgs   = tgsRes.data  || [];
+    const slots = slotsRes.data || [];
+
+    // slotMap: "group_type_id|branch|trainer_id" → ["Пн 09:00", ...]
+    // Но тренеры у одной группы в одном филиале могут иметь разное время (суша/вода)
+    // Ключ: group_type_id|branch → уникальные расписания
+    const slotMap = {};
+    slots.forEach(s => {
+      const key = `${s.group_type_id}|${s.branch}`;
+      if (!slotMap[key]) slotMap[key] = new Set();
+      slotMap[key].add(`${DOW[s.day_of_week]} ${s.start_time.slice(0,5)}`);
+    });
+
+    // Группируем: branch → group_type_id → {name, type, trainers[]}
+    const byBranch = {};
+    tgs.forEach(tg => {
+      const b  = tg.branch;
+      const gk = `${tg.group_type_id}|${b}`;
+      if (!byBranch[b]) byBranch[b] = {};
+      if (!byBranch[b][gk]) byBranch[b][gk] = {
+        name: tg.group_types?.name||'?',
+        type: tg.group_types?.type,
+        trainers: [],
+      };
+      byBranch[b][gk].trainers.push({fio: tg.profiles?.fio||'—', role: tg.role||''});
+    });
+
+    const branchNames = (branches||[]).map(b=>b.name);
+    const html = branchNames.map(branchName => {
+      const groups = byBranch[branchName];
+      if (!groups || !Object.keys(groups).length) return '';
+      const groupsHtml = Object.entries(groups)
+        .sort((a,b)=>a[1].name.localeCompare(b[1].name, 'ru'))
+        .map(([gk, g])=>{
+          const times = [...(slotMap[gk]||[])].sort();
+          const timesHtml = times.length
+            ? `<div style="font-size:12px;color:var(--accent);font-weight:500;margin:3px 0 6px">${times.join(' · ')}</div>`
+            : `<div style="font-size:12px;color:var(--hint);margin:3px 0 6px">расписание не задано</div>`;
+          const trainersHtml = g.trainers.map(t=>{
+            const roleColor = t.role==='суша'?'#ca8a04':t.role==='вода'?'#3b82f6':'var(--hint)';
+            const roleBadge = t.role
+              ? `<span style="font-size:10px;background:${roleColor}22;color:${roleColor};padding:1px 6px;border-radius:6px;font-weight:600;margin-left:4px">${t.role}</span>`
+              : '';
+            return `<div style="font-size:13px;padding:2px 0;display:flex;align-items:center">👤 ${t.fio}${roleBadge}</div>`;
+          }).join('');
+          return `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
+            <div style="font-weight:600;font-size:14px">${g.name}</div>
+            ${timesHtml}
+            <div>${trainersHtml}</div>
+          </div>`;
+        }).join('');
+      return `<div style="margin-bottom:24px">
+        <div style="font-weight:700;font-size:15px;padding:8px 12px;background:rgba(124,58,237,.1);border-radius:10px;margin-bottom:4px">
+          📍 ${branchName}
+        </div>
+        ${groupsHtml}
+      </div>`;
+    }).filter(Boolean).join('');
+
+    document.getElementById('gs-body').innerHTML = html || '<p class="hint">Групп нет</p>';
+  } catch(e) { document.getElementById('gs-body').innerHTML='<p class="hint">Ошибка</p>'; console.error(e); }
+}
+
 async function loadGroupsList(monthStr) {
   const body=document.getElementById('groups-list'); if (!body) return;
   const ms = monthStr || new Date().toISOString().slice(0,7)+'-01';

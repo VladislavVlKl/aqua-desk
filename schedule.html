@@ -293,9 +293,7 @@
                         let slotClass = `slot-${s.slot_type}`;
                         if (s.slot_type==='group') {
                           const role = (window._trainerRoleMap||{})[`${s.trainer_id}_${s.group_type_id}`]||'';
-                          if (role==='суша') slotClass='slot-group-susha';
-                          else if (role==='вода') slotClass='slot-group-voda';
-                          else if (role==='суша+вода') slotClass='slot-group-both';
+                          slotClass = role==='суша' ? 'slot-group-susha' : 'slot-group-voda';
                         }
                         return `<div class="slot ${slotClass}"><div class="slot-name">${name}</div><div class="slot-sub">${sub}</div></div>`;
                       }),
