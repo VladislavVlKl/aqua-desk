@@ -354,17 +354,26 @@ async function renderHomeTab() {
     <div class="home-block">
       <div class="home-block-title">📋 Списание ПТ</div>
       ${branchSelect('sel-branch',branches)}
-      <div class="form-group"><label>Клиент</label>
-        <select id="wk-client" onchange="onClientChange(this)">
+      <div class="form-group" style="position:relative">
+        <label>Клиент</label>
+        <select id="wk-client" style="display:none">
           <option value="">— выберите —</option>
           ${clients.map(c=>{
             const days=daysUntil(c.subscription_end);
             const warn=days!==null&&days<=SUBSCRIPTION_WARN_DAYS&&days>=0?' ⚠️':'';
             return `<option value="${c.id}" data-cat="${c.category}" data-bal="${c.balance}"
               data-age="${c.age||''}" data-di="${c.drop_in_used}">
-              ${c.fio}${warn} (кат.${c.category}, баланс: ${c.balance})</option>`;
+              ${c.fio}${warn}</option>`;
           }).join('')}
         </select>
+        <div id="wk-client-chip" style="display:none;padding:10px 12px;background:var(--card);border:1px solid var(--accent);border-radius:8px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;margin-bottom:0">
+          <span id="wk-client-chip-name" style="font-size:14px;font-weight:500"></span>
+          <span style="font-size:16px;color:var(--hint);padding:0 4px" onclick="wkClientClear()">✕</span>
+        </div>
+        <input type="text" id="wk-client-search" autocomplete="off" placeholder="🔍 Введите имя клиента..."
+          style="width:100%;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);font-size:14px;box-sizing:border-box"
+          oninput="wkClientInput(this)">
+        <div id="wk-client-drop" style="display:none;position:absolute;z-index:50;left:0;right:0;background:var(--card);border:1px solid var(--border);border-radius:0 0 10px 10px;max-height:200px;overflow-y:auto;box-shadow:0 6px 20px rgba(0,0,0,.35)"></div>
       </div>
       <div class="form-group"><label>Тип тренировки</label>
         <select id="wk-type" onchange="onWkTypeChange(this)">
@@ -440,6 +449,14 @@ async function renderHomeTab() {
 
   </div>`;
   renderDateFields();
+  // Закрывать дропдаун поиска клиента при клике вне
+  document.addEventListener('click', function closeWkDrop(e) {
+    const drop = document.getElementById('wk-client-drop');
+    if (!drop) { document.removeEventListener('click',closeWkDrop); return; }
+    if (!e.target.closest('#wk-client-search') && !e.target.closest('#wk-client-drop')) {
+      drop.style.display='none';
+    }
+  });
 }
 
 async function doLogDutyHome() {
@@ -475,17 +492,37 @@ async function renderClientsTab() {
   const renderList = (filter='') => {
     const body = document.getElementById('cl-list');
     if (!body) return;
-    const arr = filter ? clients.filter(c=>c.fio.toLowerCase().includes(filter.toLowerCase())) : clients;
+    let arr = filter ? clients.filter(c=>c.fio.toLowerCase().includes(filter.toLowerCase())) : clients;
     if (!arr.length) { body.innerHTML='<p class="hint" style="text-align:center;padding:20px">Не найдено</p>'; return; }
+    // Сортировка: просроченные → истекающие/нулевой баланс → остальные
+    arr = [...arr].sort((a,b)=>{
+      const score = c=>{
+        const d=daysUntil(c.subscription_end);
+        if (d!==null&&d<0) return 0;           // просрочен
+        if (c.balance<=0) return 1;             // нулевой баланс
+        if (d!==null&&d<=SUBSCRIPTION_WARN_DAYS) return 1; // истекает
+        return 2;
+      };
+      return score(a)-score(b);
+    });
     body.innerHTML = arr.map(c=>{
       const days = daysUntil(c.subscription_end);
       const warn = days!==null&&days<=SUBSCRIPTION_WARN_DAYS&&days>=0;
       const exp  = days!==null&&days<0;
+      const noBalance = c.balance<=0;
       const dot  = c.color?`<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${c.color};margin-right:4px;vertical-align:middle"></span>`:'';
-      return `<div class="client-row" onclick="renderClientProfile('${c.id}','clients')">
-        <div>
-          <div class="cr-name">${dot}${c.fio}${warn?'<span class="warn-dot">⚠️</span>':''}${exp?'<span class="exp-dot">❌</span>':''}</div>
-          <div class="cr-meta">Кат.${c.category} · Баланс: ${c.balance}${c.age?' · '+c.age+' лет':''}${c.subscription_end?' · до '+c.subscription_end:''}</div>
+      let rowBg = '';
+      if (exp)           rowBg = 'background:rgba(239,68,68,.08);border-left:3px solid rgba(239,68,68,.5)';
+      else if (warn||noBalance) rowBg = 'background:rgba(245,158,11,.08);border-left:3px solid rgba(245,158,11,.5)';
+      return `<div class="client-row" style="${rowBg}" onclick="renderClientProfile('${c.id}','clients')">
+        <div style="flex:1;min-width:0">
+          <div class="cr-name" style="font-size:16px;font-weight:600">${dot}${c.fio}</div>
+          <div class="cr-meta" style="margin-top:2px;display:flex;flex-wrap:wrap;gap:4px;align-items:center">
+            <span style="background:rgba(16,185,129,.18);color:#10b981;font-size:11px;padding:1px 7px;border-radius:8px;font-weight:600">Кат.${c.category}</span>
+            <span style="font-size:12px;color:var(--hint)">${c.balance} ПТ</span>
+            ${c.age?`<span style="font-size:12px;color:var(--hint)">${c.age} лет</span>`:''}
+            ${c.subscription_end?`<span style="font-size:12px;color:${exp?'#ef4444':warn?'#f59e0b':'var(--hint)'}">до ${c.subscription_end}</span>`:''}
+          </div>
         </div>
         <span class="cr-arrow">›</span>
       </div>`;
@@ -530,6 +567,48 @@ function onWkTypeChange(sel) {
     sel.value='regular';
     renderLateRequestModal();
   }
+}
+let _wkClientTimer = null;
+function wkClientInput(inp) {
+  clearTimeout(_wkClientTimer);
+  _wkClientTimer = setTimeout(()=>_wkClientFilter(inp.value), 300);
+}
+function _wkClientFilter(q) {
+  const drop = document.getElementById('wk-client-drop');
+  const sel  = document.getElementById('wk-client');
+  if (!drop||!sel) return;
+  const opts = [...sel.options].filter(o=>o.value);
+  const matches = q.length<1 ? opts : opts.filter(o=>o.text.toLowerCase().includes(q.toLowerCase()));
+  if (!matches.length) { drop.style.display='none'; return; }
+  drop.innerHTML = matches.slice(0,30).map(o=>`
+    <div style="padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer;font-size:14px"
+      onmousedown="wkClientPick('${o.value}','${encodeURIComponent(o.text)}')"
+      ontouchstart="wkClientPick('${o.value}','${encodeURIComponent(o.text)}')">
+      ${o.text}
+    </div>`).join('');
+  drop.style.display = 'block';
+}
+function wkClientPick(id, nameEnc) {
+  const sel   = document.getElementById('wk-client');
+  const inp   = document.getElementById('wk-client-search');
+  const drop  = document.getElementById('wk-client-drop');
+  const chip  = document.getElementById('wk-client-chip');
+  const cname = document.getElementById('wk-client-chip-name');
+  if (!sel) return;
+  sel.value = id;
+  drop.style.display = 'none';
+  if (inp)  { inp.style.display='none'; inp.value=''; }
+  if (chip) { chip.style.display='flex'; }
+  if (cname) cname.textContent = decodeURIComponent(nameEnc);
+  onClientChange(sel);
+}
+function wkClientClear() {
+  const sel  = document.getElementById('wk-client');
+  const inp  = document.getElementById('wk-client-search');
+  const chip = document.getElementById('wk-client-chip');
+  if (sel)  sel.value = '';
+  if (chip) chip.style.display='none';
+  if (inp)  { inp.style.display=''; inp.value=''; inp.focus(); }
 }
 function onClientChange(sel) {
   const opt=sel.options[sel.selectedIndex];
@@ -1717,8 +1796,11 @@ async function loadTrainerReport(year,month) {
         <div class="summary-card"><div class="s-val">${(sal.cat.dropIn1||0)+(sal.cat.dropIn2||0)+(sal.cat.dropIn3||0)}</div><div class="s-lbl">Разовые</div></div>
         ${trialSessions.length?`<div class="summary-card"><div class="s-val">${trialSessions.length}</div><div class="s-lbl">Пробные</div></div>`:''}
         <div class="summary-card"><div class="s-val">${sal.hours.toFixed(1)}ч</div><div class="s-lbl">Деж.</div></div>
-        ${sal.adultSum+sal.childSum>0?`<div class="summary-card"><div class="s-val" style="font-size:13px">${fmt(sal.adultSum+sal.childSum)}</div><div class="s-lbl">Группы</div></div>`:''}
-        <div class="summary-card accent" style="grid-column:span ${sal.adultSum+sal.childSum>0?1:2}">
+        <div class="summary-card">
+          <div class="s-val" style="font-size:13px">${sal.adultSum+sal.childSum>0?fmt(sal.adultSum+sal.childSum):'—'}</div>
+          <div class="s-lbl">Группы${sal.adultSum+sal.childSum===0?'<div style="font-size:10px;opacity:.6">ожидает расчёта</div>':''}</div>
+        </div>
+        <div class="summary-card accent">
           <div class="s-val">${fmt(sal.total)}</div>
           <div class="s-lbl">К выплате (сум)</div>
         </div>
@@ -2695,11 +2777,13 @@ async function loadSeniorGroupsList() {
             </div>
             <div class="staff-meta">${g.branch} · с ${g.subscription_start||'—'}</div>
           </div>
-          <div style="display:flex;gap:6px">
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
             <button class="btn btn-sm btn-primary"
               onclick="${g.group_types?.type==='children'?`renderGroupDetail('${g.id}')`:`renderAdultGroupDetail('${g.id}')`}">Открыть</button>
             ${g.group_types?.type==='children'?`<button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
               onclick="renderGroupMonthReport('${g.id}','${new Date().toISOString().slice(0,7)+'-01'}')">📊 Отчёт</button>`:''}
+            <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
+              onclick="renderGroupSubstitutionModal('${g.id}')">🔄 Замена</button>
           </div>
         </div>
       </div>`).join('');
@@ -5563,14 +5647,21 @@ async function doApproveSubstitution(id) {
 
 // ── ВЗРОСЛЫЕ ГРУППЫ — КЛИЕНТЫ ────────────────────────────────────────────────
 
-async function renderAdultGroupDetail(groupId) {
+async function renderAdultGroupDetail(groupId, monthStr) {
   loading('Загрузка...');
   try {
     const {data:tgInfo} = await sb().from('trainer_groups')
       .select('branch,group_type_id,group_types(name)').eq('id',groupId).single();
-    const now = new Date();
-    const fromDay = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
-    const toDay   = new Date(now.getFullYear(),now.getMonth()+1,1).toISOString().slice(0,10);
+    if (!monthStr) {
+      const now = new Date();
+      monthStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
+    }
+    const [mYear, mMonth] = monthStr.split('-').map(Number);
+    const fromDay = monthStr;
+    const toDay   = new Date(mYear, mMonth, 1).toISOString().slice(0,10);
+    const prevMonth = mMonth===1 ? `${mYear-1}-12-01` : `${mYear}-${String(mMonth-1).padStart(2,'0')}-01`;
+    const nextMonth = mMonth===12 ? `${mYear+1}-01-01` : `${mYear}-${String(mMonth+1).padStart(2,'0')}-01`;
+    const isCurrentMonth = monthStr === new Date().toISOString().slice(0,7)+'-01';
     const [clients, sessions] = await Promise.all([
       DB.getAdultGroupClients(groupId),
       sb().from('group_sessions').select('*')
@@ -5579,6 +5670,7 @@ async function renderAdultGroupDetail(groupId) {
         .gte('session_date',fromDay).lt('session_date',toDay)
         .order('session_date',{ascending:false}).then(r=>r.data||[]),
     ]);
+    const monthLabel = new Date(mYear,mMonth-1,1).toLocaleString('ru-RU',{month:'long',year:'numeric'});
     setScreen(`<div class="app-header">
       <button class="btn-icon" onclick="STATE.profile.role==='trainer'?renderTrainerApp():renderSeniorApp()">←</button>
       <div class="app-title">${tgInfo?.group_types?.name||'Группа'}</div><div></div></div>
@@ -5594,10 +5686,19 @@ async function renderAdultGroupDetail(groupId) {
           <button class="btn btn-sm btn-danger" onclick="archiveAdultClient('${c.id}','${groupId}')">✕</button>
         </div>`).join('')}
 
-      <div class="section-header" style="margin-top:20px"><h4>Занятия за месяц</h4>
-        <button class="btn btn-sm" onclick="renderAddManualGroupSession('${groupId}')">+ Добавить</button>
+      <div class="section-header" style="margin-top:20px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <h4 style="margin:0">История занятий</h4>
+          <div class="month-nav" style="display:flex;align-items:center;gap:4px">
+            <button onclick="renderAdultGroupDetail('${groupId}','${prevMonth}')">‹</button>
+            <span style="font-size:12px;min-width:100px;text-align:center">${monthLabel}</span>
+            <button ${isCurrentMonth?'disabled':''}
+              onclick="renderAdultGroupDetail('${groupId}','${nextMonth}')">›</button>
+          </div>
+        </div>
+        ${isCurrentMonth?`<button class="btn btn-sm" onclick="renderAddManualGroupSession('${groupId}')">+ Добавить</button>`:''}
       </div>
-      ${!sessions.length?'<p class="hint">Нет занятий</p>':sessions.map(s=>{
+      ${!sessions.length?'<p class="hint">Нет занятий за этот месяц</p>':sessions.map(s=>{
         const rate = getAdultGroupRate(s.headcount);
         return `<div class="history-item">
           <div class="hi-main">
@@ -5605,12 +5706,12 @@ async function renderAdultGroupDetail(groupId) {
             <span class="hi-cat" style="background:rgba(16,185,129,.15);color:#10b981">${fmt(rate)} сум</span>
             <span class="hint">${s.headcount} чел.</span>
           </div>
-          <div style="display:flex;gap:6px;margin-top:4px">
+          ${isCurrentMonth?`<div style="display:flex;gap:6px;margin-top:4px">
             <button class="btn btn-sm" style="font-size:11px;background:var(--card);border:1px solid var(--border)"
               onclick="renderEditGroupSession('${s.id}','${s.session_date}',${s.headcount},'${groupId}')">✏️</button>
             <button class="btn btn-sm btn-danger" style="font-size:11px"
               onclick="doDeleteGroupSession('${s.id}','${groupId}')">🗑</button>
-          </div>
+          </div>`:''}
         </div>`;
       }).join('')}
     </div></div>`);
