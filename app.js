@@ -180,7 +180,7 @@ async function doRegister() {
     if (!p) { renderRegister(); return toast('ФИО не найдено или уже занято','error'); }
     STATE.profile=await DB.claimProfile(p.id,STATE.tgId,pin);
     toast('Аккаунт привязан! ✅','success'); enterApp();
-  } catch(e) { renderRegister(); toast('Ошибка регистрации','error'); console.error(e); }
+  } catch(e) { renderRegister(); toast('Ошибка: '+(e?.message||String(e)),'error'); console.error('[doRegister]',e); }
 }
 
 // ── PIN — принудительная установка ───────────
