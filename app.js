@@ -1336,22 +1336,39 @@ async function doAddSlot() {
 async function renderTodayTab() {
   $('#tab-content').innerHTML=`<div class="center-screen"><div class="spinner"></div></div>`;
   const date=todayStr();
+  const yesterday=new Date(); yesterday.setDate(yesterday.getDate()-1);
+  const yesterdayStr=yesterday.toISOString().slice(0,10);
   const dayName=DAYS_FULL[(new Date().getDay()+6)%7];
   try {
-    const slots=await DB.getTodaySlots(STATE.profile.id,date);
+    const [slots, yesterdaySlots, events] = await Promise.all([
+      DB.getTodaySlots(STATE.profile.id, date),
+      DB.getTodaySlots(STATE.profile.id, yesterdayStr),
+      DB.getUpcomingEvents(STATE.profile.branches?.[0]||null),
+    ]);
+
+    // Вчерашние незакрытые (только PT и группы, без дежурств)
+    const missedSlots = yesterdaySlots.filter(s=>
+      s.slot_type!=='duty' && !s.confirmation
+    );
+
     const ptSlots=slots.filter(s=>s.slot_type==='pt');
     const grpSlots=slots.filter(s=>s.slot_type==='group');
     const dutySlots=slots.filter(s=>s.slot_type==='duty');
     const pending=slots.filter(s=>!s.confirmation&&s.slot_type!=='duty').length;
-    // Ближайшие события
-    const events=await DB.getUpcomingEvents(STATE.profile.branches?.[0]||null);
     const todayEvents=events.filter(e=>fmtDate(e.start_time)===fmtDate(new Date()));
+
+    const missedHtml = missedSlots.length ? `
+      <div style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.25);border-radius:12px;padding:12px;margin-bottom:16px">
+        <div style="font-size:13px;font-weight:600;color:#ef4444;margin-bottom:10px">⚠️ Не внесено вчера (${yesterdayStr})</div>
+        ${missedSlots.map(s=>renderTodaySlot(s, yesterdayStr)).join('')}
+      </div>` : '';
 
     $('#tab-content').innerHTML=`<div class="tab-pad">
       <div class="section-header">
         <div><h3>Сегодня</h3><p class="hint">${dayName}, ${date}</p></div>
-        ${pending>0?`<div class="pending-badge">${pending} не закрыто</div>`:''}
+        ${(pending+missedSlots.length)>0?`<div class="pending-badge">${pending+missedSlots.length} не закрыто</div>`:''}
       </div>
+      ${missedHtml}
       ${todayEvents.map(ev=>`<div class="today-card event-card-mini ${ev.blocks_pool?'event-blocking':''}">
         <span>${EVENT_TYPES[ev.event_type]||'📌'} <b>${ev.title}</b></span>
         <span class="hint">${fmtTime(ev.start_time)}–${fmtTime(ev.end_time)}</span>
@@ -1365,7 +1382,7 @@ async function renderTodayTab() {
           </div></div>`).join('')}`:''}
       ${ptSlots.length?`<h4>Персональные тренировки</h4>${ptSlots.map(s=>renderTodaySlot(s,date)).join('')}`:''}
       ${grpSlots.length?`<h4>Групповые занятия</h4>${grpSlots.map(s=>renderTodaySlot(s,date)).join('')}`:''}
-      ${!slots.length&&!todayEvents.length?'<div class="empty-state">📭<p>На сегодня ничего нет</p></div>':''}
+      ${!slots.length&&!todayEvents.length&&!missedSlots.length?'<div class="empty-state">📭<p>На сегодня ничего нет</p></div>':''}
     </div>`;
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
