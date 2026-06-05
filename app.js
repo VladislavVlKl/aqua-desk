@@ -4179,57 +4179,70 @@ async function loadGroupsList(monthStr) {
     const allAssigned = await Promise.all(types.map(gt=>
       DB.getAssignedTrainers(gt.id).then(data=>({data}))
     ));
-    body.innerHTML=types.map((gt,i)=>{
-      const assigned = allAssigned[i]?.data||[];
 
-      // Группируем тренеров по филиалу → одна строка на группу+филиал
+    // Собираем все instanceы: {branch, gt, trainers, schedLabel, reportId, trainersJson}
+    const allInstances = [];
+    types.forEach((gt,i)=>{
+      const assigned = allAssigned[i]?.data||[];
       const byBranch = {};
       assigned.forEach(a=>{
         if (!byBranch[a.branch]) byBranch[a.branch]=[];
         byBranch[a.branch].push(a);
       });
-      const instances = Object.entries(byBranch);
+      Object.entries(byBranch).forEach(([branch, trainers])=>{
+        allInstances.push({branch, gt, trainers});
+      });
+    });
 
-      const instancesHtml = instances.length ? instances.map(([branch, trainers])=>{
+    // Группируем по филиалу
+    const byBranchFinal = {};
+    allInstances.forEach(inst=>{
+      if (!byBranchFinal[inst.branch]) byBranchFinal[inst.branch]=[];
+      byBranchFinal[inst.branch].push(inst);
+    });
+
+    // Порядок филиалов
+    const branchOrder = (await cached('branches',()=>DB.getBranches())).map(b=>b.name);
+    const branches = [...new Set([...branchOrder, ...Object.keys(byBranchFinal)])];
+
+    const html = branches.filter(b=>byBranchFinal[b]?.length).map(branch=>{
+      const instances = byBranchFinal[branch];
+      const rowsHtml = instances.map(({gt, trainers})=>{
         const first = trainers[0];
-        const schedLabel = first.days_of_week?.length
-          ? `<span style="font-size:12px;color:var(--accent);font-weight:500">${first.days_of_week.join(' ')}${first.session_time?' '+first.session_time:''}</span>`
+        const sched = first.days_of_week?.length
+          ? `${first.days_of_week.join(' ')} ${first.session_time||''}`.trim()
+          : '';
+        const schedLabel = sched
+          ? `<span style="font-size:12px;color:var(--accent);font-weight:500">${sched}</span>`
           : `<span style="font-size:12px;color:var(--hint)">расписание не задано</span>`;
         const reportId = first.id;
         const trainersJson = encodeURIComponent(JSON.stringify(trainers.map(t=>({
-          id:t.id, fio:t.profiles?.fio||'—', role:t.role||'',
-          days:t.days_of_week||[], time:t.session_time||''
+          id:t.id, trainerId:t.trainer_id, fio:t.profiles?.fio||'—', role:t.role||'',
+          days:t.days_of_week||[], time:t.session_time||'',
+          rateType:t.rate_type||'percent', rateValue:t.rate_value||0,
+          leaderName:t.leader_name||'', leaderPct:t.leader_fee_percent||0
         }))));
-        return `<div style="display:flex;justify-content:space-between;align-items:center;width:100%;padding:8px 0;border-top:1px solid var(--border)">
-          <div>
-            <div style="font-size:13px;font-weight:500">${branch}</div>
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-top:1px solid var(--border)">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:14px;font-weight:600">${gt.name}</div>
             <div style="margin-top:2px">${schedLabel}</div>
           </div>
-          <div style="display:flex;gap:6px">
+          <div style="display:flex;gap:6px;margin-left:8px">
             ${gt.type==='children'?`<button class="btn btn-sm btn-primary" style="font-size:12px"
               onclick="renderGroupMonthReport('${reportId}','${ms}')">📊 Отчёт</button>`:''}
             <button class="btn btn-sm" style="font-size:12px;background:rgba(124,58,237,.15);color:#a78bfa"
-              onclick="renderGroupPersonnelModal('${gt.id}','${encodeURIComponent(gt.name)}','${branch}','${gt.type}','${ms}','${trainersJson}')">👥 Персонал</button>
+              onclick="renderGroupPersonnelModal(${gt.id},'${encodeURIComponent(gt.name)}','${branch}','${gt.type}','${ms}','${trainersJson}')">👥 Персонал</button>
           </div>
         </div>`;
-      }).join('') : '<p class="hint" style="font-size:12px">Нет тренеров</p>';
-
-      return `<div class="staff-card" style="flex-direction:column;align-items:flex-start;gap:4px">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;width:100%">
-          <div>
-            <div class="staff-fio">${gt.name}</div>
-            <div class="staff-meta">${gt.type==='children'?`Детская · ${fmt(gt.price_per_month)} сум/мес · ${gt.trainer_percentage}%`:'Взрослая · по явке (110/120/130к)'}</div>
-          </div>
-          <div style="display:flex;gap:4px">
-            <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
-              onclick="renderEditGroupTypeModal(${gt.id},'${encodeURIComponent(gt.name)}','${gt.type}',${gt.price_per_month||0},${gt.trainer_percentage||0})">✏️</button>
-            <button class="btn btn-sm btn-danger"
-              onclick="doDeleteGroupType(${gt.id},'${encodeURIComponent(gt.name)}')">🗑</button>
-          </div>
+      }).join('');
+      return `<div class="staff-card" style="flex-direction:column;align-items:flex-start;gap:0;padding-bottom:4px">
+        <div style="display:flex;justify-content:space-between;align-items:center;width:100%;margin-bottom:4px">
+          <div style="font-weight:700;font-size:15px">📍 ${branch}</div>
         </div>
-        ${instancesHtml}
+        ${rowsHtml}
       </div>`;
-    }).join('')||'<p class="hint">Нет типов</p>';
+    }).join('');
+    body.innerHTML = html || '<p class="hint">Нет групп</p>';
   } catch(e) { body.innerHTML='<p class="hint">Ошибка</p>'; console.error(e); }
 }
 
@@ -4237,8 +4250,14 @@ function renderGroupPersonnelModal(groupTypeId, groupNameEnc, branch, groupType,
   const groupName = decodeURIComponent(groupNameEnc);
   const trainers  = JSON.parse(decodeURIComponent(trainersEnc));
   const isArtSwim = groupName.toLowerCase().includes('art');
+  const isAdult   = groupType === 'adult';
+
+  // Ищем данные руководителя из любого тренера где есть leader_name
+  const withLeader = trainers.find(t=>t.leaderName)||trainers[0];
+
   const m = el('div','modal-overlay');
-  const trainersHtml = trainers.map(t=>{
+
+  const trainersHtml = trainers.map((t,idx)=>{
     const roleColor = t.role==='суша'?'#ca8a04':t.role==='вода'?'#3b82f6':'var(--hint)';
     const roleBadge = t.role
       ? `<span style="font-size:10px;background:${roleColor}22;color:${roleColor};padding:1px 6px;border-radius:6px;font-weight:600;margin-left:6px">${t.role}</span>`
@@ -4246,30 +4265,93 @@ function renderGroupPersonnelModal(groupTypeId, groupNameEnc, branch, groupType,
     const schedLabel = t.days?.length
       ? `<span style="font-size:11px;color:var(--hint)">${t.days.join(' ')}${t.time?' '+t.time:''}</span>`
       : '';
-    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)">
-      <div>
-        <div style="font-size:14px;font-weight:500">${t.fio}${roleBadge}</div>
-        ${schedLabel?`<div style="margin-top:2px">${schedLabel}</div>`:''}
-      </div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap">
-        <button class="btn btn-sm" style="font-size:11px;background:var(--card);border:1px solid var(--border)"
-          onclick="document.querySelector('.modal-overlay').remove();renderGroupScheduleModal('${t.id}','${encodeURIComponent(JSON.stringify(t.days))}','${t.time}')">🗓️</button>
-        ${isArtSwim?`<button class="btn btn-sm" style="font-size:11px;background:rgba(124,58,237,.15);color:#a78bfa"
-          onclick="document.querySelector('.modal-overlay').remove();renderLinkGroupInstanceModal('${t.id}')">🔗 Связать</button>`:''}
-        <button class="btn btn-sm" style="background:rgba(239,68,68,.15);color:#ef4444;font-size:11px"
-          onclick="document.querySelector('.modal-overlay').remove();doUnassignGroup(${t.id})">Открепить</button>
+
+    // Поле ставки/процента
+    let rateHtml = '';
+    if (isAdult) {
+      rateHtml = `<div style="font-size:12px;color:var(--hint);margin-top:6px">Взрослая — ставка по явке</div>`;
+    } else if (t.rateType==='flat') {
+      rateHtml = `<div style="display:flex;align-items:center;gap:6px;margin-top:6px">
+        <span style="font-size:12px;color:var(--hint)">Ставка/занятие:</span>
+        <input id="rate-val-${t.id}" type="number" value="${t.rateValue}" min="0"
+          style="width:90px;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:4px 6px;color:var(--text);font-size:12px">
+        <span style="font-size:12px;color:var(--hint)">сум</span>
+        <button class="btn btn-sm" style="font-size:11px;padding:2px 8px"
+          onclick="doSaveTrainerRate('${t.id}','flat',document.getElementById('rate-val-${t.id}').value)">💾</button>
+      </div>`;
+    } else {
+      rateHtml = `<div style="display:flex;align-items:center;gap:6px;margin-top:6px">
+        <span style="font-size:12px;color:var(--hint)">Процент:</span>
+        <input id="rate-val-${t.id}" type="number" value="${t.rateValue}" min="0" max="100"
+          style="width:60px;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:4px 6px;color:var(--text);font-size:12px">
+        <span style="font-size:12px;color:var(--hint)">%</span>
+        <button class="btn btn-sm" style="font-size:11px;padding:2px 8px"
+          onclick="doSaveTrainerRate('${t.id}','percent',document.getElementById('rate-val-${t.id}').value)">💾</button>
+      </div>`;
+    }
+
+    return `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div style="flex:1">
+          <div style="font-size:14px;font-weight:500">${t.fio}${roleBadge}</div>
+          ${schedLabel?`<div style="margin-top:2px">${schedLabel}</div>`:''}
+          ${rateHtml}
+        </div>
+        <div style="display:flex;gap:5px;margin-left:8px;flex-shrink:0">
+          <button class="btn btn-sm" style="font-size:11px;background:var(--card);border:1px solid var(--border)"
+            onclick="document.querySelector('.modal-overlay').remove();renderGroupScheduleModal('${t.id}','${encodeURIComponent(JSON.stringify(t.days))}','${t.time}')">🗓️</button>
+          ${isArtSwim?`<button class="btn btn-sm" style="font-size:11px;background:rgba(124,58,237,.15);color:#a78bfa"
+            onclick="document.querySelector('.modal-overlay').remove();renderLinkGroupInstanceModal('${t.id}')">🔗</button>`:''}
+          <button class="btn btn-sm" style="background:rgba(239,68,68,.15);color:#ef4444;font-size:11px"
+            onclick="document.querySelector('.modal-overlay').remove();doUnassignGroup(${t.id})">Откр.</button>
+        </div>
       </div>
     </div>`;
   }).join('');
+
+  // Блок руководителя (только детская)
+  const leaderHtml = !isAdult ? `
+    <div style="margin-top:14px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.3);border-radius:10px;padding:12px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px;color:#f59e0b">👑 Руководитель группы</div>
+      <div style="font-size:12px;color:var(--hint);margin-bottom:8px">% от суммы оплат за месяц. Видно координатору и старшим тренерам.</div>
+      <div class="form-group" style="margin-bottom:8px"><label style="font-size:12px">Имя</label>
+        <input id="leader-name-inp" type="text" placeholder="Иванов Иван" value="${withLeader?.leaderName||''}"
+          style="font-size:13px"></div>
+      <div class="form-group" style="margin-bottom:8px"><label style="font-size:12px">Процент (%)</label>
+        <input id="leader-pct-inp" type="number" min="0" max="100" value="${withLeader?.leaderPct||0}"
+          style="font-size:13px"></div>
+      <button class="btn btn-sm btn-primary btn-full"
+        onclick="doSaveLeaderFeePersonnel('${withLeader?.id}')">Сохранить руководителя</button>
+    </div>` : '';
+
   m.innerHTML=`<div class="modal">
     <div class="modal-header"><h3>Персонал — ${groupName}</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <p class="hint" style="margin-bottom:8px">${branch}</p>
     ${trainersHtml}
+    ${leaderHtml}
     <button class="btn btn-primary btn-full" style="margin-top:14px"
       onclick="this.closest('.modal-overlay').remove();renderAddSecondTrainerModal(${groupTypeId},'${encodeURIComponent(groupName)}','${branch}','${groupType}')">+ 2й тренер</button>
   </div>`;
   document.body.appendChild(m);
+}
+
+async function doSaveTrainerRate(tgId, rateType, rateValueStr) {
+  const rateValue = parseFloat(rateValueStr)||0;
+  try {
+    await DB.updateTrainerGroupRate(tgId, rateType, rateValue);
+    toast('✅ Ставка сохранена','success');
+    invalidateCache('groupTypes');
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+
+async function doSaveLeaderFeePersonnel(tgId) {
+  const name = document.getElementById('leader-name-inp')?.value.trim()||null;
+  const pct  = parseFloat(document.getElementById('leader-pct-inp')?.value)||0;
+  try {
+    await DB.updateTrainerGroupLeader(tgId, name, pct);
+    toast('✅ Руководитель сохранён','success');
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 function renderAddGroupTypeModal() {
   const m=el('div','modal-overlay');
@@ -4580,6 +4662,19 @@ async function renderGroupMonthReport(groupId, monthStr) {
           </tbody>
         </table>
       </div>
+
+      <!-- Конспекты группы -->
+      ${notes.length ? `
+      <h4 style="margin-top:20px;margin-bottom:8px">📝 Конспекты за месяц</h4>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        ${notes.map(n=>{
+          const clientName = (clients.find(c=>c.id===n.group_client_id)?.name)||'—';
+          return `<div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:10px">
+            <div style="font-size:12px;color:var(--hint);margin-bottom:4px">${clientName}</div>
+            <div style="font-size:13px">${n.note||'—'}</div>
+          </div>`;
+        }).join('')}
+      </div>` : ''}
 
       <!-- ЗП тренерам — авто-расчёт (только координатор / старший) -->
       ${(()=>{

@@ -375,6 +375,16 @@ async getAssignedTrainers(groupTypeId) {
       .update({days_of_week: daysOfWeek, session_time: sessionTime}).eq('id',id);
     if (error) throw error;
   },
+  async updateTrainerGroupRate(id, rateType, rateValue) {
+    const {error} = await sb().from('trainer_groups')
+      .update({rate_type: rateType, rate_value: rateValue}).eq('id',id);
+    if (error) throw error;
+  },
+  async updateTrainerGroupLeader(id, leaderName, leaderFeePct) {
+    const {error} = await sb().from('trainer_groups')
+      .update({leader_name: leaderName||null, leader_fee_percent: leaderFeePct||0}).eq('id',id);
+    if (error) throw error;
+  },
   async linkTrainerGroupInstance(id, groupInstanceId) {
     const {error} = await sb().from('trainer_groups')
       .update({group_instance_id: groupInstanceId}).eq('id',id);
@@ -453,9 +463,12 @@ async unassignTrainerGroup(id) {
     const {error} = await sb().from('adult_group_clients').delete().eq('id',id);
     if (error) throw error;
   },
-  async deleteGroupAttendanceDay(groupId, date) {
-    const {error} = await sb().from('group_attendance')
-      .delete().eq('group_id',groupId).eq('session_date',date);
+  async deleteGroupAttendanceDay(groupId, date, groupInstanceId=null) {
+    // Удаляем по instance_id если есть, иначе по group_id
+    let q = sb().from('group_attendance').delete().eq('session_date',date);
+    if (groupInstanceId) q = q.eq('group_instance_id', groupInstanceId);
+    else q = q.eq('group_id', groupId);
+    const {error} = await q;
     if (error) throw error;
   },
 
@@ -474,13 +487,16 @@ async unassignTrainerGroup(id) {
     if (error) throw error;
   },
 
-  // Уникальные даты занятий с явкой
+  // Уникальные даты занятий с явкой (по instance_id если есть, иначе по group_id)
   async getGroupSessionHistory(groupId) {
-    const {data} = await sb().from('group_attendance')
-      .select('session_date, attended')
-      .eq('group_id', groupId)
-      .order('session_date', {ascending:false})
-      .limit(500);
+    // Сначала получаем instance_id
+    const {data:tg} = await sb().from('trainer_groups')
+      .select('group_instance_id').eq('id',groupId).single();
+    const instanceId = tg?.group_instance_id;
+    let q = sb().from('group_attendance').select('session_date, attended').limit(500).order('session_date',{ascending:false});
+    if (instanceId) q = q.eq('group_instance_id', instanceId);
+    else q = q.eq('group_id', groupId);
+    const {data} = await q;
     const map = {};
     (data||[]).forEach(r=>{
       if (!map[r.session_date]) map[r.session_date] = {total:0, attended:0};
