@@ -4833,7 +4833,10 @@ async function renderGroupMonthReport(groupId, monthStr) {
       })()}
 
     </div></div>`);
-  } catch(e) { toast('Ошибка','error'); console.error(e); }
+  } catch(e) {
+    toast('Ошибка: ' + (e?.message||String(e)), 'error');
+    console.error('[renderGroupMonthReport]', e);
+  }
 }
 
 function renderLeaderFeeModal(groupId, nameEnc, pct) {
