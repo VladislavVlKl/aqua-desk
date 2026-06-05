@@ -2512,21 +2512,32 @@ async function doExportBranchChildGroups(monthStr, branches) {
   await ensureXlsx();
   try {
     const branch = branches[0];
-    // Все детские группы по филиалу
-    const {data:tgs} = await sb().from('trainer_groups')
-      .select('id, group_types(name,type), profiles(fio)')
+    // Все детские группы по филиалу — уникальные инстансы (убираем дубли по group_instance_id)
+    const {data:tgs, error:tgsErr} = await sb().from('trainer_groups')
+      .select('id, group_instance_id, group_types(name,type), profiles(fio)')
       .eq('branch', branch).is('subscription_end', null);
+    if (tgsErr) throw tgsErr;
 
     const childGroups = (tgs||[]).filter(tg=>tg.group_types?.type==='children');
     if (!childGroups.length) { toast('Нет детских групп в этом филиале','error'); return; }
 
-    // Загружаем отчёты всех групп параллельно
-    const reports = await Promise.all(
-      childGroups.map(tg => DB.getGroupMonthReport(tg.id, monthStr).then(r=>({tg, report:r})))
-    );
+    // Дедупликация по group_instance_id — берём по одному представителю каждого инстанса
+    const seen = new Set();
+    const unique = childGroups.filter(tg => {
+      const key = tg.group_instance_id || tg.id;
+      if (seen.has(key)) return false;
+      seen.add(key); return true;
+    });
+
+    // Загружаем отчёты последовательно чтобы не перегружать Supabase
+    const reports = [];
+    for (const tg of unique) {
+      const report = await DB.getGroupMonthReport(tg.id, monthStr);
+      reports.push({tg, report});
+    }
 
     exportBranchChildGroupsExcel(branch, monthStr, reports);
-  } catch(e) { toast('Ошибка экспорта','error'); console.error(e); }
+  } catch(e) { toast('Ошибка экспорта: '+(e?.message||String(e)),'error'); console.error('[exportBranch]',e); }
 }
 
 async function doExportChildGroupExcel(groupId, monthStr) {
