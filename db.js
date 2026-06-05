@@ -16,10 +16,29 @@ const DB = {
     if (error) throw error; return data;
   },
   async getUnclaimedProfileByFio(fio) {
-    const {data,error} = await sb().from('profiles')
+    const normalized = fio.trim().replace(/\s+/g,' ');
+    // Сначала ищем точное совпадение (case-insensitive)
+    const {data:exact} = await sb().from('profiles')
       .select('id,fio,role,branches')
-      .ilike('fio',fio.trim()).is('tg_id',null).maybeSingle();
-    if (error) throw error; return data;
+      .ilike('fio', normalized).is('tg_id',null);
+    if (exact?.length === 1) return exact[0];
+    // Запасной поиск: по каждому слову (Фамилия + Имя)
+    const words = normalized.split(' ').filter(Boolean);
+    if (words.length >= 2) {
+      const pattern = `%${words[0]}%${words[1]}%`;
+      const {data:fuzzy} = await sb().from('profiles')
+        .select('id,fio,role,branches')
+        .ilike('fio', pattern).is('tg_id',null);
+      if (fuzzy?.length === 1) return fuzzy[0];
+      if (fuzzy?.length > 1) {
+        // Несколько совпадений — берём самое похожее (точно совпадающее начало)
+        const best = fuzzy.find(p=>p.fio.toLowerCase().startsWith(words[0].toLowerCase()));
+        if (best) return best;
+        return fuzzy[0];
+      }
+    }
+    // Ничего не найдено
+    return null;
   },
   async claimProfile(profileId, tgId, pin) {
     const {data,error} = await sb().rpc('claim_profile',{p_profile_id:profileId,p_tg_id:tgId,p_pin:pin});

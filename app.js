@@ -3648,7 +3648,7 @@ async function doAddTrainer() {
   if (!fio)        return toast('Введите ФИО','error');
   if (!brs.length) return toast('Выберите хотя бы один филиал','error');
   try { await DB.addTrainer(fio,brs,role); invalidateCache('profiles'); document.querySelector('.modal-overlay')?.remove(); toast('✅','success'); loadStaffList(); }
-  catch(e) { toast('Ошибка','error'); console.error(e); }
+  catch(e) { toast('Ошибка: '+(e?.message||String(e)),'error'); console.error(e); }
 }
 async function renderEditTrainerModal(id,fioEnc,branchesStr,role) {
   const fio=decodeURIComponent(fioEnc);
@@ -3689,7 +3689,7 @@ async function doEditTrainer(id) {
     invalidateCache('profiles');
     document.querySelector('.modal-overlay')?.remove();
     toast('✅','success'); loadStaffList();
-  } catch(e) { toast('Ошибка','error'); }
+  } catch(e) { toast('Ошибка: '+(e?.message||String(e)),'error'); console.error('[doEditTrainer]',e); }
 }
 function renderAddGroupClientModal(groupId) {
   const m=el('div','modal-overlay');
