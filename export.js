@@ -484,7 +484,7 @@ function exportChildGroupExcel(groupId, monthStr, report, groupInfo) {
       tc(isPaid?'✅ Оплачено':'❌ Не оплачено', paidStyle),
       tc(pay?.paid_at ? new Date(pay.paid_at).toLocaleDateString('ru-RU') : '—', rs),
       mc(debt, {...rs, font:{...rs.font, color:{rgb:debt>0?'DC2626':XL.TEXT_DARK}}}),
-      tc(note?.accomplishments||'—', rs),
+      tc(note?.note||'—', rs),
     ]);
   });
 
@@ -645,7 +645,7 @@ function exportBranchChildGroupsExcel(branch, monthStr, groupReports) {
         tc(isPaid?'✅ Оплачено':'❌ Не оплачено', paidStyle),
         tc(pay?.paid_at?new Date(pay.paid_at).toLocaleDateString('ru-RU'):'—',rs),
         mc(debt,{...rs,font:{...rs.font,color:{rgb:debt>0?'DC2626':XL.TEXT_DARK}}}),
-        tc(note?.accomplishments||'—',rs),
+        tc(note?.note||'—',rs),
       ]);
     });
 
