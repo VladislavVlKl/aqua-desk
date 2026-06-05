@@ -2604,6 +2604,7 @@ async function renderSeniorApp() {
     <div style="display:flex;gap:6px;align-items:center">
       <button class="btn-icon" onclick="openSchedule()">📅</button>
       <button class="btn-icon" onclick="renderHelpModal()">?</button>
+      <button class="btn-icon" id="notif-bell" onclick="renderInAppNotifications()" style="position:relative">🔔<span id="notif-count" style="display:none;position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;border-radius:50%;font-size:9px;width:16px;height:16px;line-height:16px;text-align:center"></span></button>
     </div>
   </div>
   <div id="tab-content" class="tab-content"></div>
@@ -2617,6 +2618,7 @@ async function renderSeniorApp() {
     <button class="nav-btn" onclick="seniorTab('more')"><span>⋯</span>Ещё</button>
   </nav>`);
   seniorTab('home');
+  setTimeout(checkInAppNotifications, 2000);
 }
 async function renderSeniorAnalytics() {
   $('#tab-content').innerHTML=`<div class="tab-pad">
@@ -3039,6 +3041,7 @@ function renderAdminApp() {
     <div style="display:flex;gap:6px;align-items:center">
       <button class="btn-icon" onclick="openSchedule()">📅</button>
       <button class="btn-icon" onclick="renderHelpModal()">?</button>
+      <button class="btn-icon" id="notif-bell" onclick="renderInAppNotifications()" style="position:relative">🔔<span id="notif-count" style="display:none;position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;border-radius:50%;font-size:9px;width:16px;height:16px;line-height:16px;text-align:center"></span></button>
     </div>
   </div>
   <div id="tab-content" class="tab-content"></div>
@@ -3052,6 +3055,7 @@ function renderAdminApp() {
     <button class="nav-btn" onclick="adminTab('more')"><span>⋯</span>Ещё</button>
   </nav>`);
   adminTab('summary');
+  setTimeout(checkInAppNotifications, 2000);
 }
 function adminTab(tab) {
   $$('.nav-btn').forEach((b,i)=>b.classList.toggle('active',
@@ -5783,6 +5787,7 @@ async function renderCeoApp() {
         <div class="app-title">👑 AquaDesk</div>
         <div class="app-sub">${STATE.profile.fio} · Топ-менеджмент</div>
       </div>
+      <button class="btn-icon" id="notif-bell" onclick="renderInAppNotifications()" style="position:relative">🔔<span id="notif-count" style="display:none;position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;border-radius:50%;font-size:9px;width:16px;height:16px;line-height:16px;text-align:center"></span></button>
     </div>
     <div id="tab-content" class="tab-content"></div>
     <nav class="bottom-nav">
@@ -5793,6 +5798,7 @@ async function renderCeoApp() {
       <button class="nav-btn" onclick="ceoTab('plans')"><span>📋</span>Планы</button>
     </nav>`);
   ceoTab('dashboard');
+  setTimeout(checkInAppNotifications, 2000);
 }
 
 function ceoTab(tab) {
@@ -6306,6 +6312,8 @@ async function checkInAppNotifications() {
     }
   } catch(e) { console.error(e); }
 }
+// Периодически проверяем новые уведомления каждые 60 секунд
+setInterval(()=>{ if (STATE.profile?.tg_id) checkInAppNotifications(); }, 60000);
 async function renderInAppNotifications() {
   try {
     const notifs = await DB.getMyNotifications(STATE.profile.tg_id);
@@ -6328,6 +6336,76 @@ async function renderInAppNotifications() {
     </div>`;
     document.body.appendChild(m);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+
+async function renderAdminNotifications() {
+  $('#tab-content').innerHTML=`<div class="center-screen"><div class="spinner"></div></div>`;
+  try {
+    const [recent, profiles] = await Promise.all([
+      DB.getRecentNotifications(50),
+      DB.getAllProfiles(),
+    ]);
+
+    $('#tab-content').innerHTML=`<div class="tab-pad">
+      <div class="section-header"><h3>Уведомления</h3></div>
+
+      <!-- Отправить сообщение -->
+      <div class="staff-card" style="flex-direction:column;gap:10px;margin-bottom:20px">
+        <div style="font-weight:600;font-size:14px">📤 Отправить уведомление</div>
+        <div class="form-group" style="margin-bottom:0">
+          <label>Кому</label>
+          <select id="notif-target">
+            <option value="all">Всем сотрудникам</option>
+            <option value="trainers">Всем тренерам</option>
+            ${profiles.filter(p=>p.tg_id).map(p=>`<option value="${p.tg_id}">${p.fio}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+          <label>Сообщение</label>
+          <textarea id="notif-msg" rows="3" placeholder="Текст уведомления..."></textarea>
+        </div>
+        <button class="btn btn-primary btn-full" onclick="doSendAdminNotification()">Отправить</button>
+      </div>
+
+      <!-- История -->
+      <h4 style="margin-bottom:12px">История (последние 50)</h4>
+      ${!recent.length?'<p class="hint">Нет уведомлений</p>':
+        recent.map(n=>`<div style="padding:10px 0;border-bottom:1px solid var(--border)">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start">
+            <div style="flex:1">
+              <div style="font-size:13px">${n.message}</div>
+              <div style="font-size:11px;color:var(--hint);margin-top:3px">
+                → ${n.recipient_name||n.recipient_tg_id} · ${fmtDT(n.created_at)}
+                ${n.read_at?`<span style="color:#10b981;margin-left:6px">✓ прочитано</span>`:'<span style="color:var(--accent);margin-left:6px">● не прочитано</span>'}
+              </div>
+            </div>
+          </div>
+        </div>`).join('')}
+    </div>`;
+  } catch(e) { $('#tab-content').innerHTML='<p class="hint">Ошибка</p>'; console.error(e); }
+}
+
+async function doSendAdminNotification() {
+  const target  = document.getElementById('notif-target')?.value;
+  const message = document.getElementById('notif-msg')?.value.trim();
+  if (!message) return toast('Введите текст','error');
+  try {
+    const allProfiles = await DB.getAllProfiles();
+    let recipients = [];
+    if (target==='all') {
+      recipients = allProfiles.filter(p=>p.tg_id);
+    } else if (target==='trainers') {
+      recipients = allProfiles.filter(p=>p.tg_id && ['trainer','senior_trainer'].includes(p.role));
+    } else {
+      const tgId = parseInt(target);
+      recipients = allProfiles.filter(p=>p.tg_id===tgId);
+    }
+    if (!recipients.length) return toast('Нет получателей с привязанным аккаунтом','error');
+    const count = await DB.queueBroadcast(recipients, message, null, STATE.profile.id);
+    toast(`✅ Отправлено ${count} получател${count===1?'ю':'ям'}`, 'success');
+    document.getElementById('notif-msg').value='';
+    renderAdminNotifications();
+  } catch(e) { toast('Ошибка: '+(e?.message||String(e)),'error'); console.error(e); }
 }
 
 // ── ЗАМЕНА В ГРУППАХ ──────────────────────────────────────────────────────────
