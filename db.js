@@ -416,9 +416,15 @@ async getAssignedTrainers(groupTypeId) {
   },
   async getDuplicateFlags(groupInstanceId) {
     const {data,error} = await sb().from('group_client_duplicate_flags')
-      .select('*, c1:group_clients!client_id_1(name,age), c2:group_clients!client_id_2(name,age)')
+      .select('*')
       .eq('group_instance_id', groupInstanceId).eq('status','pending');
-    if (error) throw error; return data||[];
+    if (error) return []; // таблица или FK не настроены — просто пропускаем
+    if (!data?.length) return [];
+    // Подтягиваем имена клиентов отдельно
+    const ids = [...new Set(data.flatMap(f=>[f.client_id_1, f.client_id_2].filter(Boolean)))];
+    const {data:clients} = await sb().from('group_clients').select('id,name,age').in('id',ids);
+    const cMap = Object.fromEntries((clients||[]).map(c=>[c.id,c]));
+    return data.map(f=>({...f, c1: cMap[f.client_id_1]||null, c2: cMap[f.client_id_2]||null}));
   },
   async resolveDuplicateFlag(id, status) {
     const {error} = await sb().from('group_client_duplicate_flags')
