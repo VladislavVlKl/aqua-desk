@@ -373,7 +373,10 @@ async function renderHomeTab() {
         <input type="text" id="wk-client-search" autocomplete="off" placeholder="🔍 Введите имя клиента..."
           style="width:100%;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);font-size:14px;box-sizing:border-box"
           oninput="wkClientInput(this)">
-        <div id="wk-client-drop" style="display:none;position:absolute;z-index:50;left:0;right:0;background:var(--card);border:1px solid var(--border);border-radius:0 0 10px 10px;max-height:200px;overflow-y:auto;box-shadow:0 6px 20px rgba(0,0,0,.35)"></div>
+        <div id="wk-client-drop" style="display:none;position:absolute;z-index:100;left:0;right:0;border-radius:0 0 12px 12px;max-height:220px;overflow-y:auto;
+          background:#1e1e2e;border:1.5px solid rgba(124,58,237,.5);border-top:none;
+          box-shadow:0 12px 40px rgba(0,0,0,.7);"></div>
+        <div id="wk-client-backdrop" style="display:none;position:fixed;inset:0;z-index:99;background:rgba(0,0,0,.35)" ontouchstart="wkClientClear()" onclick="wkClientClear()"></div>
       </div>
       <div class="form-group"><label>Тип тренировки</label>
         <select id="wk-type" onchange="onWkTypeChange(this)">
@@ -453,8 +456,10 @@ async function renderHomeTab() {
   const _closeWkDrop = (e) => {
     const drop = document.getElementById('wk-client-drop');
     if (!drop) { document.removeEventListener('touchstart',_closeWkDrop); document.removeEventListener('mousedown',_closeWkDrop); return; }
-    if (!e.target.closest('#wk-client-search') && !e.target.closest('#wk-client-drop')) {
+    if (!e.target.closest('#wk-client-search') && !e.target.closest('#wk-client-drop') && !e.target.closest('#wk-client-backdrop')) {
       drop.style.display='none';
+      const bd = document.getElementById('wk-client-backdrop');
+      if (bd) bd.style.display='none';
     }
   };
   document.addEventListener('touchstart', _closeWkDrop, {passive:true});
@@ -576,40 +581,76 @@ function wkClientInput(inp) {
   _wkClientTimer = setTimeout(()=>_wkClientFilter(inp.value), 300);
 }
 function _wkClientFilter(q) {
-  const drop = document.getElementById('wk-client-drop');
-  const sel  = document.getElementById('wk-client');
+  const drop     = document.getElementById('wk-client-drop');
+  const backdrop = document.getElementById('wk-client-backdrop');
+  const sel      = document.getElementById('wk-client');
   if (!drop||!sel) return;
   const opts = [...sel.options].filter(o=>o.value);
   const matches = q.length<1 ? opts : opts.filter(o=>o.text.toLowerCase().includes(q.toLowerCase()));
-  if (!matches.length) { drop.style.display='none'; return; }
-  drop.innerHTML = matches.slice(0,30).map(o=>`
-    <div style="padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer;font-size:14px"
-      onmousedown="wkClientPick('${o.value}','${encodeURIComponent(o.text)}')"
-      ontouchstart="wkClientPick('${o.value}','${encodeURIComponent(o.text)}')">
-      ${o.text}
-    </div>`).join('');
+  if (!matches.length) {
+    drop.style.display='none';
+    if (backdrop) backdrop.style.display='none';
+    return;
+  }
+  const catColors = {'1':'#10b981','2':'#a78bfa','3':'#f59e0b'};
+  drop.innerHTML = matches.slice(0,30).map((o,i)=>{
+    const cat = o.dataset.cat||'';
+    const bal = o.dataset.bal||'';
+    const catColor = catColors[cat]||'#9ca3af';
+    const isLow = parseInt(bal)<=0;
+    return `<div style="
+        padding:12px 16px;
+        border-bottom:1px solid rgba(255,255,255,.07);
+        cursor:pointer;
+        display:flex;
+        justify-content:space-between;
+        align-items:center;
+        gap:10px;
+        transition:background .1s;
+        ${i===matches.length-1?'border-bottom:none;':''}"
+      onmouseenter="this.style.background='rgba(124,58,237,.25)'"
+      onmouseleave="this.style.background=''"
+      ontouchstart="this.style.background='rgba(124,58,237,.25)';wkClientPick('${o.value}','${encodeURIComponent(o.text)}')"
+      onmousedown="wkClientPick('${o.value}','${encodeURIComponent(o.text)}')">
+      <span style="font-size:15px;font-weight:500;color:#f1f5f9;flex:1;min-width:0;
+        overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${o.text}</span>
+      <span style="display:flex;gap:6px;align-items:center;flex-shrink:0">
+        ${cat?`<span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:8px;
+          background:${catColor}22;color:${catColor}">кат.${cat}</span>`:''}
+        ${bal!==''?`<span style="font-size:12px;font-weight:600;
+          color:${isLow?'#ef4444':'#94a3b8'}">${bal} ПТ</span>`:''}
+      </span>
+    </div>`;
+  }).join('');
   drop.style.display = 'block';
+  if (backdrop) backdrop.style.display='block';
 }
 function wkClientPick(id, nameEnc) {
-  const sel   = document.getElementById('wk-client');
-  const inp   = document.getElementById('wk-client-search');
-  const drop  = document.getElementById('wk-client-drop');
-  const chip  = document.getElementById('wk-client-chip');
-  const cname = document.getElementById('wk-client-chip-name');
+  const sel      = document.getElementById('wk-client');
+  const inp      = document.getElementById('wk-client-search');
+  const drop     = document.getElementById('wk-client-drop');
+  const backdrop = document.getElementById('wk-client-backdrop');
+  const chip     = document.getElementById('wk-client-chip');
+  const cname    = document.getElementById('wk-client-chip-name');
   if (!sel) return;
   sel.value = id;
   drop.style.display = 'none';
+  if (backdrop) backdrop.style.display='none';
   if (inp)  { inp.style.display='none'; inp.value=''; }
   if (chip) { chip.style.display='flex'; }
   if (cname) cname.textContent = decodeURIComponent(nameEnc);
   onClientChange(sel);
 }
 function wkClientClear() {
-  const sel  = document.getElementById('wk-client');
-  const inp  = document.getElementById('wk-client-search');
-  const chip = document.getElementById('wk-client-chip');
+  const sel      = document.getElementById('wk-client');
+  const inp      = document.getElementById('wk-client-search');
+  const drop     = document.getElementById('wk-client-drop');
+  const backdrop = document.getElementById('wk-client-backdrop');
+  const chip     = document.getElementById('wk-client-chip');
   if (sel)  sel.value = '';
   if (chip) chip.style.display='none';
+  if (drop) drop.style.display='none';
+  if (backdrop) backdrop.style.display='none';
   if (inp)  { inp.style.display=''; inp.value=''; inp.focus(); }
 }
 function onClientChange(sel) {
