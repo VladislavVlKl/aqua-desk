@@ -4181,7 +4181,40 @@ async function loadGroupsList(monthStr) {
     ));
     body.innerHTML=types.map((gt,i)=>{
       const assigned = allAssigned[i]?.data||[];
-      return `<div class="staff-card" style="flex-direction:column;align-items:flex-start;gap:8px">
+
+      // Группируем тренеров по филиалу → одна строка на группу+филиал
+      const byBranch = {};
+      assigned.forEach(a=>{
+        if (!byBranch[a.branch]) byBranch[a.branch]=[];
+        byBranch[a.branch].push(a);
+      });
+      const instances = Object.entries(byBranch);
+
+      const instancesHtml = instances.length ? instances.map(([branch, trainers])=>{
+        const first = trainers[0];
+        const schedLabel = first.days_of_week?.length
+          ? `<span style="font-size:12px;color:var(--accent);font-weight:500">${first.days_of_week.join(' ')}${first.session_time?' '+first.session_time:''}</span>`
+          : `<span style="font-size:12px;color:var(--hint)">расписание не задано</span>`;
+        const reportId = first.id;
+        const trainersJson = encodeURIComponent(JSON.stringify(trainers.map(t=>({
+          id:t.id, fio:t.profiles?.fio||'—', role:t.role||'',
+          days:t.days_of_week||[], time:t.session_time||''
+        }))));
+        return `<div style="display:flex;justify-content:space-between;align-items:center;width:100%;padding:8px 0;border-top:1px solid var(--border)">
+          <div>
+            <div style="font-size:13px;font-weight:500">${branch}</div>
+            <div style="margin-top:2px">${schedLabel}</div>
+          </div>
+          <div style="display:flex;gap:6px">
+            ${gt.type==='children'?`<button class="btn btn-sm btn-primary" style="font-size:12px"
+              onclick="renderGroupMonthReport('${reportId}','${ms}')">📊 Отчёт</button>`:''}
+            <button class="btn btn-sm" style="font-size:12px;background:rgba(124,58,237,.15);color:#a78bfa"
+              onclick="renderGroupPersonnelModal('${gt.id}','${encodeURIComponent(gt.name)}','${branch}','${gt.type}','${ms}','${trainersJson}')">👥 Персонал</button>
+          </div>
+        </div>`;
+      }).join('') : '<p class="hint" style="font-size:12px">Нет тренеров</p>';
+
+      return `<div class="staff-card" style="flex-direction:column;align-items:flex-start;gap:4px">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;width:100%">
           <div>
             <div class="staff-fio">${gt.name}</div>
@@ -4194,25 +4227,49 @@ async function loadGroupsList(monthStr) {
               onclick="doDeleteGroupType(${gt.id},'${encodeURIComponent(gt.name)}')">🗑</button>
           </div>
         </div>
-        ${assigned.length?assigned.map(a=>`
-          <div style="display:flex;justify-content:space-between;align-items:center;width:100%;padding:4px 0;border-top:1px solid var(--border)">
-            <span style="font-size:13px">${a.profiles?.fio||'—'} · ${a.branch}${a.role?' · '+a.role:''}</span>
-            <div style="display:flex;gap:4px;flex-wrap:wrap">
-              ${gt.type==='children'?`<button class="btn btn-sm btn-primary" style="font-size:11px"
-                onclick="renderGroupMonthReport('${a.id}','${ms}')">📊 Отчёт</button>`:''}
-              <button class="btn btn-sm" style="font-size:11px;background:var(--card);border:1px solid var(--border)"
-                onclick="renderGroupScheduleModal('${a.id}','${encodeURIComponent(JSON.stringify(a.days_of_week||[]))}','${a.session_time||''}')">🗓️</button>
-              ${gt.name?.toLowerCase().includes('art')?`<button class="btn btn-sm" style="font-size:11px;background:rgba(124,58,237,.15);color:#a78bfa"
-                onclick="renderLinkGroupInstanceModal('${a.id}')">🔗 Связать</button>`:''}
-              <button class="btn btn-sm" style="font-size:11px;background:rgba(16,185,129,.15);color:#059669"
-                onclick="renderAddSecondTrainerModal(${gt.id},'${encodeURIComponent(gt.name)}','${a.branch}','${gt.type}')">+ 2й тренер</button>
-              <button class="btn btn-sm" style="background:rgba(239,68,68,.15);color:#ef4444"
-                onclick="doUnassignGroup(${a.id})">Открепить</button>
-            </div>
-          </div>`).join(''):'<p class="hint" style="font-size:12px">Нет тренеров</p>'}
+        ${instancesHtml}
       </div>`;
     }).join('')||'<p class="hint">Нет типов</p>';
   } catch(e) { body.innerHTML='<p class="hint">Ошибка</p>'; console.error(e); }
+}
+
+function renderGroupPersonnelModal(groupTypeId, groupNameEnc, branch, groupType, ms, trainersEnc) {
+  const groupName = decodeURIComponent(groupNameEnc);
+  const trainers  = JSON.parse(decodeURIComponent(trainersEnc));
+  const isArtSwim = groupName.toLowerCase().includes('art');
+  const m = el('div','modal-overlay');
+  const trainersHtml = trainers.map(t=>{
+    const roleColor = t.role==='суша'?'#ca8a04':t.role==='вода'?'#3b82f6':'var(--hint)';
+    const roleBadge = t.role
+      ? `<span style="font-size:10px;background:${roleColor}22;color:${roleColor};padding:1px 6px;border-radius:6px;font-weight:600;margin-left:6px">${t.role}</span>`
+      : '';
+    const schedLabel = t.days?.length
+      ? `<span style="font-size:11px;color:var(--hint)">${t.days.join(' ')}${t.time?' '+t.time:''}</span>`
+      : '';
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)">
+      <div>
+        <div style="font-size:14px;font-weight:500">${t.fio}${roleBadge}</div>
+        ${schedLabel?`<div style="margin-top:2px">${schedLabel}</div>`:''}
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn btn-sm" style="font-size:11px;background:var(--card);border:1px solid var(--border)"
+          onclick="document.querySelector('.modal-overlay').remove();renderGroupScheduleModal('${t.id}','${encodeURIComponent(JSON.stringify(t.days))}','${t.time}')">🗓️</button>
+        ${isArtSwim?`<button class="btn btn-sm" style="font-size:11px;background:rgba(124,58,237,.15);color:#a78bfa"
+          onclick="document.querySelector('.modal-overlay').remove();renderLinkGroupInstanceModal('${t.id}')">🔗 Связать</button>`:''}
+        <button class="btn btn-sm" style="background:rgba(239,68,68,.15);color:#ef4444;font-size:11px"
+          onclick="document.querySelector('.modal-overlay').remove();doUnassignGroup(${t.id})">Открепить</button>
+      </div>
+    </div>`;
+  }).join('');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>Персонал — ${groupName}</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <p class="hint" style="margin-bottom:8px">${branch}</p>
+    ${trainersHtml}
+    <button class="btn btn-primary btn-full" style="margin-top:14px"
+      onclick="this.closest('.modal-overlay').remove();renderAddSecondTrainerModal(${groupTypeId},'${encodeURIComponent(groupName)}','${branch}','${groupType}')">+ 2й тренер</button>
+  </div>`;
+  document.body.appendChild(m);
 }
 function renderAddGroupTypeModal() {
   const m=el('div','modal-overlay');
@@ -4291,18 +4348,29 @@ async function renderAddSecondTrainerModal(groupTypeId, groupNameEnc, branch, gr
         </select></div>`:'<input type="hidden" id="st2-role" value="">'}
       ${isAdult?`<div style="background:rgba(16,185,129,.1);border-radius:8px;padding:10px;font-size:12px;color:var(--hint);margin-bottom:12px">
         ✅ Взрослая группа: ставка по явке</div>`:`
-      <div class="form-group"><label>Процент тренеру (%)</label>
-        <input id="st2-rate" type="number" value="20" min="0" max="100"></div>`}
+      <div class="form-group"><label>Ставка за занятие (сум)</label>
+        <input id="st2-rate" type="number" value="75000" min="0" placeholder="75000"></div>`}
       <button class="btn btn-primary btn-full" onclick="doAddSecondTrainer(${groupTypeId},'${branch}','${groupType}')">Добавить</button>
     </div>`;
     document.body.appendChild(m);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
+function onSt2RateTypeChange(sel) {
+  const label = document.getElementById('st2-rate-label');
+  const inp   = document.getElementById('st2-rate');
+  if (sel.value==='flat') {
+    if (label) label.textContent='Сумма (сум)';
+    if (inp)   { inp.value=500000; inp.placeholder='500000'; }
+  } else {
+    if (label) label.textContent='Процент (%)';
+    if (inp)   { inp.value=20; inp.placeholder='20'; }
+  }
+}
 async function doAddSecondTrainer(groupTypeId, branch, groupType) {
   const trainerId = parseInt(document.getElementById('st2-trainer')?.value);
   const role      = document.getElementById('st2-role')?.value||null;
   const isAdult   = groupType === 'adult';
-  const rateType  = isAdult ? 'headcount' : 'percent';
+  const rateType  = isAdult ? 'headcount' : 'flat';
   const rateValue = isAdult ? 0 : (parseFloat(document.getElementById('st2-rate')?.value)||20);
   if (!trainerId) return toast('Выберите тренера','error');
   try {
@@ -4544,9 +4612,14 @@ async function renderGroupMonthReport(groupId, monthStr) {
               calcNote = `${sessionCount} занятий × 75 000 сум`;
             }
           } else {
-            // Детская группа: % от суммы оплат
-            autoAmt = Math.round(totalPaid * (t.rate_value||40) / 100);
-            calcNote = `${t.rate_value||40}% × ${fmt(totalPaid)} сум`;
+            // Детская группа
+            if (t.rate_type==='flat') {
+              autoAmt = totalSessions * (t.rate_value||0);
+              calcNote = `${totalSessions} занятий × ${fmt(t.rate_value||0)} сум`;
+            } else {
+              autoAmt = Math.round(totalPaid * (t.rate_value||40) / 100);
+              calcNote = `${t.rate_value||40}% × ${fmt(totalPaid)} сум`;
+            }
           }
 
           const prevAdj = existing ? (Number(existing.payout_value) - autoAmt) : 0;
