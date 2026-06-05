@@ -4644,7 +4644,10 @@ async function renderGroupMonthReport(groupId, monthStr) {
     setScreen(`<div class="app-header">
       <button class="btn-icon" onclick="${backFn}">←</button>
       <div class="app-title">Отчёт группы</div>
-      <button class="btn btn-sm btn-primary" onclick="doExportChildGroupExcel('${groupId}','${monthStr}')">⬇️ Excel</button>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-sm btn-primary" onclick="doExportChildGroupExcel('${groupId}','${monthStr}')">⬇️ Excel</button>
+        ${(isAdmin||STATE.profile.role==='senior_trainer')?`<button class="btn btn-sm" style="background:rgba(16,185,129,.2);color:#10b981" onclick="doExportGroupPayroll('${groupId}','${monthStr}')">⬇️ ЗП</button>`:''}
+      </div>
     </div>
     <div class="tab-content"><div class="tab-pad">
       <div class="section-header">
@@ -4730,10 +4733,13 @@ async function renderGroupMonthReport(groupId, monthStr) {
 
         const isArtSwim = groupTypeInfo?.name?.toLowerCase().includes('art');
         const pricePerChild = groupTypeInfo?.price_per_month || 0;
+        const activeCount  = clients.filter(c=>c.is_active!==false).length;
+        // База ЗП = активные дети × цена (не зависит от фактических оплат)
+        const totalRevenue = activeCount * pricePerChild;
         const tgWithLeader = trainers.find(t=>t.leader_name);
         const leaderName   = tgWithLeader?.leader_name || '';
         const leaderPct    = tgWithLeader?.leader_fee_percent || 0;
-        const leaderFee    = leaderPct>0 ? Math.round(totalPaid * leaderPct / 100) : 0;
+        const leaderFee    = leaderPct>0 ? Math.round(totalRevenue * leaderPct / 100) : 0;
 
         // Расчёт ЗП каждого тренера
         const trainerRows = trainers.map(t=>{
@@ -4742,16 +4748,15 @@ async function renderGroupMonthReport(groupId, monthStr) {
           let calcNote = '';
 
           if (isArtSwim) {
-            // Арт-свим: процент от общего пула ИЛИ ставка за занятия
+            // Арт-свим: процент от выручки (дети × цена) ИЛИ ставка за занятия
             const sessions = (instanceSessions||[]).filter(s=>s.trainer_id===t.trainer_id);
             const sessionCount = sessions.length;
             if (t.rate_type==='percent') {
-              autoAmt = Math.round(totalPaid * (t.rate_value||0) / 100);
-              calcNote = `${t.rate_value||0}% × ${fmt(totalPaid)} сум`;
+              autoAmt = Math.round(totalRevenue * (t.rate_value||0) / 100);
+              calcNote = `${t.rate_value||0}% × ${fmt(totalRevenue)} сум (${activeCount} дет × ${fmt(pricePerChild)})`;
             } else {
-              // Ставка за занятие (75 000 за суша/вода)
-              autoAmt = sessionCount * 75000;
-              calcNote = `${sessionCount} занятий × 75 000 сум`;
+              autoAmt = sessionCount * (t.rate_value||75000);
+              calcNote = `${sessionCount} занятий × ${fmt(t.rate_value||75000)} сум`;
             }
           } else {
             // Детская группа
@@ -4759,8 +4764,8 @@ async function renderGroupMonthReport(groupId, monthStr) {
               autoAmt = totalSessions * (t.rate_value||0);
               calcNote = `${totalSessions} занятий × ${fmt(t.rate_value||0)} сум`;
             } else {
-              autoAmt = Math.round(totalPaid * (t.rate_value||40) / 100);
-              calcNote = `${t.rate_value||40}% × ${fmt(totalPaid)} сум`;
+              autoAmt = Math.round(totalRevenue * (t.rate_value||40) / 100);
+              calcNote = `${t.rate_value||40}% × ${fmt(totalRevenue)} сум (${activeCount} дет × ${fmt(pricePerChild)})`;
             }
           }
 
@@ -4773,7 +4778,7 @@ async function renderGroupMonthReport(groupId, monthStr) {
           const adj = r.existing ? (Number(r.existing.payout_value) - r.autoAmt) : 0;
           return s + r.autoAmt + adj;
         }, 0);
-        const remainder = totalPaid - totalTrainerPay - leaderFee;
+        const remainder = totalRevenue - totalTrainerPay - leaderFee;
 
         return `
         <div style="margin-top:20px">
@@ -4781,8 +4786,8 @@ async function renderGroupMonthReport(groupId, monthStr) {
 
           ${isArtSwim?`<div style="background:rgba(124,58,237,.08);border:1px solid rgba(124,58,237,.3);border-radius:10px;padding:12px;margin-bottom:12px">
             <div style="display:flex;justify-content:space-between;margin-bottom:4px">
-              <span style="font-size:13px;color:var(--hint)">Общий пул (оплаты)</span>
-              <span style="font-weight:700;font-size:15px">${fmt(totalPaid)} сум</span>
+              <span style="font-size:13px;color:var(--hint)">Выручка (${activeCount} дет × ${fmt(pricePerChild)})</span>
+              <span style="font-weight:700;font-size:15px">${fmt(totalRevenue)} сум</span>
             </div>
             ${leaderName?`<div style="display:flex;justify-content:space-between;margin-bottom:4px">
               <span style="font-size:12px;color:var(--hint)">Руководитель (${leaderPct}%): ${leaderName}</span>
@@ -4829,7 +4834,7 @@ async function renderGroupMonthReport(groupId, monthStr) {
             <div style="display:flex;justify-content:space-between;align-items:center">
               <div>
                 <div style="font-weight:600;font-size:14px">Руководитель: ${leaderName}</div>
-                <div style="font-size:12px;color:var(--hint)">${leaderPct}% от ${fmt(totalPaid)} сум</div>
+                <div style="font-size:12px;color:var(--hint)">${leaderPct}% от ${fmt(totalRevenue)} сум</div>
               </div>
               <div style="display:flex;align-items:center;gap:8px">
                 <span style="font-size:18px;font-weight:700;color:var(--accent)">${fmt(leaderFee)} сум</span>
@@ -4879,6 +4884,48 @@ async function doSaveLeaderFee(groupId, remove=false) {
     const ms = new Date().toISOString().slice(0,7)+'-01';
     renderGroupMonthReport(groupId, ms);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+
+async function doExportGroupPayroll(groupId, monthStr) {
+  if (window.Telegram?.WebApp?.initData) {
+    const m=el('div','modal-overlay');
+    m.innerHTML=`<div class="modal"><div class="modal-header"><h3>Скачать ЗП</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+      <p style="line-height:1.6">Откройте приложение в браузере для скачивания файла.</p>
+      <button class="btn btn-primary btn-full" onclick="window.Telegram.WebApp.openLink(''+APP_URL+'',{try_instant_view:false});this.closest('.modal-overlay').remove()">Открыть в браузере</button>
+    </div>`;
+    document.body.appendChild(m); return;
+  }
+  await ensureXlsx();
+  try {
+    const report = await DB.getGroupMonthReport(groupId, monthStr);
+    const {clients, attendance, payouts, trainers, instanceSessions, groupTypeInfo} = report;
+    const activeCount   = clients.filter(c=>c.is_active!==false).length;
+    const pricePerChild = groupTypeInfo?.price_per_month || 0;
+    const totalRevenue  = activeCount * pricePerChild;
+    const totalSessions = [...new Set(attendance.map(a=>a.session_date))].length;
+    const isArtSwim     = groupTypeInfo?.name?.toLowerCase().includes('art');
+    const tgWithLeader  = trainers.find(t=>t.leader_name);
+    const leaderName    = tgWithLeader?.leader_name || '';
+    const leaderPct     = tgWithLeader?.leader_fee_percent || 0;
+    const leaderFee     = leaderPct>0 ? Math.round(totalRevenue * leaderPct / 100) : 0;
+
+    const rows = trainers.map(t=>{
+      let amt=0, note='';
+      if (isArtSwim) {
+        const sc = (instanceSessions||[]).filter(s=>s.trainer_id===t.trainer_id).length;
+        if (t.rate_type==='percent') { amt=Math.round(totalRevenue*(t.rate_value||0)/100); note=`${t.rate_value||0}% от выручки`; }
+        else { amt=sc*(t.rate_value||75000); note=`${sc} занятий × ${fmt(t.rate_value||75000)} сум`; }
+      } else {
+        if (t.rate_type==='flat') { amt=totalSessions*(t.rate_value||0); note=`${totalSessions} занятий × ${fmt(t.rate_value||0)} сум`; }
+        else { amt=Math.round(totalRevenue*(t.rate_value||40)/100); note=`${t.rate_value||40}% от выручки`; }
+      }
+      const existing = payouts.find(p=>p.trainer_id===t.trainer_id);
+      return {fio:t.profiles?.fio||'—', role:t.role||'основной', autoAmt:amt, note, approved:existing?Number(existing.payout_value):null};
+    });
+
+    exportGroupPayrollExcel(groupTypeInfo?.name||'Группа', monthStr, totalRevenue, activeCount, pricePerChild, rows, leaderName, leaderPct, leaderFee);
+  } catch(e) { toast('Ошибка: '+(e?.message||String(e)),'error'); console.error(e); }
 }
 
 function prevMonthStr(monthStr) {

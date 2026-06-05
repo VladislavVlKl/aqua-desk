@@ -681,3 +681,61 @@ function exportBranchChildGroupsExcel(branch, monthStr, groupReports) {
 
   XLSX.writeFile(wb, `Дет_ГП_${branch}_${monthLabel}.xlsx`);
 }
+
+// ─────────────────────────────────────────────
+// ЗП ТРЕНЕРОВ ПО ГРУППЕ
+// ─────────────────────────────────────────────
+function exportGroupPayrollExcel(groupName, monthStr, totalRevenue, activeCount, pricePerChild, trainerRows, leaderName, leaderPct, leaderFee) {
+  const XLSX = window.XLSX;
+  const wb   = XLSX.utils.book_new();
+  const monthLabel = new Date(monthStr).toLocaleDateString('ru-RU',{month:'long',year:'numeric'});
+  const safeName = groupName.replace(/[\\/:*?"<>|]/g,'').slice(0,20);
+
+  const rows = [];
+  rows.push([tc(`Выплаты тренерам — ${groupName} — ${monthLabel}`, titleStyle())]);
+  rows.push([]);
+  rows.push([tc('База расчёта', hStyle().font ? hStyle() : {}),
+             tc(`${activeCount} детей × ${fmt(pricePerChild)} сум = ${fmt(totalRevenue)} сум`,
+                {font:{sz:12,name:'Arial',bold:false,color:{rgb:XL.TEXT_DARK}}})]);
+  rows.push([]);
+  rows.push(sr(['Тренер','Роль','Формула','К выплате','Утверждено','Статус'], hStyle()));
+
+  let grandTotal = 0;
+  trainerRows.forEach((r,i)=>{
+    const toPayAmt = r.approved !== null ? r.approved : r.autoAmt;
+    grandTotal += toPayAmt;
+    const status = r.approved !== null ? '✅ Утверждено' : '⏳ Авто';
+    const rs = rStyle(i%2===0);
+    const payStyle = {...rs, font:{...rs.font, bold:true, color:{rgb:XL.GREEN_DARK}}};
+    rows.push([
+      tc(r.fio, rs),
+      tc(r.role, rs),
+      tc(r.note, rs),
+      mc(r.autoAmt, rs),
+      r.approved !== null ? mc(r.approved, payStyle) : tc('—', rs),
+      tc(status, rs),
+    ]);
+  });
+
+  if (leaderName) {
+    const ls = rStyle(trainerRows.length%2===0);
+    grandTotal += leaderFee;
+    rows.push([
+      tc(leaderName, ls),
+      tc('Руководитель', ls),
+      tc(`${leaderPct}% от выручки`, ls),
+      mc(leaderFee, ls),
+      tc('—', ls),
+      tc('ℹ️ Отдельно', ls),
+    ]);
+  }
+
+  rows.push([]);
+  rows.push(sr(['ИТОГО к выплате:','','', mc(grandTotal),'',''], gStyle()));
+
+  const ws = buildSheet(rows);
+  ws['!cols'] = [{wch:22},{wch:14},{wch:30},{wch:14},{wch:14},{wch:14}];
+  ws['!merges'] = [{s:{r:0,c:0},e:{r:0,c:5}}];
+  XLSX.utils.book_append_sheet(wb, ws, 'ЗП тренерам');
+  XLSX.writeFile(wb, `ЗП_${safeName}_${monthLabel}.xlsx`);
+}
