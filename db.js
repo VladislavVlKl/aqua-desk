@@ -545,24 +545,63 @@ async unassignTrainerGroup(id) {
   async getGroupMonthReport(groupId, month) {
     const nextMonth = new Date(month); nextMonth.setMonth(nextMonth.getMonth()+1);
     const nextMonthStr = nextMonth.toISOString().slice(0,10);
-    const [clients, payments, notes, attendance, payout, trainers] = await Promise.all([
-      sb().from('group_clients').select('*').eq('group_id',groupId).eq('is_active',true).order('name'),
-      sb().from('group_payments').select('*').eq('group_id',groupId).eq('month',month),
+
+    // Сначала получаем данные этой trainer_groups строки (чтобы знать instance_id)
+    const {data:tgRow} = await sb().from('trainer_groups')
+      .select('*, profiles(fio), group_types(name,type,price_per_month)')
+      .eq('id',groupId).single();
+
+    const instanceId = tgRow?.group_instance_id;
+
+    // Загружаем всё параллельно
+    const [clients, payments, notes, attendance, payouts, instanceTrainers, instanceSessions] = await Promise.all([
+      // Клиенты и оплаты — по instance если есть, иначе по groupId
+      instanceId
+        ? sb().from('group_clients').select('*').eq('group_instance_id',instanceId).eq('is_active',true).order('name')
+        : sb().from('group_clients').select('*').eq('group_id',groupId).eq('is_active',true).order('name'),
+      instanceId
+        ? sb().from('group_payments').select('*').eq('group_instance_id',instanceId).eq('month',month)
+        : sb().from('group_payments').select('*').eq('group_id',groupId).eq('month',month),
       sb().from('group_progress_notes').select('*').eq('group_id',groupId).eq('month',month),
-      sb().from('group_attendance').select('*').eq('group_id',groupId)
-        .gte('session_date',month).lt('session_date',nextMonthStr),
-      sb().from('group_trainer_payouts').select('*')
-        .eq('group_id',groupId).eq('month',month),
-      sb().from('trainer_groups').select('*, profiles(fio), group_types(name)')
-        .eq('id',groupId).is('subscription_end',null),
+      instanceId
+        ? sb().from('group_attendance').select('*').eq('group_instance_id',instanceId)
+            .gte('session_date',month).lt('session_date',nextMonthStr)
+        : sb().from('group_attendance').select('*').eq('group_id',groupId)
+            .gte('session_date',month).lt('session_date',nextMonthStr),
+      // Все payouts по instance за месяц
+      instanceId
+        ? sb().from('group_trainer_payouts').select('*').eq('month',month)
+            .in('group_id', (await sb().from('trainer_groups')
+              .select('id').eq('group_instance_id',instanceId).is('subscription_end',null)
+              .then(r=>(r.data||[]).map(t=>t.id))))
+        : sb().from('group_trainer_payouts').select('*').eq('group_id',groupId).eq('month',month),
+      // Все тренеры этого instance
+      instanceId
+        ? sb().from('trainer_groups').select('*, profiles(fio), group_types(name,type)')
+            .eq('group_instance_id',instanceId).is('subscription_end',null)
+        : sb().from('trainer_groups').select('*, profiles(fio), group_types(name,type)')
+            .eq('id',groupId).is('subscription_end',null),
+      // Занятия (для ставки по сессиям) — все тренеры instance за месяц
+      instanceId
+        ? sb().from('group_sessions').select('*')
+            .gte('session_date',month).lt('session_date',nextMonthStr)
+            .in('trainer_id', (await sb().from('trainer_groups')
+              .select('trainer_id').eq('group_instance_id',instanceId).is('subscription_end',null)
+              .then(r=>(r.data||[]).map(t=>t.trainer_id))))
+        : sb().from('group_sessions').select('*')
+            .gte('session_date',month).lt('session_date',nextMonthStr)
+            .eq('trainer_id', tgRow?.trainer_id),
     ]);
+
     return {
-      clients:    clients.data||[],
-      payments:   payments.data||[],
-      notes:      notes.data||[],
-      attendance: attendance.data||[],
-      payouts:    payout.data||[],
-      trainers:   trainers.data||[],
+      clients:          clients.data||[],
+      payments:         payments.data||[],
+      notes:            notes.data||[],
+      attendance:       attendance.data||[],
+      payouts:          payouts.data||[],
+      trainers:         instanceTrainers.data||[tgRow].filter(Boolean),
+      instanceSessions: instanceSessions.data||[],
+      groupTypeInfo:    tgRow?.group_types||null,
     };
   },
 
@@ -1422,14 +1461,11 @@ function calcSalary({workouts=[], duties=[], trainerGroups=[], groupSessions=[],
   const hours    = duties.reduce((s,d)=>s+(new Date(d.end_time)-new Date(d.start_time))/3600000,0);
   const dutySum  = Math.round(hours*RATES.duty_per_hour);
 
-  // Детские группы: ЗП только если есть утверждённый payout за месяц
+  // Детские группы: утверждённые payout (всегда fixed, авто-расчёт при утверждении)
+  const myGroupIds = new Set(trainerGroups.map(tg=>tg.id));
   const childSum = groupPayouts
-    .filter(p=>trainerGroups.some(tg=>tg.id===p.group_id || tg.group_type_id===p.group_id))
-    .reduce((s,p)=>{
-      if (p.payout_type==='fixed') return s + Number(p.payout_value);
-      // percent: от суммы оплат клиентов группы (передаётся снаружи если есть, иначе 0)
-      return s + Number(p.payout_value);
-    },0);
+    .filter(p => myGroupIds.has(p.group_id) && (!trainerId || p.trainer_id===trainerId))
+    .reduce((s,p) => s + Number(p.payout_value), 0);
 
   // Взрослые группы: по явке (авто)
   const adultSum = groupSessions

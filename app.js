@@ -4399,7 +4399,7 @@ async function renderGroupMonthReport(groupId, monthStr) {
   loading('Загрузка...');
   try {
     const report = await DB.getGroupMonthReport(groupId, monthStr);
-    const {clients, payments, notes, attendance, payouts, trainers} = report;
+    const {clients, payments, notes, attendance, payouts, trainers, instanceSessions, groupTypeInfo} = report;
 
     const payMap  = Object.fromEntries(payments.map(p=>[p.group_client_id, p]));
     const noteMap = Object.fromEntries(notes.map(n=>[n.group_client_id, n]));
@@ -4500,66 +4500,118 @@ async function renderGroupMonthReport(groupId, monthStr) {
         </table>
       </div>
 
-      <!-- Утверждение ЗП тренерам -->
-      ${isAdmin||STATE.profile.role==='senior_trainer'?`
-      <h4 style="margin-top:20px;margin-bottom:8px">ЗП тренерам за месяц</h4>
-      ${trainers.map(t=>{
-        const key = `${t.id}_${t.trainer_id}`;
-        const existing = payoutMap[`${groupId}_${t.trainer_id}`];
-        return `<div class="staff-card" style="flex-direction:column;gap:10px">
-          <div style="display:flex;justify-content:space-between;align-items:center">
-            <div>
-              <div class="staff-fio">${t.profiles?.fio||'—'}</div>
-              <div class="staff-meta">${t.role||'основной'}</div>
-            </div>
-            ${existing?`<span style="font-size:12px;color:#10b981;font-weight:600">
-              ${existing.payout_type==='fixed'?fmt(existing.payout_value)+' сум':existing.payout_value+'%'}
-              ✓</span>`:'<span style="font-size:12px;color:var(--hint)">Не утверждено</span>'}
-          </div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <select id="payout-type-${t.trainer_id}" onchange="onPayoutTypeChange(${t.trainer_id})"
-              style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text);font-size:13px">
-              <option value="fixed" ${existing?.payout_type==='fixed'?'selected':''}>Фикс. сумма</option>
-              <option value="percent" ${existing?.payout_type==='percent'?'selected':''}>Процент (%)</option>
-            </select>
-            <input id="payout-val-${t.trainer_id}" type="number"
-              value="${existing?.payout_value||''}"
-              placeholder="${existing?.payout_type==='percent'?'40':'500000'}"
-              style="width:120px;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text);font-size:13px">
-            <button class="btn btn-sm btn-primary"
-              onclick="doApproveGroupPayout('${groupId}','${t.trainer_id}','${monthStr}')">Утвердить</button>
-          </div>
-          ${existing?.payout_type==='percent'?`<div style="font-size:11px;color:var(--hint)">
-            ${existing.payout_value}% от ${fmt(totalPaid)} = ${fmt(Math.round(totalPaid*existing.payout_value/100))} сум</div>`:''}
-        </div>`;
-      }).join('')}
-      `:''}
-
-      <!-- Руководитель группы (только координатор / старший) -->
+      <!-- ЗП тренерам — авто-расчёт (только координатор / старший) -->
       ${(()=>{
         const canSee = isAdmin || STATE.profile.role==='senior_trainer';
         if (!canSee) return '';
-        // Ищем запись с leader_name среди trainers (trainer_groups)
+
+        const isArtSwim = groupTypeInfo?.name?.toLowerCase().includes('art');
+        const pricePerChild = groupTypeInfo?.price_per_month || 0;
         const tgWithLeader = trainers.find(t=>t.leader_name);
-        const leaderName    = tgWithLeader?.leader_name || '';
-        const leaderPct     = tgWithLeader?.leader_fee_percent || 0;
-        const leaderFee     = leaderPct>0 ? Math.round(totalPaid * leaderPct / 100) : 0;
-        return `<div style="margin-top:20px;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-            <h4 style="margin:0">Руководитель группы</h4>
-            ${isAdmin?`<button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
-              onclick="renderLeaderFeeModal('${groupId}','${encodeURIComponent(leaderName)}',${leaderPct})">✏️</button>`:''}
-          </div>
-          ${leaderName
-            ? `<div style="display:flex;justify-content:space-between;align-items:center">
-                <div>
-                  <div style="font-weight:600;font-size:14px">${leaderName}</div>
-                  <div style="font-size:12px;color:var(--hint)">${leaderPct}% от ${fmt(totalPaid)} сум</div>
-                </div>
-                <div style="font-size:20px;font-weight:700;color:var(--accent)">${fmt(leaderFee)} сум</div>
-              </div>`
-            : `<p class="hint" style="margin:0">${isAdmin?'Нажмите ✏️ чтобы добавить руководителя':'Не указан'}</p>`
+        const leaderName   = tgWithLeader?.leader_name || '';
+        const leaderPct    = tgWithLeader?.leader_fee_percent || 0;
+        const leaderFee    = leaderPct>0 ? Math.round(totalPaid * leaderPct / 100) : 0;
+
+        // Расчёт ЗП каждого тренера
+        const trainerRows = trainers.map(t=>{
+          const existing = payouts.find(p=>p.trainer_id===t.trainer_id);
+          let autoAmt = 0;
+          let calcNote = '';
+
+          if (isArtSwim) {
+            // Арт-свим: процент от общего пула ИЛИ ставка за занятия
+            const sessions = (instanceSessions||[]).filter(s=>s.trainer_id===t.trainer_id);
+            const sessionCount = sessions.length;
+            if (t.rate_type==='percent') {
+              autoAmt = Math.round(totalPaid * (t.rate_value||0) / 100);
+              calcNote = `${t.rate_value||0}% × ${fmt(totalPaid)} сум`;
+            } else {
+              // Ставка за занятие (75 000 за суша/вода)
+              autoAmt = sessionCount * 75000;
+              calcNote = `${sessionCount} занятий × 75 000 сум`;
+            }
+          } else {
+            // Детская группа: % от суммы оплат
+            autoAmt = Math.round(totalPaid * (t.rate_value||40) / 100);
+            calcNote = `${t.rate_value||40}% × ${fmt(totalPaid)} сум`;
           }
+
+          const prevAdj = existing ? (Number(existing.payout_value) - autoAmt) : 0;
+          return {t, autoAmt, calcNote, existing, prevAdj};
+        });
+
+        // Остаток пула (только Арт-свим)
+        const totalTrainerPay = trainerRows.reduce((s,r)=>{
+          const adj = r.existing ? (Number(r.existing.payout_value) - r.autoAmt) : 0;
+          return s + r.autoAmt + adj;
+        }, 0);
+        const remainder = totalPaid - totalTrainerPay - leaderFee;
+
+        return `
+        <div style="margin-top:20px">
+          <h4 style="margin-bottom:12px">ЗП тренерам за месяц</h4>
+
+          ${isArtSwim?`<div style="background:rgba(124,58,237,.08);border:1px solid rgba(124,58,237,.3);border-radius:10px;padding:12px;margin-bottom:12px">
+            <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+              <span style="font-size:13px;color:var(--hint)">Общий пул (оплаты)</span>
+              <span style="font-weight:700;font-size:15px">${fmt(totalPaid)} сум</span>
+            </div>
+            ${leaderName?`<div style="display:flex;justify-content:space-between;margin-bottom:4px">
+              <span style="font-size:12px;color:var(--hint)">Руководитель (${leaderPct}%): ${leaderName}</span>
+              <span style="font-size:13px;color:#f59e0b;font-weight:600">−${fmt(leaderFee)} сум</span>
+            </div>`:''}
+            <div style="display:flex;justify-content:space-between;padding-top:8px;border-top:1px solid rgba(124,58,237,.2)">
+              <span style="font-size:12px;color:var(--hint)">Остаток</span>
+              <span style="font-size:13px;font-weight:600;color:${remainder>=0?'#10b981':'#ef4444'}">${fmt(remainder)} сум</span>
+            </div>
+          </div>`:''}
+
+          ${trainerRows.map(({t,autoAmt,calcNote,existing,prevAdj})=>`
+          <div class="staff-card" style="flex-direction:column;gap:8px;margin-bottom:10px">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <div>
+                <div class="staff-fio">${t.profiles?.fio||'—'}</div>
+                <div class="staff-meta">${t.role||'основной'}</div>
+              </div>
+              ${existing?`<span style="font-size:13px;color:#10b981;font-weight:700">${fmt(existing.payout_value)} сум ✓</span>`
+                        :`<span style="font-size:12px;color:var(--hint)">Не утверждено</span>`}
+            </div>
+            <div style="background:rgba(16,185,129,.07);border-radius:8px;padding:10px;font-size:13px">
+              <div style="display:flex;justify-content:space-between">
+                <span style="color:var(--hint)">Авто (${calcNote})</span>
+                <span style="font-weight:600">${fmt(autoAmt)} сум</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+                <label style="color:var(--hint);font-size:12px;white-space:nowrap">Корректировка:</label>
+                <input id="adj-${t.trainer_id}" type="number" value="${existing?prevAdj:0}" placeholder="0"
+                  oninput="updatePayoutTotal(${t.trainer_id},${autoAmt})"
+                  style="flex:1;min-width:0;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:6px 8px;color:var(--text);font-size:13px">
+              </div>
+              <div style="display:flex;justify-content:space-between;margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
+                <span style="font-weight:600">Итого:</span>
+                <span id="total-${t.trainer_id}" style="font-weight:700;color:var(--accent)">${fmt(autoAmt+(existing?prevAdj:0))} сум</span>
+              </div>
+            </div>
+            <button class="btn btn-sm btn-primary btn-full"
+              onclick="doApproveGroupPayoutAuto('${t.id}','${t.trainer_id}','${monthStr}',${autoAmt},${t.rate_value||40})">
+              Утвердить</button>
+          </div>`).join('')}
+
+          ${leaderName?`<div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;margin-top:8px">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <div>
+                <div style="font-weight:600;font-size:14px">Руководитель: ${leaderName}</div>
+                <div style="font-size:12px;color:var(--hint)">${leaderPct}% от ${fmt(totalPaid)} сум</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <span style="font-size:18px;font-weight:700;color:var(--accent)">${fmt(leaderFee)} сум</span>
+                ${isAdmin?`<button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
+                  onclick="renderLeaderFeeModal('${groupId}','${encodeURIComponent(leaderName)}',${leaderPct})">✏️</button>`:''}
+              </div>
+            </div>
+          </div>`:`
+          ${isAdmin?`<div style="margin-top:8px"><button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
+            onclick="renderLeaderFeeModal('${groupId}','',0)">+ Руководитель группы</button></div>`:''}`}
         </div>`;
       })()}
 
@@ -4611,10 +4663,29 @@ function onPayoutTypeChange(trainerId) {
   const inp  = document.getElementById(`payout-val-${trainerId}`);
   if (inp) inp.placeholder = type==='percent' ? '40' : '500000';
 }
+function updatePayoutTotal(trainerId, autoAmt) {
+  const adj = parseInt(document.getElementById(`adj-${trainerId}`)?.value)||0;
+  const el  = document.getElementById(`total-${trainerId}`);
+  if (el) el.textContent = fmt(autoAmt + adj) + ' сум';
+}
+async function doApproveGroupPayoutAuto(tgId, trainerId, monthStr, autoAmt, rate) {
+  const adj   = parseInt(document.getElementById(`adj-${trainerId}`)?.value)||0;
+  const final = autoAmt + adj;
+  const note  = adj !== 0 ? `авто ${rate}% + корр. ${adj>0?'+':''}${adj}` : `авто ${rate}%`;
+  if (_pending.has(`payout_${tgId}_${trainerId}`)) return;
+  _pending.add(`payout_${tgId}_${trainerId}`);
+  try {
+    await DB.setGroupTrainerPayout(parseInt(tgId), parseInt(trainerId), monthStr, 'fixed', final, STATE.profile.id, note);
+    toast('ЗП утверждена ✅','success');
+    renderGroupMonthReport(tgId, monthStr);
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+  finally { _pending.delete(`payout_${tgId}_${trainerId}`); }
+}
+// Оставлен для совместимости с модалкой Ставки
 async function doApproveGroupPayout(groupId, trainerId, monthStr) {
-  const type  = document.getElementById(`payout-type-${trainerId}`)?.value||'fixed';
-  const val   = parseFloat(document.getElementById(`payout-val-${trainerId}`)?.value||0);
-  if (!val) return toast('Введите сумму или %','error');
+  const type = document.getElementById(`payout-type-${trainerId}`)?.value||'fixed';
+  const val  = parseFloat(document.getElementById(`payout-val-${trainerId}`)?.value||0);
+  if (!val) return toast('Введите сумму','error');
   if (_pending.has(`payout_${groupId}_${trainerId}`)) return;
   _pending.add(`payout_${groupId}_${trainerId}`);
   try {
