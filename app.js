@@ -6434,13 +6434,17 @@ async function renderAdultGroupDetail(groupId, monthStr) {
     const prevMonth = mMonth===1 ? `${mYear-1}-12-01` : `${mYear}-${String(mMonth-1).padStart(2,'0')}-01`;
     const nextMonth = mMonth===12 ? `${mYear+1}-01-01` : `${mYear}-${String(mMonth+1).padStart(2,'0')}-01`;
     const isCurrentMonth = monthStr === new Date().toISOString().slice(0,7)+'-01';
+    // Для тренера показываем только его занятия; для координатора/старшего — все
+    const isAdminView = ['admin','ceo','senior_trainer'].includes(STATE.profile.role);
+    let sessQ = sb().from('group_sessions').select('*, profiles(fio)')
+      .eq('group_type_id', tgInfo?.group_type_id||0)
+      .eq('branch', tgInfo?.branch||'')
+      .gte('session_date',fromDay).lt('session_date',toDay)
+      .order('session_date',{ascending:false});
+    if (!isAdminView) sessQ = sessQ.eq('trainer_id', STATE.profile.id);
     const [clients, sessions] = await Promise.all([
       DB.getAdultGroupClients(groupId),
-      sb().from('group_sessions').select('*')
-        .eq('group_type_id', tgInfo?.group_type_id||0)
-        .eq('branch', tgInfo?.branch||'')
-        .gte('session_date',fromDay).lt('session_date',toDay)
-        .order('session_date',{ascending:false}).then(r=>r.data||[]),
+      sessQ.then(r=>r.data||[]),
     ]);
     const monthLabel = new Date(mYear,mMonth-1,1).toLocaleString('ru-RU',{month:'long',year:'numeric'});
     setScreen(`<div class="app-header">
@@ -6479,6 +6483,7 @@ async function renderAdultGroupDetail(groupId, monthStr) {
             <span class="hi-client">${fmtDate(s.session_date)}</span>
             <span class="hi-cat" style="background:rgba(16,185,129,.15);color:#10b981">${fmt(rate)} сум</span>
             <span class="hint">${s.headcount} чел.</span>
+            ${isAdminView && s.profiles?.fio ? `<span class="hint" style="font-size:11px">· ${s.profiles.fio}</span>` : ''}
           </div>
           ${isCurrentMonth?`<div style="display:flex;gap:6px;margin-top:4px">
             <button class="btn btn-sm" style="font-size:11px;background:var(--card);border:1px solid var(--border)"
@@ -6650,8 +6655,10 @@ async function doAddManualGroupSession(groupId) {
   if (!date || !headcount) return toast('Заполните дату и явку','error');
   try {
     const {data:tg} = await sb().from('trainer_groups')
-      .select('branch,group_type_id').eq('id',groupId).single();
-    await DB.logGroupSession(STATE.profile.id, tg?.group_type_id, tg?.branch||'', date, headcount);
+      .select('branch,group_type_id,trainer_id').eq('id',groupId).single();
+    // Используем trainer_id из группы (не STATE.profile.id — координатор мог добавлять)
+    const logTrainerId = tg?.trainer_id || STATE.profile.id;
+    await DB.logGroupSession(logTrainerId, tg?.group_type_id, tg?.branch||'', date, headcount);
     document.querySelector('.modal-overlay')?.remove();
     toast('✅ Занятие добавлено','success');
     renderAdultGroupDetail(groupId);
