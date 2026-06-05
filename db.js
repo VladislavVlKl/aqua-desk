@@ -465,10 +465,11 @@ async unassignTrainerGroup(id) {
       .select('*').eq('group_id',groupId).eq('session_date',date);
     if (error) throw error; return data||[];
   },
-  async saveGroupAttendance(groupId, groupClientId, date, attended) {
+  async saveGroupAttendance(groupId, groupClientId, date, attended, groupInstanceId=null) {
     const {error} = await sb().from('group_attendance')
       .upsert({group_id:groupId, group_client_id:groupClientId,
-               session_date:date, attended},
+               session_date:date, attended,
+               ...(groupInstanceId ? {group_instance_id:groupInstanceId} : {})},
               {onConflict:'group_client_id,session_date'});
     if (error) throw error;
   },
@@ -497,13 +498,14 @@ async unassignTrainerGroup(id) {
       .select('*').eq('group_id',groupId).eq('month',month);
     if (error) throw error; return data||[];
   },
-  async setGroupPayment(groupId, groupClientId, month, amount, paid, subStart=null, subEnd=null) {
+  async setGroupPayment(groupId, groupClientId, month, amount, paid, subStart=null, subEnd=null, groupInstanceId=null) {
     const {error} = await sb().from('group_payments')
       .upsert({group_id:groupId, group_client_id:groupClientId,
                month, amount, paid,
                sub_start: subStart||null,
                sub_end:   subEnd||null,
-               paid_at: paid ? new Date().toISOString() : null},
+               paid_at: paid ? new Date().toISOString() : null,
+               ...(groupInstanceId ? {group_instance_id:groupInstanceId} : {})},
               {onConflict:'group_client_id,month'});
     if (error) throw error;
   },

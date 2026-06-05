@@ -3763,7 +3763,8 @@ function toggleGroupPayment(groupId, clientId, paid, amount, month) {
     document.body.appendChild(m);
   } else {
     // Снять оплату — без модала
-    DB.setGroupPayment(groupId, clientId, month, amount, false)
+    sb().from('trainer_groups').select('group_instance_id').eq('id',groupId).single()
+      .then(({data:tg})=>DB.setGroupPayment(groupId, clientId, month, amount, false, null, null, tg?.group_instance_id||null))
       .then(()=>renderGroupDetail(groupId))
       .catch(()=>toast('Ошибка','error'));
   }
@@ -3774,7 +3775,11 @@ async function doSetGroupPayment(groupId, clientId, month, paid) {
   const subEnd   = document.getElementById('gp-sub-end')?.value||null;
   document.querySelector('.modal-overlay')?.remove();
   try {
-    await DB.setGroupPayment(groupId, clientId, month, amount, paid, subStart, subEnd);
+    // Берём instance_id для этой группы
+    const {data:tg} = await sb().from('trainer_groups')
+      .select('group_instance_id').eq('id',groupId).single();
+    const instanceId = tg?.group_instance_id||null;
+    await DB.setGroupPayment(groupId, clientId, month, amount, paid, subStart, subEnd, instanceId);
     toast('Оплата отмечена ✅','success');
     renderGroupDetail(groupId);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
@@ -3843,9 +3848,17 @@ async function doDeleteGroupClient(clientId, groupId) {
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 async function renderGroupAttendance(groupId) {
-  const clients = await DB.getGroupClients(groupId);
+  // Берём instance_id группы
+  const {data:tg} = await sb().from('trainer_groups')
+    .select('group_instance_id').eq('id',groupId).single();
+  const instanceId = tg?.group_instance_id||null;
+  const clients = instanceId
+    ? await DB.getGroupClientsByInstance(instanceId)
+    : await DB.getGroupClients(groupId);
   const today = todayStr();
-  const existing = await DB.getGroupAttendance(groupId, today);
+  const existing = instanceId
+    ? await DB.getGroupAttendanceByInstance(instanceId, today)
+    : await DB.getGroupAttendance(groupId, today);
   const attMap = Object.fromEntries(existing.map(a=>[a.group_client_id, a.attended]));
   const m=el('div','modal-overlay');
   m.innerHTML=`<div class="modal">
@@ -3855,16 +3868,16 @@ async function renderGroupAttendance(groupId) {
       <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)">
         <span>${c.name}</span>
         <input type="checkbox" ${attMap[c.id]?'checked':''} style="width:20px;height:20px"
-          onchange="saveAttendance('${groupId}','${c.id}','${today}',this.checked)">
+          onchange="saveAttendance('${groupId}','${c.id}','${today}',this.checked,'${instanceId||''}')">
       </div>`).join('')}
     <button class="btn btn-primary btn-full" style="margin-top:12px"
       onclick="this.closest('.modal-overlay').remove()">Готово</button>
   </div>`;
   document.body.appendChild(m);
 }
-async function saveAttendance(groupId, clientId, date, attended) {
+async function saveAttendance(groupId, clientId, date, attended, instanceId='') {
   try {
-    await DB.saveGroupAttendance(groupId, clientId, date, attended);
+    await DB.saveGroupAttendance(groupId, clientId, date, attended, instanceId||null);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 async function doArchiveClient(id, fioEnc) {
@@ -6326,9 +6339,12 @@ async function doEditGroupClient(clientId, groupId) {
 
 // Открыть редактор посещаемости за конкретную дату из истории
 async function renderGroupAttendanceEdit(groupId, date) {
+  const {data:tg} = await sb().from('trainer_groups')
+    .select('group_instance_id').eq('id',groupId).single();
+  const instanceId = tg?.group_instance_id||null;
   const [clients, existing] = await Promise.all([
-    DB.getGroupClients(groupId),
-    DB.getGroupAttendance(groupId, date),
+    instanceId ? DB.getGroupClientsByInstance(instanceId) : DB.getGroupClients(groupId),
+    instanceId ? DB.getGroupAttendanceByInstance(instanceId, date) : DB.getGroupAttendance(groupId, date),
   ]);
   const attMap = Object.fromEntries(existing.map(a=>[a.group_client_id, a.attended]));
   const m = el('div','modal-overlay');
@@ -6342,6 +6358,7 @@ async function renderGroupAttendanceEdit(groupId, date) {
       </div>`).join('')}
     </div>
     <input type="hidden" id="att-date" value="${date}">
+    <input type="hidden" id="att-instance" value="${instanceId||''}">
     <button class="btn btn-primary btn-full" style="margin-top:12px"
       onclick="saveAttendanceByDate('${groupId}')">Сохранить</button>
   </div>`;
@@ -6350,30 +6367,40 @@ async function renderGroupAttendanceEdit(groupId, date) {
 
 // Посещаемость за другую дату
 async function renderGroupAttendanceByDate(groupId) {
-  const clients = await DB.getGroupClients(groupId);
+  const {data:tg} = await sb().from('trainer_groups')
+    .select('group_instance_id').eq('id',groupId).single();
+  const instanceId = tg?.group_instance_id||null;
+  const clients = instanceId
+    ? await DB.getGroupClientsByInstance(instanceId)
+    : await DB.getGroupClients(groupId);
   const m = el('div','modal-overlay');
   m.innerHTML=`<div class="modal">
     <div class="modal-header"><h3>Посещаемость за дату</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="form-group"><label>Дата</label>
-      <input type="date" id="att-date" value="${todayStr()}" onchange="loadAttendanceForDate('${groupId}',this.value)"></div>
+      <input type="date" id="att-date" value="${todayStr()}" onchange="loadAttendanceForDate('${groupId}',this.value,'${instanceId||''}')"></div>
     <div id="att-list">
       ${clients.map(c=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)">
         <span>${c.name}</span>
         <input type="checkbox" id="att-${c.id}" style="width:20px;height:20px">
       </div>`).join('')}
     </div>
+    <input type="hidden" id="att-instance" value="${instanceId||''}">
     <button class="btn btn-primary btn-full" style="margin-top:12px"
       onclick="saveAttendanceByDate('${groupId}')">Сохранить</button>
   </div>`;
   document.body.appendChild(m);
-  await loadAttendanceForDate(groupId, todayStr());
+  await loadAttendanceForDate(groupId, todayStr(), instanceId||'');
 }
-async function loadAttendanceForDate(groupId, date) {
+async function loadAttendanceForDate(groupId, date, instanceId='') {
   try {
-    const existing = await DB.getGroupAttendance(groupId, date);
+    const existing = instanceId
+      ? await DB.getGroupAttendanceByInstance(instanceId, date)
+      : await DB.getGroupAttendance(groupId, date);
     const attMap = Object.fromEntries(existing.map(a=>[a.group_client_id, a.attended]));
-    const clients = await DB.getGroupClients(groupId);
+    const clients = instanceId
+      ? await DB.getGroupClientsByInstance(instanceId)
+      : await DB.getGroupClients(groupId);
     clients.forEach(c=>{
       const cb = document.getElementById(`att-${c.id}`);
       if (cb) cb.checked = attMap[c.id]||false;
@@ -6382,11 +6409,14 @@ async function loadAttendanceForDate(groupId, date) {
 }
 async function saveAttendanceByDate(groupId) {
   const date = document.getElementById('att-date')?.value;
+  const instanceId = document.getElementById('att-instance')?.value||null;
   if (!date) return toast('Выберите дату','error');
-  const clients = await DB.getGroupClients(groupId);
+  const clients = instanceId
+    ? await DB.getGroupClientsByInstance(instanceId)
+    : await DB.getGroupClients(groupId);
   try {
     await Promise.all(clients.map(c=>
-      DB.saveGroupAttendance(groupId, c.id, date, document.getElementById(`att-${c.id}`)?.checked||false)
+      DB.saveGroupAttendance(groupId, c.id, date, document.getElementById(`att-${c.id}`)?.checked||false, instanceId||null)
     ));
     document.querySelector('.modal-overlay')?.remove();
     toast('✅ Посещаемость сохранена','success');
