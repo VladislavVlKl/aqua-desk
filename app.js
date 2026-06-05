@@ -4636,6 +4636,9 @@ async function renderGroupMonthReport(groupId, monthStr) {
     // Утверждённые payouts
     const payoutMap = Object.fromEntries(payouts.map(p=>[`${p.group_id}_${p.trainer_id}`, p]));
 
+    const isArtSwimGroup = groupTypeInfo?.name?.toLowerCase().includes('art');
+    const canSeePayroll  = (isAdmin || STATE.profile.role==='senior_trainer') && isArtSwimGroup;
+
     const monthLabel = new Date(monthStr).toLocaleDateString('ru-RU',{month:'long',year:'numeric'});
     const backFn = isAdmin ? `renderAdminApp();adminTab('groups')`
       : STATE.profile.role==='trainer' ? `renderTrainerApp()`
@@ -4646,7 +4649,7 @@ async function renderGroupMonthReport(groupId, monthStr) {
       <div class="app-title">Отчёт группы</div>
       <div style="display:flex;gap:6px">
         <button class="btn btn-sm btn-primary" onclick="doExportChildGroupExcel('${groupId}','${monthStr}')">⬇️ Excel</button>
-        ${(isAdmin||STATE.profile.role==='senior_trainer')?`<button class="btn btn-sm" style="background:rgba(16,185,129,.2);color:#10b981" onclick="doExportGroupPayroll('${groupId}','${monthStr}')">⬇️ ЗП</button>`:''}
+        ${canSeePayroll?`<button class="btn btn-sm" style="background:rgba(16,185,129,.2);color:#10b981" onclick="doExportGroupPayroll('${groupId}','${monthStr}')">⬇️ ЗП</button>`:''}
       </div>
     </div>
     <div class="tab-content"><div class="tab-pad">
