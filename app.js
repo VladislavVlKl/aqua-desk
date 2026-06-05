@@ -4171,6 +4171,9 @@ async function renderGroupsStructure() {
   } catch(e) { document.getElementById('gs-body').innerHTML='<p class="hint">Ошибка</p>'; console.error(e); }
 }
 
+// Глобальный кеш инстансов групп (чтобы не передавать JSON в onclick)
+window._glInstances = {};
+
 async function loadGroupsList(monthStr) {
   const body=document.getElementById('groups-list'); if (!body) return;
   const ms = monthStr || new Date().toISOString().slice(0,7)+'-01';
@@ -4180,48 +4183,59 @@ async function loadGroupsList(monthStr) {
       DB.getAssignedTrainers(gt.id).then(data=>({data}))
     ));
 
-    // Собираем все instanceы: {branch, gt, trainers, schedLabel, reportId, trainersJson}
-    const allInstances = [];
+    // Строим инстансы: группируем по group_instance_id
+    // Если у нескольких тренеров одинаковый instance_id → один инстанс (Art-swim связка)
+    // У каждого обычного тренера свой уникальный instance_id → своя строка
+    const instanceMap = {}; // instanceId → {gt, branch, trainers[]}
+    const instanceOrder = []; // порядок появления
+
     types.forEach((gt,i)=>{
       const assigned = allAssigned[i]?.data||[];
-      const byBranch = {};
       assigned.forEach(a=>{
-        if (!byBranch[a.branch]) byBranch[a.branch]=[];
-        byBranch[a.branch].push(a);
-      });
-      Object.entries(byBranch).forEach(([branch, trainers])=>{
-        allInstances.push({branch, gt, trainers});
+        const key = a.group_instance_id || `solo_${a.id}`;
+        if (!instanceMap[key]) {
+          instanceMap[key] = {gt, branch: a.branch, trainers: [], key};
+          instanceOrder.push(key);
+        }
+        instanceMap[key].trainers.push(a);
       });
     });
 
-    // Группируем по филиалу
-    const byBranchFinal = {};
-    allInstances.forEach(inst=>{
-      if (!byBranchFinal[inst.branch]) byBranchFinal[inst.branch]=[];
-      byBranchFinal[inst.branch].push(inst);
+    // Группируем инстансы по филиалу
+    const byBranch = {};
+    instanceOrder.forEach(key=>{
+      const inst = instanceMap[key];
+      if (!byBranch[inst.branch]) byBranch[inst.branch]=[];
+      byBranch[inst.branch].push(inst);
     });
+
+    // Сохраняем в глобальный кеш (для доступа из onclick без JSON в атрибуте)
+    window._glInstances = instanceMap;
 
     // Порядок филиалов
     const branchOrder = (await cached('branches',()=>DB.getBranches())).map(b=>b.name);
-    const branches = [...new Set([...branchOrder, ...Object.keys(byBranchFinal)])];
+    const branches = [...new Set([...branchOrder, ...Object.keys(byBranch)])];
 
-    const html = branches.filter(b=>byBranchFinal[b]?.length).map(branch=>{
-      const instances = byBranchFinal[branch];
-      const rowsHtml = instances.map(({gt, trainers})=>{
+    const html = branches.filter(b=>byBranch[b]?.length).map(branch=>{
+      const rowsHtml = byBranch[branch].map(inst=>{
+        const {gt, trainers, key} = inst;
         const first = trainers[0];
-        const sched = first.days_of_week?.length
-          ? `${first.days_of_week.join(' ')} ${first.session_time||''}`.trim()
-          : '';
-        const schedLabel = sched
-          ? `<span style="font-size:12px;color:var(--accent);font-weight:500">${sched}</span>`
+
+        // Расписание: берём уникальные слоты всех тренеров инстанса
+        const schedSet = new Set();
+        trainers.forEach(t=>{
+          if (t.days_of_week?.length) {
+            schedSet.add(`${t.days_of_week.join(' ')}${t.session_time?' '+t.session_time:''}`);
+          }
+        });
+        const schedStr = [...schedSet].join(' · ');
+        const schedLabel = schedStr
+          ? `<span style="font-size:12px;color:var(--accent);font-weight:500">${schedStr}</span>`
           : `<span style="font-size:12px;color:var(--hint)">расписание не задано</span>`;
+
         const reportId = first.id;
-        const trainersJson = encodeURIComponent(JSON.stringify(trainers.map(t=>({
-          id:t.id, trainerId:t.trainer_id, fio:t.profiles?.fio||'—', role:t.role||'',
-          days:t.days_of_week||[], time:t.session_time||'',
-          rateType:t.rate_type||'percent', rateValue:t.rate_value||0,
-          leaderName:t.leader_name||'', leaderPct:t.leader_fee_percent||0
-        }))));
+        const safeKey = CSS.escape ? key.replace(/['"]/g,'') : key;
+
         return `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-top:1px solid var(--border)">
           <div style="flex:1;min-width:0">
             <div style="font-size:14px;font-weight:600">${gt.name}</div>
@@ -4231,24 +4245,38 @@ async function loadGroupsList(monthStr) {
             ${gt.type==='children'?`<button class="btn btn-sm btn-primary" style="font-size:12px"
               onclick="renderGroupMonthReport('${reportId}','${ms}')">📊 Отчёт</button>`:''}
             <button class="btn btn-sm" style="font-size:12px;background:rgba(124,58,237,.15);color:#a78bfa"
-              onclick="renderGroupPersonnelModal(${gt.id},'${encodeURIComponent(gt.name)}','${branch}','${gt.type}','${ms}','${trainersJson}')">👥 Персонал</button>
+              onclick="openGroupPersonnel('${key}','${ms}')">👥 Персонал</button>
           </div>
         </div>`;
       }).join('');
+
       return `<div class="staff-card" style="flex-direction:column;align-items:flex-start;gap:0;padding-bottom:4px">
-        <div style="display:flex;justify-content:space-between;align-items:center;width:100%;margin-bottom:4px">
-          <div style="font-weight:700;font-size:15px">📍 ${branch}</div>
-        </div>
+        <div style="font-weight:700;font-size:15px;margin-bottom:4px">📍 ${branch}</div>
         ${rowsHtml}
       </div>`;
     }).join('');
+
     body.innerHTML = html || '<p class="hint">Нет групп</p>';
   } catch(e) { body.innerHTML='<p class="hint">Ошибка</p>'; console.error(e); }
 }
 
-function renderGroupPersonnelModal(groupTypeId, groupNameEnc, branch, groupType, ms, trainersEnc) {
-  const groupName = decodeURIComponent(groupNameEnc);
-  const trainers  = JSON.parse(decodeURIComponent(trainersEnc));
+function openGroupPersonnel(instanceKey, ms) {
+  const inst = window._glInstances?.[instanceKey];
+  if (!inst) return toast('Данные не загружены, обновите страницу','error');
+  renderGroupPersonnelModal(inst.gt.id, inst.gt.name, inst.branch, inst.gt.type, ms, inst.trainers);
+}
+
+function renderGroupPersonnelModal(groupTypeId, groupNameRaw, branch, groupType, ms, trainersRaw) {
+  const groupName = typeof groupNameRaw === 'string' ? groupNameRaw : String(groupNameRaw);
+  // trainersRaw может быть массивом (прямой вызов) или строкой (старый путь)
+  const trainers = Array.isArray(trainersRaw)
+    ? trainersRaw.map(t=>({
+        id: t.id, trainerId: t.trainer_id, fio: t.profiles?.fio||'—', role: t.role||'',
+        days: t.days_of_week||[], time: t.session_time||'',
+        rateType: t.rate_type||'percent', rateValue: t.rate_value||0,
+        leaderName: t.leader_name||'', leaderPct: t.leader_fee_percent||0
+      }))
+    : JSON.parse(decodeURIComponent(trainersRaw));
   const isArtSwim = groupName.toLowerCase().includes('art');
   const isAdult   = groupType === 'adult';
 
