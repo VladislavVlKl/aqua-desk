@@ -667,7 +667,15 @@ function exportBranchChildGroupsExcel(branch, monthStr, groupReports) {
 
     const ws = buildSheet(rows);
     ws['!cols'] = [{wch:4},{wch:20},{wch:7},{wch:10},{wch:6},{wch:12},{wch:14},{wch:12},{wch:10},{wch:28}];
-    const sheetName = groupName.replace(/[\\/:*?"<>|]/g,'').slice(0,31);
+    // Уникальное имя листа: группа + фамилия тренера (Excel ограничение 31 символ)
+    const lastName = (trainerFio||'').split(' ')[0] || '';
+    const rawName  = `${groupName} ${lastName}`.replace(/[\\/:*?"<>|]/g,'').trim();
+    let sheetName  = rawName.slice(0,31);
+    // Если такое имя уже есть — добавляем счётчик
+    let counter = 2;
+    while (wb.SheetNames.includes(sheetName)) {
+      sheetName = rawName.slice(0,28) + ` ${counter++}`;
+    }
     XLSX.utils.book_append_sheet(wb, ws, sheetName);
   });
 
