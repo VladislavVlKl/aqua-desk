@@ -70,6 +70,13 @@ function el(tag,cls,html) {
   return e;
 }
 function fmt(n)     { return Number(n).toLocaleString('ru-RU'); }
+function levenshtein(a, b) {
+  const m=a.length, n=b.length;
+  const dp=Array.from({length:m+1},(_,i)=>Array.from({length:n+1},(_,j)=>i===0?j:j===0?i:0));
+  for(let i=1;i<=m;i++) for(let j=1;j<=n;j++)
+    dp[i][j]=a[i-1]===b[j-1]?dp[i-1][j-1]:1+Math.min(dp[i-1][j],dp[i][j-1],dp[i-1][j-1]);
+  return dp[m][n];
+}
 function fmtDate(d) { return new Date(d).toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit',year:'2-digit'}); }
 function fmtTime(d) { return new Date(d).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'}); }
 function fmtDT(d)   { return `${fmtDate(d)} ${fmtTime(d)}`; }
@@ -2821,28 +2828,39 @@ async function loadSeniorGroupsList() {
   try {
     const groups = await DB.getTrainerGroups(STATE.profile.id);
     if (!groups.length) { body.innerHTML='<p class="hint">Нет назначенных групп</p>'; return; }
-    body.innerHTML = groups.map(g=>`
-      <div class="staff-card" style="flex-direction:column;align-items:flex-start;gap:8px">
+    const canEdit = ['admin','senior_trainer'].includes(STATE.profile.role);
+    body.innerHTML = groups.map(g=>{
+      const roleDot = g.role==='суша'
+        ? '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#eab308;margin-right:4px;vertical-align:middle"></span>'
+        : g.role==='вода'
+        ? '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#3b82f6;margin-right:4px;vertical-align:middle"></span>'
+        : g.role==='суша+вода'
+        ? '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:linear-gradient(90deg,#eab308 50%,#3b82f6 50%);margin-right:4px;vertical-align:middle"></span>'
+        : '';
+      const schedLabel = g.days_of_week?.length
+        ? `<span style="font-size:11px;background:rgba(124,58,237,.15);color:#a78bfa;padding:2px 8px;border-radius:6px;margin-top:4px;display:inline-block">
+            ${g.days_of_week.join('/')}${g.session_time?' '+g.session_time:''}</span>`
+        : `<span style="font-size:11px;color:var(--hint);margin-top:4px;display:inline-block">⚠️ Расписание не задано</span>`;
+      return `<div class="staff-card" style="flex-direction:column;align-items:flex-start;gap:8px">
         <div style="display:flex;justify-content:space-between;width:100%">
           <div>
-            <div class="staff-fio">
-              ${g.role==='суша'?'<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#eab308;margin-right:4px;vertical-align:middle"></span>':
-                g.role==='вода'?'<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#3b82f6;margin-right:4px;vertical-align:middle"></span>':
-                g.role==='суша+вода'?'<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:linear-gradient(90deg,#eab308 50%,#3b82f6 50%);margin-right:4px;vertical-align:middle"></span>':''}
-              ${g.group_types?.name||'Группа'}${g.role?' ('+g.role+')':''}
-            </div>
+            <div class="staff-fio">${roleDot}${g.group_types?.name||'Группа'}${g.role?' ('+g.role+')':''}</div>
             <div class="staff-meta">${g.branch} · с ${g.subscription_start||'—'}</div>
+            ${schedLabel}
           </div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-start">
             <button class="btn btn-sm btn-primary"
               onclick="${g.group_types?.type==='children'?`renderGroupDetail('${g.id}')`:`renderAdultGroupDetail('${g.id}')`}">Открыть</button>
             ${g.group_types?.type==='children'?`<button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
               onclick="renderGroupMonthReport('${g.id}','${new Date().toISOString().slice(0,7)+'-01'}')">📊 Отчёт</button>`:''}
+            ${canEdit?`<button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
+              onclick="renderGroupScheduleModal('${g.id}','${encodeURIComponent(JSON.stringify(g.days_of_week||[]))}','${g.session_time||''}')">🗓️</button>`:''}
             <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
               onclick="renderGroupSubstitutionModal('${g.id}')">🔄 Замена</button>
           </div>
         </div>
-      </div>`).join('');
+      </div>`;
+    }).join('');
   } catch(e) { body.innerHTML='<p class="hint">Ошибка</p>'; console.error(e); }
 }
 
@@ -2856,9 +2874,11 @@ async function renderGroupDetail(groupId) {
     if (groupInfo?.group_types?.type !== 'children') {
       renderAdultGroupDetail(groupId); return;
     }
+    // Используем instance_id для общего списка детей и платежей
+    const instanceId = groupInfo.group_instance_id;
     const [clients, payments, notes, sessionHistory] = await Promise.all([
-      DB.getGroupClients(groupId),
-      DB.getGroupPayments(groupId, month),
+      instanceId ? DB.getGroupClientsByInstance(instanceId) : DB.getGroupClients(groupId),
+      instanceId ? DB.getGroupPaymentsByInstance(instanceId, month) : DB.getGroupPayments(groupId, month),
       DB.getGroupProgressNotes(groupId, month),
       DB.getGroupSessionHistory(groupId),
     ]);
@@ -3692,7 +3712,32 @@ async function doAddGroupClient(groupId) {
   const price = parseInt(document.getElementById('gc-price')?.value)||0;
   if (!name) return toast('Введите имя','error');
   try {
-    await DB.addGroupClient(groupId, name, age, price, todayStr());
+    // Получаем group_instance_id для этой группы
+    const {data:tg} = await sb().from('trainer_groups')
+      .select('group_instance_id').eq('id',groupId).single();
+    const instanceId = tg?.group_instance_id||null;
+
+    const newClient = await DB.addGroupClient(groupId, name, age, price, todayStr(), instanceId);
+
+    // Проверка дублей по instance
+    if (instanceId && newClient) {
+      const existing = await DB.getGroupClientsByInstance(instanceId);
+      const others = existing.filter(c=>c.id!==newClient.id);
+      const nameLower = name.toLowerCase();
+      for (const other of others) {
+        const dist = levenshtein(nameLower, other.name.toLowerCase());
+        if (dist > 0 && dist <= 2) {
+          // Создаём флаг потенциального дубля
+          await sb().from('group_client_duplicate_flags').insert({
+            group_instance_id: instanceId,
+            client_id_1: newClient.id,
+            client_id_2: other.id,
+            status: 'pending'
+          });
+        }
+      }
+    }
+
     document.querySelector('.modal-overlay')?.remove();
     toast('Ребёнок добавлен ✅','success');
     renderGroupDetail(groupId);
@@ -4142,6 +4187,10 @@ async function loadGroupsList(monthStr) {
             <div style="display:flex;gap:4px;flex-wrap:wrap">
               ${gt.type==='children'?`<button class="btn btn-sm btn-primary" style="font-size:11px"
                 onclick="renderGroupMonthReport('${a.id}','${ms}')">📊 Отчёт</button>`:''}
+              <button class="btn btn-sm" style="font-size:11px;background:var(--card);border:1px solid var(--border)"
+                onclick="renderGroupScheduleModal('${a.id}','${encodeURIComponent(JSON.stringify(a.days_of_week||[]))}','${a.session_time||''}')">🗓️</button>
+              ${gt.name?.toLowerCase().includes('art')?`<button class="btn btn-sm" style="font-size:11px;background:rgba(124,58,237,.15);color:#a78bfa"
+                onclick="renderLinkGroupInstanceModal('${a.id}')">🔗 Связать</button>`:''}
               <button class="btn btn-sm" style="font-size:11px;background:rgba(16,185,129,.15);color:#059669"
                 onclick="renderAddSecondTrainerModal(${gt.id},'${encodeURIComponent(gt.name)}','${a.branch}','${gt.type}')">+ 2й тренер</button>
               <button class="btn btn-sm" style="background:rgba(239,68,68,.15);color:#ef4444"
@@ -4369,6 +4418,11 @@ async function renderGroupMonthReport(groupId, monthStr) {
     // Итого оплат
     const totalPaid = payments.filter(p=>p.paid).reduce((s,p)=>s+Number(p.amount||0),0);
 
+    // Флаги потенциальных дублей (только для координатора/старшего)
+    const instanceId = trainers[0]?.group_instance_id||null;
+    const dupFlags = (isAdmin||STATE.profile.role==='senior_trainer') && instanceId
+      ? await DB.getDuplicateFlags(instanceId) : [];
+
     // Утверждённые payouts
     const payoutMap = Object.fromEntries(payouts.map(p=>[`${p.group_id}_${p.trainer_id}`, p]));
 
@@ -4398,6 +4452,24 @@ async function renderGroupMonthReport(groupId, monthStr) {
         <div class="summary-card"><div class="s-val">${totalSessions}</div><div class="s-lbl">Занятий</div></div>
         <div class="summary-card accent"><div class="s-val">${fmt(totalPaid)}</div><div class="s-lbl">Сумма оплат</div></div>
       </div>
+
+      <!-- Потенциальные дубли имён -->
+      ${dupFlags.length?`<div class="warn-banner" style="background:rgba(245,158,11,.1);border-color:rgba(245,158,11,.4);margin-bottom:16px">
+        <div style="font-weight:600;margin-bottom:8px">⚠️ Возможные дубли имён (${dupFlags.length})</div>
+        ${dupFlags.map(f=>`<div style="padding:8px 0;border-top:1px solid rgba(245,158,11,.2)">
+          <div style="font-size:13px;margin-bottom:6px">
+            <b>${f.c1?.name||'?'}</b> и <b>${f.c2?.name||'?'}</b> — один ребёнок?
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-sm" style="background:rgba(239,68,68,.15);color:#ef4444"
+              onclick="resolveGroupDuplicate('${f.id}','merged','${groupId}','${monthStr}')">
+              Да — объединить</button>
+            <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
+              onclick="resolveGroupDuplicate('${f.id}','confirmed_different','${groupId}','${monthStr}')">
+              Нет — разные дети</button>
+          </div>
+        </div>`).join('')}
+      </div>`:''}
 
       <!-- Таблица детей -->
       <h4 style="margin-bottom:8px">Посещаемость и оплаты</h4>
@@ -5889,6 +5961,105 @@ async function renderInAppNotifications() {
 }
 
 // ── ЗАМЕНА В ГРУППАХ ──────────────────────────────────────────────────────────
+
+// ── РАСПИСАНИЕ ГРУППЫ (дни/время) ────────────────────────────────────────────
+async function resolveGroupDuplicate(flagId, status, groupId, monthStr) {
+  try {
+    await DB.resolveDuplicateFlag(flagId, status);
+    if (status === 'merged') toast('Дубль помечен — удалите лишнего ребёнка вручную','success');
+    else toast('Подтверждено: разные дети ✅','success');
+    renderGroupMonthReport(groupId, monthStr);
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+
+function renderGroupScheduleModal(groupId, daysEnc, time) {
+  const currentDays = JSON.parse(decodeURIComponent(daysEnc)||'[]');
+  const DAYS = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>Расписание группы</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="form-group"><label>Дни занятий</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
+        ${DAYS.map(d=>`<label style="display:flex;align-items:center;gap:4px;cursor:pointer">
+          <input type="checkbox" class="sched-day" value="${d}" ${currentDays.includes(d)?'checked':''} style="width:18px;height:18px">
+          <span style="font-size:14px">${d}</span>
+        </label>`).join('')}
+      </div>
+    </div>
+    <div class="form-group"><label>Время начала</label>
+      <input type="time" id="sched-time" value="${time||''}"
+        style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text);font-size:14px;width:100%;box-sizing:border-box">
+    </div>
+    <button class="btn btn-primary btn-full" onclick="doSaveGroupSchedule('${groupId}')">Сохранить</button>
+  </div>`;
+  document.body.appendChild(m);
+}
+async function doSaveGroupSchedule(groupId) {
+  const days = [...document.querySelectorAll('.sched-day:checked')].map(cb=>cb.value);
+  const time = document.getElementById('sched-time')?.value||null;
+  if (!days.length) return toast('Выберите хотя бы один день','error');
+  try {
+    await DB.updateTrainerGroupSchedule(groupId, days, time);
+    document.querySelector('.modal-overlay')?.remove();
+    toast('Расписание сохранено ✅','success');
+    loadSeniorGroupsList();
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+
+// ── СВЯЗАТЬ ТРЕНЕРОВ В ОДИН INSTANCE (Арт-свим) ──────────────────────────────
+async function renderLinkGroupInstanceModal(groupId) {
+  // Ищем все группы того же типа и филиала с разными instance
+  const {data:thisGroup} = await sb().from('trainer_groups')
+    .select('group_type_id,branch,group_instance_id,group_types(name)')
+    .eq('id',groupId).single();
+  if (!thisGroup) return toast('Ошибка','error');
+
+  const {data:candidates} = await sb().from('trainer_groups')
+    .select('id,group_instance_id,days_of_week,session_time,profiles(fio)')
+    .eq('group_type_id', thisGroup.group_type_id)
+    .eq('branch', thisGroup.branch)
+    .is('subscription_end',null)
+    .neq('id', groupId)
+    .neq('group_instance_id', thisGroup.group_instance_id);
+
+  const groups = [];
+  const seen = new Set();
+  (candidates||[]).forEach(c=>{
+    if (!seen.has(c.group_instance_id)) {
+      seen.add(c.group_instance_id);
+      const days = c.days_of_week?.join('/')|| 'без расписания';
+      const t = c.session_time||'';
+      groups.push({instance_id: c.group_instance_id, label: `${days}${t?' '+t:''}`});
+    }
+  });
+
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>Связать с группой</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <p class="hint" style="margin-bottom:12px">Выберите существующую группу ${thisGroup.group_types?.name||''} в ${thisGroup.branch}, к которой относится этот тренер. Они будут делить общий список детей и баланс.</p>
+    ${!groups.length
+      ? '<p class="hint">Других групп этого типа в этом филиале нет. Сначала задайте расписание каждой группе.</p>'
+      : groups.map(g=>`
+        <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);margin-bottom:8px;text-align:left;padding:12px"
+          onclick="doLinkGroupInstance('${groupId}','${g.instance_id}')">
+          <div style="font-weight:600">${g.label}</div>
+          <div style="font-size:12px;color:var(--hint)">instance: ${g.instance_id.slice(0,8)}...</div>
+        </button>`).join('')}
+    <button class="btn btn-full" style="margin-top:8px;background:rgba(239,68,68,.1);color:#ef4444"
+      onclick="this.closest('.modal-overlay').remove()">Отмена</button>
+  </div>`;
+  document.body.appendChild(m);
+}
+async function doLinkGroupInstance(groupId, newInstanceId) {
+  try {
+    await DB.linkTrainerGroupInstance(groupId, newInstanceId);
+    document.querySelector('.modal-overlay')?.remove();
+    toast('Связано ✅','success');
+    loadSeniorGroupsList();
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
 
 async function renderGroupSubstitutionModal(groupId) {
   try {

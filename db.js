@@ -365,9 +365,55 @@ async getAssignedTrainers(groupTypeId) {
     const {data,error} = await sb().from('trainer_groups')
       .insert({trainer_id:trainerId, group_type_id:groupTypeId, branch,
                subscription_start:startDate, rate_type:rateType,
-               rate_value:rateValue, role})
+               rate_value:rateValue, role,
+               group_instance_id: crypto.randomUUID()})
       .select('*, group_types(*)').single();
     if (error) throw error; return data;
+  },
+  async updateTrainerGroupSchedule(id, daysOfWeek, sessionTime) {
+    const {error} = await sb().from('trainer_groups')
+      .update({days_of_week: daysOfWeek, session_time: sessionTime}).eq('id',id);
+    if (error) throw error;
+  },
+  async linkTrainerGroupInstance(id, groupInstanceId) {
+    const {error} = await sb().from('trainer_groups')
+      .update({group_instance_id: groupInstanceId}).eq('id',id);
+    if (error) throw error;
+  },
+  async getGroupInstanceMembers(groupInstanceId) {
+    const {data,error} = await sb().from('trainer_groups')
+      .select('*, profiles(fio), group_types(name,type)')
+      .eq('group_instance_id', groupInstanceId)
+      .is('subscription_end',null);
+    if (error) throw error; return data||[];
+  },
+  // Клиенты по instance (общий список)
+  async getGroupClientsByInstance(groupInstanceId) {
+    const {data,error} = await sb().from('group_clients')
+      .select('*').eq('group_instance_id', groupInstanceId)
+      .eq('is_active',true).order('name');
+    if (error) throw error; return data||[];
+  },
+  async getGroupPaymentsByInstance(groupInstanceId, month) {
+    const {data,error} = await sb().from('group_payments')
+      .select('*').eq('group_instance_id', groupInstanceId).eq('month',month);
+    if (error) throw error; return data||[];
+  },
+  async getGroupAttendanceByInstance(groupInstanceId, date) {
+    const {data,error} = await sb().from('group_attendance')
+      .select('*').eq('group_instance_id', groupInstanceId).eq('session_date',date);
+    if (error) throw error; return data||[];
+  },
+  async getDuplicateFlags(groupInstanceId) {
+    const {data,error} = await sb().from('group_client_duplicate_flags')
+      .select('*, c1:group_clients!client_id_1(name,age), c2:group_clients!client_id_2(name,age)')
+      .eq('group_instance_id', groupInstanceId).eq('status','pending');
+    if (error) throw error; return data||[];
+  },
+  async resolveDuplicateFlag(id, status) {
+    const {error} = await sb().from('group_client_duplicate_flags')
+      .update({status}).eq('id',id);
+    if (error) throw error;
   },
 async unassignTrainerGroup(id) {
     const {error} = await sb().from('trainer_groups')
@@ -381,10 +427,11 @@ async unassignTrainerGroup(id) {
       .select('*').eq('group_id',groupId).eq('is_active',true).order('name');
     if (error) throw error; return data||[];
   },
-  async addGroupClient(groupId, name, age, monthlyPrice, startDate) {
+  async addGroupClient(groupId, name, age, monthlyPrice, startDate, groupInstanceId=null) {
     const {data,error} = await sb().from('group_clients')
       .insert({group_id:groupId, name, age:age||null,
-               monthly_price:monthlyPrice||0, start_date:startDate})
+               monthly_price:monthlyPrice||0, start_date:startDate,
+               group_instance_id: groupInstanceId})
       .select().single();
     if (error) throw error; return data;
   },
