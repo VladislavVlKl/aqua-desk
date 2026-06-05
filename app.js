@@ -2612,6 +2612,7 @@ async function renderSeniorApp() {
     <button class="nav-btn" onclick="seniorTab('clients')"><span>👥</span>Клиенты</button>
     <button class="nav-btn" onclick="seniorTab('today')"><span>✅</span>Сегодня</button>
     <button class="nav-btn" onclick="seniorTab('report')"><span>📊</span>Отчёт</button>
+    <button class="nav-btn" onclick="seniorTab('branch')"><span>🏢</span>Филиал</button>
     <button class="nav-btn" onclick="seniorTab('groups')"><span>🏊</span>Группы</button>
     <button class="nav-btn" onclick="seniorTab('more')"><span>⋯</span>Ещё</button>
   </nav>`);
@@ -2654,7 +2655,7 @@ async function renderSeniorAnalytics() {
 }
 
 function seniorTab(tab) {
-  const tabs=['home','clients','today','report','groups','more'];
+  const tabs=['home','clients','today','report','branch','groups','more'];
   $$('.nav-btn').forEach((b,i)=>b.classList.toggle('active',tabs[i]===tab));
   if (tab==='home')     renderHomeTab();
   if (tab==='clients')  renderClientsTab();
