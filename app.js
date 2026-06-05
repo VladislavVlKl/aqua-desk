@@ -4328,8 +4328,6 @@ function renderGroupPersonnelModal(groupTypeId, groupNameRaw, branch, groupType,
         <div style="display:flex;gap:5px;margin-left:8px;flex-shrink:0">
           <button class="btn btn-sm" style="font-size:11px;background:var(--card);border:1px solid var(--border)"
             onclick="document.querySelector('.modal-overlay').remove();renderGroupScheduleModal('${t.id}','${encodeURIComponent(JSON.stringify(t.days))}','${t.time}')">🗓️</button>
-          ${isArtSwim?`<button class="btn btn-sm" style="font-size:11px;background:rgba(124,58,237,.15);color:#a78bfa"
-            onclick="document.querySelector('.modal-overlay').remove();renderLinkGroupInstanceModal('${t.id}')">🔗</button>`:''}
           <button class="btn btn-sm" style="background:rgba(239,68,68,.15);color:#ef4444;font-size:11px"
             onclick="document.querySelector('.modal-overlay').remove();doUnassignGroup(${t.id})">Откр.</button>
         </div>
@@ -4359,7 +4357,7 @@ function renderGroupPersonnelModal(groupTypeId, groupNameRaw, branch, groupType,
     ${trainersHtml}
     ${leaderHtml}
     <button class="btn btn-primary btn-full" style="margin-top:14px"
-      onclick="this.closest('.modal-overlay').remove();renderAddSecondTrainerModal(${groupTypeId},'${encodeURIComponent(groupName)}','${branch}','${groupType}')">+ 2й тренер</button>
+      onclick="this.closest('.modal-overlay').remove();renderAddSecondTrainerModal(${groupTypeId},'${encodeURIComponent(groupName)}','${branch}','${groupType}','${trainers[0]?.id||''}')">+ 2й тренер</button>
   </div>`;
   document.body.appendChild(m);
 }
@@ -4430,10 +4428,18 @@ async function doAddGroupType() {
     document.querySelector('.modal-overlay')?.remove(); toast('✅','success'); loadGroupsList();
   } catch(e) { toast('Ошибка','error'); }
 }
-async function renderAddSecondTrainerModal(groupTypeId, groupNameEnc, branch, groupType) {
+async function renderAddSecondTrainerModal(groupTypeId, groupNameEnc, branch, groupType, existingTgId) {
   const groupName = decodeURIComponent(groupNameEnc);
   const isAdult   = groupType === 'adult';
   const isArtSwim = groupName.toLowerCase().includes('art');
+  // Получаем group_instance_id существующего тренера для автоматической связки
+  let existingInstanceId = null;
+  if (existingTgId) {
+    try {
+      const {data} = await sb().from('trainer_groups').select('group_instance_id').eq('id', existingTgId).single();
+      existingInstanceId = data?.group_instance_id || null;
+    } catch(e) {}
+  }
   try {
     const [trainers, seniors] = await Promise.all([
       DB.getProfilesByRole('trainer'),
@@ -4460,6 +4466,7 @@ async function renderAddSecondTrainerModal(groupTypeId, groupNameEnc, branch, gr
         ✅ Взрослая группа: ставка по явке</div>`:`
       <div class="form-group"><label>Ставка за занятие (сум)</label>
         <input id="st2-rate" type="number" value="75000" min="0" placeholder="75000"></div>`}
+      <input type="hidden" id="st2-instance-id" value="${existingInstanceId||''}">
       <button class="btn btn-primary btn-full" onclick="doAddSecondTrainer(${groupTypeId},'${branch}','${groupType}')">Добавить</button>
     </div>`;
     document.body.appendChild(m);
@@ -4477,14 +4484,15 @@ function onSt2RateTypeChange(sel) {
   }
 }
 async function doAddSecondTrainer(groupTypeId, branch, groupType) {
-  const trainerId = parseInt(document.getElementById('st2-trainer')?.value);
-  const role      = document.getElementById('st2-role')?.value||null;
-  const isAdult   = groupType === 'adult';
-  const rateType  = isAdult ? 'headcount' : 'flat';
-  const rateValue = isAdult ? 0 : (parseFloat(document.getElementById('st2-rate')?.value)||20);
+  const trainerId  = parseInt(document.getElementById('st2-trainer')?.value);
+  const role       = document.getElementById('st2-role')?.value||null;
+  const isAdult    = groupType === 'adult';
+  const rateType   = isAdult ? 'headcount' : 'flat';
+  const rateValue  = isAdult ? 0 : (parseFloat(document.getElementById('st2-rate')?.value)||75000);
+  const instanceId = document.getElementById('st2-instance-id')?.value||null;
   if (!trainerId) return toast('Выберите тренера','error');
   try {
-    await DB.addTrainerGroup(trainerId, groupTypeId, branch, todayStr(), rateType, rateValue, role||null);
+    await DB.addTrainerGroup(trainerId, groupTypeId, branch, todayStr(), rateType, rateValue, role||null, instanceId||null);
     document.querySelector('.modal-overlay')?.remove();
     toast('✅ Второй тренер добавлен','success');
     invalidateCache('groupTypes');

@@ -361,12 +361,12 @@ async getAssignedTrainers(groupTypeId) {
       .is('subscription_end',null).order('subscription_start',{ascending:false});
     if (error) throw error; return data||[];
   },
-  async addTrainerGroup(trainerId, groupTypeId, branch, startDate, rateType='percent', rateValue=40, role=null) {
+  async addTrainerGroup(trainerId, groupTypeId, branch, startDate, rateType='percent', rateValue=40, role=null, groupInstanceId=null) {
     const {data,error} = await sb().from('trainer_groups')
       .insert({trainer_id:trainerId, group_type_id:groupTypeId, branch,
                subscription_start:startDate, rate_type:rateType,
                rate_value:rateValue, role,
-               group_instance_id: crypto.randomUUID()})
+               group_instance_id: groupInstanceId || crypto.randomUUID()})
       .select('*, group_types(*)').single();
     if (error) throw error; return data;
   },
