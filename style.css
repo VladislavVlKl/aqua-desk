@@ -286,7 +286,10 @@ select option{background:#1a1a2e;}
 /* Вставить в конец существующего style.css */
 
 /* Кнопка-иконка в хедере */
-.btn-icon{background:none;border:none;font-size:20px;cursor:pointer;padding:4px;line-height:1;}
+.btn-icon{background:none;border:none;font-size:20px;cursor:pointer;padding:4px;line-height:1;color:var(--text);}
+.back-btn{font-size:22px;font-weight:700;color:var(--text);background:none;border:none;
+  cursor:pointer;padding:4px 8px;line-height:1;opacity:0.85;}
+.back-btn:active{opacity:0.6;}
 
 /* Предупреждение об абонементе */
 .warn-banner{background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.3);

@@ -88,8 +88,12 @@ function localDT(daysOffset=0) {
 function hoursFromDuty(s,e) { return (new Date(e)-new Date(s))/3600000; }
 function canEdit(createdAt)  { return (Date.now()-new Date(createdAt)) < EDIT_WINDOW_MIN*60000; }
 function isValidWorkoutDate(v) {
-  const diff = Date.now()-new Date(v).getTime();
-  return diff>=0 && diff<=MAX_BACKDATE_HOURS*3600000;
+  const workoutDate = new Date(v);
+  const now = new Date();
+  // Разрешаем сегодняшний день целиком (даже если время ещё не наступило)
+  const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+  const limitStart = new Date(Date.now() - MAX_BACKDATE_HOURS * 3600000);
+  return workoutDate <= todayEnd && workoutDate >= limitStart;
 }
 function getBranch(id='sel-branch') {
   return document.getElementById(id)?.value || STATE.profile?.branches?.[0] || '';
@@ -114,6 +118,19 @@ function setupBack(cb) {
   if (!window.Telegram?.WebApp?.BackButton) return;
   cb ? (Telegram.WebApp.BackButton.show(), Telegram.WebApp.BackButton.onClick(cb))
      :  Telegram.WebApp.BackButton.hide();
+}
+// Универсальная кнопка назад — запоминает откуда пришли
+function navPush(fn) { STATE._backFn = fn; }
+function goBack() {
+  if (STATE._backFn) { const f=STATE._backFn; STATE._backFn=null; f(); return; }
+  const role = STATE.profile?.role;
+  if (role==='admin'||role==='ceo') { renderAdminApp(); adminTab('groups'); }
+  else if (role==='senior_trainer') { renderSeniorApp(); seniorTab('groups'); }
+  else { renderTrainerApp(); switchTab('groups'); }
+}
+// Кнопка назад с правильным цветом темы
+function backBtn(label='←') {
+  return `<button class="btn-icon back-btn" onclick="goBack()">${label}</button>`;
 }
 function openSchedule() {
   window.Telegram?.WebApp?.openLink
@@ -1357,18 +1374,20 @@ async function renderTodayTab() {
     const pending=slots.filter(s=>!s.confirmation&&s.slot_type!=='duty').length;
     const todayEvents=events.filter(e=>fmtDate(e.start_time)===fmtDate(new Date()));
 
-    const missedHtml = missedSlots.length ? `
-      <div style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.25);border-radius:12px;padding:12px;margin-bottom:16px">
-        <div style="font-size:13px;font-weight:600;color:#ef4444;margin-bottom:10px">⚠️ Не внесено вчера (${yesterdayStr})</div>
-        ${missedSlots.map(s=>renderTodaySlot(s, yesterdayStr)).join('')}
-      </div>` : '';
+    // Сохраняем пропущенные в глобальной переменной для панели
+    window._missedSlots = missedSlots;
+    window._missedDate  = yesterdayStr;
 
     $('#tab-content').innerHTML=`<div class="tab-pad">
       <div class="section-header">
         <div><h3>Сегодня</h3><p class="hint">${dayName}, ${date}</p></div>
-        ${(pending+missedSlots.length)>0?`<div class="pending-badge">${pending+missedSlots.length} не закрыто</div>`:''}
+        <div style="display:flex;align-items:center;gap:8px">
+          ${pending>0?`<div class="pending-badge">${pending}</div>`:''}
+          <button onclick="renderMissedSlotsPanel()" style="background:${missedSlots.length?'rgba(239,68,68,.15)':'rgba(255,255,255,.07)'};color:${missedSlots.length?'#ef4444':'var(--hint)'};border:1px solid ${missedSlots.length?'rgba(239,68,68,.3)':'var(--border)'};border-radius:10px;padding:4px 10px;font-size:12px;font-weight:600;cursor:pointer">
+            ⚠️ Пропущенные${missedSlots.length?` (${missedSlots.length})`:''}
+          </button>
+        </div>
       </div>
-      ${missedHtml}
       ${todayEvents.map(ev=>`<div class="today-card event-card-mini ${ev.blocks_pool?'event-blocking':''}">
         <span>${EVENT_TYPES[ev.event_type]||'📌'} <b>${ev.title}</b></span>
         <span class="hint">${fmtTime(ev.start_time)}–${fmtTime(ev.end_time)}</span>
@@ -2896,6 +2915,11 @@ async function loadSeniorGroupsList() {
 }
 
 async function renderGroupDetail(groupId) {
+  // Запоминаем откуда пришли для кнопки назад
+  const role = STATE.profile?.role;
+  if (role==='admin'||role==='ceo') navPush(()=>{ renderAdminApp(); adminTab('groups'); });
+  else if (role==='senior_trainer') navPush(()=>{ renderSeniorApp(); seniorTab('groups'); });
+  else navPush(()=>{ renderTrainerApp(); switchTab('groups'); });
   const month = new Date().toISOString().slice(0,7)+'-01';
   loading('Загрузка группы...');
   try {
@@ -2917,7 +2941,7 @@ async function renderGroupDetail(groupId) {
     const noteMap = Object.fromEntries(notes.map(n=>[n.group_client_id, n]));
     const LEVELS = ['Подготовительный','Обучающий','Совершенствование','Спортивный'];
     setScreen(`<div class="app-header">
-      <button class="btn-icon" onclick="STATE.profile.role==='trainer'?renderTrainerApp():renderSeniorApp()">←</button>
+      ${backBtn()}
       <div class="app-title">Группа</div>
       <button class="btn btn-sm" style="font-size:12px" onclick="renderGroupSubstitutionModal('${groupId}')">🔄 Замена</button>
     </div>
@@ -6338,6 +6362,25 @@ async function renderInAppNotifications() {
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 
+function renderMissedSlotsPanel() {
+  const slots = window._missedSlots || [];
+  const date  = window._missedDate  || '';
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal" style="max-height:80vh;display:flex;flex-direction:column">
+    <div class="modal-header" style="flex-shrink:0">
+      <h3>⚠️ Пропущенные</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button>
+    </div>
+    <p class="hint" style="margin-bottom:12px;flex-shrink:0">Не внесено вчера · ${date}</p>
+    <div style="overflow-y:auto;flex:1">
+      ${!slots.length
+        ? '<div class="empty-state" style="padding:30px 0">✅<p>Всё внесено!</p></div>'
+        : slots.map(s=>renderTodaySlot(s, date)).join('')}
+    </div>
+  </div>`;
+  document.body.appendChild(m);
+}
+
 async function renderAdminNotifications() {
   $('#tab-content').innerHTML=`<div class="center-screen"><div class="spinner"></div></div>`;
   try {
@@ -6577,6 +6620,12 @@ async function doApproveSubstitution(id) {
 // ── ВЗРОСЛЫЕ ГРУППЫ — КЛИЕНТЫ ────────────────────────────────────────────────
 
 async function renderAdultGroupDetail(groupId, monthStr) {
+  const role = STATE.profile?.role;
+  if (!STATE._backFn) { // не перезаписываем если уже есть (навигация по месяцам)
+    if (role==='admin'||role==='ceo') navPush(()=>{ renderAdminApp(); adminTab('groups'); });
+    else if (role==='senior_trainer') navPush(()=>{ renderSeniorApp(); seniorTab('groups'); });
+    else navPush(()=>{ renderTrainerApp(); switchTab('groups'); });
+  }
   loading('Загрузка...');
   try {
     const {data:tgInfo} = await sb().from('trainer_groups')
@@ -6605,7 +6654,7 @@ async function renderAdultGroupDetail(groupId, monthStr) {
     ]);
     const monthLabel = new Date(mYear,mMonth-1,1).toLocaleString('ru-RU',{month:'long',year:'numeric'});
     setScreen(`<div class="app-header">
-      <button class="btn-icon" onclick="STATE.profile.role==='trainer'?renderTrainerApp():renderSeniorApp()">←</button>
+      ${backBtn()}
       <div class="app-title">${tgInfo?.group_types?.name||'Группа'}</div>
       <button class="btn btn-sm" style="font-size:12px" onclick="renderGroupSubstitutionModal('${groupId}')">🔄 Замена</button>
     </div>
