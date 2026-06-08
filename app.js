@@ -4733,6 +4733,18 @@ async function renderGroupMonthReport(groupId, monthStr) {
         </div>`).join('')}
       </div>`:''}
 
+      <!-- Сигнал: ходят без оплаты -->
+      ${(()=>{
+        const debtKids = clients.filter(c=>c.is_active && !(payMap[c.id]?.paid) && (attByClient[c.id]||0)>2);
+        if (!debtKids.length || !(isAdmin||STATE.profile.role==='senior_trainer')) return '';
+        return `<div class="warn-banner" style="background:rgba(239,68,68,.08);border-color:rgba(239,68,68,.35);margin-bottom:16px">
+          <div style="font-weight:600;margin-bottom:6px">⚠️ Без оплаты, но ходят больше 2 занятий (${debtKids.length})</div>
+          ${debtKids.map(c=>`<div style="font-size:13px;padding:4px 0;border-top:1px solid rgba(239,68,68,.15)">
+            ${c.name}${c.age?`, ${c.age}л`:''} — <b>${attByClient[c.id]||0} занятий</b>
+          </div>`).join('')}
+        </div>`;
+      })()}
+
       <!-- Таблица детей -->
       <h4 style="margin-bottom:8px">Посещаемость и оплаты</h4>
       <div style="overflow-x:auto">
@@ -4750,11 +4762,15 @@ async function renderGroupMonthReport(groupId, monthStr) {
               const note = noteMap[c.id];
               const att = attByClient[c.id]||0;
               const paid = pay?.paid;
-              return `<tr>
-                <td style="font-weight:500">${c.name}${c.age?`, ${c.age}л`:''}</td>
+              const debtAlert = !paid && att > 2;
+              return `<tr${debtAlert?' style="background:rgba(239,68,68,.06)"':''}>
+                <td style="font-weight:500">
+                  ${debtAlert?'<span title="Ходит без оплаты" style="color:#ef4444;margin-right:4px">⚠️</span>':''}
+                  ${c.name}${c.age?`, ${c.age}л`:''}
+                </td>
                 <td style="color:${paid?'#10b981':'#ef4444'}">${paid?fmt(pay?.amount||0)+' ✓':'—'}</td>
                 <td style="font-size:11px;color:var(--hint)">${pay?.sub_start?fmtDate(pay.sub_start)+(pay.sub_end?' – '+fmtDate(pay.sub_end):''):'—'}</td>
-                <td>${att}/${totalSessions}</td>
+                <td style="color:${debtAlert?'#ef4444':''};font-weight:${debtAlert?'600':''}">${att}/${totalSessions}</td>
                 <td style="font-size:11px;color:var(--hint);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${note?.note||'—'}</td>
               </tr>`;
             }).join('')}
