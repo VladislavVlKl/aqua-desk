@@ -1088,6 +1088,17 @@ async unassignTrainerGroup(id) {
     return { client, subscriptions:subs.data||[], workouts:workouts.data||[] };
   },
 
+  // ─── CLIENT REPORT ───────────────────────────
+  async getClientDataForReport(clientId) {
+    const [subsR, workoutsR] = await Promise.all([
+      sb().from('subscriptions').select('id,start_date,end_date,is_active')
+        .eq('client_id',clientId).order('created_at',{ascending:false}),
+      sb().from('workouts').select('workout_date,is_drop_in,is_debt,debt_confirmed_at')
+        .eq('client_id',clientId).order('workout_date',{ascending:false}),
+    ]);
+    return { subscriptions: subsR.data||[], workouts: workoutsR.data||[] };
+  },
+
   // ─── EVENTS ──────────────────────────────────
   async getUpcomingEvents(branch) {
     const now  = new Date().toISOString();

@@ -2439,7 +2439,8 @@ async function renderClientReportModal(clientId) {
     <div class="center-screen"><div class="spinner"></div></div></div>`;
   document.body.appendChild(m);
   try {
-    const {subscriptions,workouts}=await DB.getClientProfile(clientId,STATE.profile.role,STATE.profile.branches);
+    // Отдельный запрос без лимита — все тренировки клиента
+    const {subscriptions,workouts}=await DB.getClientDataForReport(clientId);
     const validSubs=subscriptions.filter(s=>s.start_date);
     const modal=m.querySelector('.modal');
     if (!validSubs.length) {
@@ -2471,12 +2472,13 @@ function renderSubReport() {
   const body=document.getElementById('report-body');
   if (!sub||!body) return;
 
-  const from=new Date(sub.start_date+'T00:00:00');
-  const to=sub.end_date ? new Date(sub.end_date+'T23:59:59') : new Date();
+  // Сравниваем только даты (YYYY-MM-DD) — без timezone-проблем
+  const fromStr=sub.start_date; // 'YYYY-MM-DD'
+  const toStr=sub.end_date||todayStr();
 
   const subWorkouts=(window._reportWorkouts||[])
-    .filter(w=>{ const d=new Date(w.workout_date); return d>=from&&d<=to; })
-    .sort((a,b)=>new Date(a.workout_date)-new Date(b.workout_date));
+    .filter(w=>{ const d=w.workout_date.slice(0,10); return d>=fromStr&&d<=toStr; })
+    .sort((a,b)=>a.workout_date.localeCompare(b.workout_date));
 
   if (!subWorkouts.length) {
     body.innerHTML='<p class="hint">Нет тренировок в этом периоде</p>'; return;
@@ -2486,9 +2488,11 @@ function renderSubReport() {
   const DAYS=['ВС','ПН','ВТ','СР','ЧТ','ПТ','СБ'];
   const byMonth={};
   for (const w of subWorkouts) {
-    const d=new Date(w.workout_date);
-    const key=`${d.getFullYear()}-${d.getMonth()}`;
-    if (!byMonth[key]) byMonth[key]={label:MONTHS[d.getMonth()],dates:[]};
+    // Берём дату из строки напрямую чтобы избежать UTC-сдвига
+    const [yr,mo,dy]=w.workout_date.slice(0,10).split('-').map(Number);
+    const d=new Date(yr,mo-1,dy); // локальная дата
+    const key=`${yr}-${mo}`;
+    if (!byMonth[key]) byMonth[key]={label:MONTHS[mo-1],dates:[]};
     byMonth[key].dates.push(d);
   }
 
