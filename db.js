@@ -964,8 +964,8 @@ async unassignTrainerGroup(id) {
       await sb().from('subscriptions')
         .update({is_active:false, end_date:startDate, closing_note:'Истёк. Остаток сгорел.'})
         .eq('client_id',clientId).eq('is_active',true);
-      // Обнулить баланс и установить новый
-      await sb().from('clients').update({balance:quantity}).eq('id',clientId);
+      // Обнулить баланс, установить новый, сбросить заморозку
+      await sb().from('clients').update({balance:quantity, freeze_start:null, freeze_end:null}).eq('id',clientId);
       // Создать новый абонемент
       const {data,error} = await sb().from('subscriptions')
         .insert({client_id:clientId,trainer_id:trainerId,
@@ -976,7 +976,7 @@ async unassignTrainerGroup(id) {
       // Взрослый: просто добавить к балансу
       const {data:cl} = await sb().from('clients').select('balance').eq('id',clientId).single();
       const newBal = (cl?.balance||0) + quantity;
-      await sb().from('clients').update({balance:newBal}).eq('id',clientId);
+      await sb().from('clients').update({balance:newBal, freeze_start:null, freeze_end:null}).eq('id',clientId);
       // Если нет активного абонемента — создать
       const {data:subs} = await sb().from('subscriptions')
         .select('id').eq('client_id',clientId).eq('is_active',true).limit(1);

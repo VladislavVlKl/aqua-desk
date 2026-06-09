@@ -364,6 +364,7 @@ async function renderHomeTab() {
   const branches = STATE.profile.branches||[];
   const now      = new Date();
   const expiring = clients.filter(c=>{
+    if (c.is_archived) return false;
     const d=daysUntil(c.subscription_end);
     return d!==null&&d<=SUBSCRIPTION_WARN_DAYS&&d>=0;
   });
@@ -1114,7 +1115,7 @@ async function doAddClient() {
   // Проверка дубля
   try {
     const existing = await DB.getClients(STATE.profile.id);
-    if (existing.find(c=>c.fio.toLowerCase()===fio.toLowerCase())) {
+    if (existing.find(c=>!c.is_archived&&c.fio.toLowerCase()===fio.toLowerCase())) {
       _addingClient=false;
       if (btn) { btn.disabled=false; btn.textContent='Добавить'; }
       return toast(`«${fio}» уже есть в вашем списке`,'error');
