@@ -1723,6 +1723,36 @@ Object.assign(DB, {
     if (error) throw error;
   },
 
+  // ─── ЗАПРОСЫ НА УДАЛЕНИЕ ТРЕНИРОВОК ─────────
+  async requestWorkoutDelete(workoutId, trainerId, clientName, workoutDate, branch) {
+    const {error} = await sb().from('workout_delete_requests')
+      .insert({workout_id:workoutId, trainer_id:trainerId, client_name:clientName,
+               workout_date:workoutDate, branch, status:'pending'});
+    if (error) throw error;
+  },
+  async getWorkoutDeleteRequests(branch) {
+    const {data,error} = await sb().from('workout_delete_requests')
+      .select('*, profiles!trainer_id(fio)')
+      .eq('status','pending').eq('branch',branch)
+      .order('created_at',{ascending:false});
+    if (error) throw error; return data||[];
+  },
+  async getAllWorkoutDeleteRequests() {
+    const {data,error} = await sb().from('workout_delete_requests')
+      .select('*, profiles!trainer_id(fio)')
+      .eq('status','pending')
+      .order('created_at',{ascending:false});
+    if (error) throw error; return data||[];
+  },
+  async approveWorkoutDeleteRequest(reqId, workoutId) {
+    await sb().from('workout_delete_requests').update({status:'approved'}).eq('id',reqId);
+    await this.deleteWorkout(workoutId);
+  },
+  async rejectWorkoutDeleteRequest(reqId) {
+    const {error} = await sb().from('workout_delete_requests').update({status:'rejected'}).eq('id',reqId);
+    if (error) throw error;
+  },
+
   // ─── ВЗРОСЛЫЕ ГРУППЫ — КЛИЕНТЫ ───────────────
   async getAdultGroupClients(groupId) {
     const {data,error} = await sb().from('adult_group_clients')

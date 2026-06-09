@@ -1991,8 +1991,11 @@ async function loadTrainerReport(year,month) {
               <button class="btn btn-sm btn-primary" onclick="doConfirmDebt('${w.id}','${w.client_id}')">Подтвердить оплату</button>`:''}
             ${STATE.profile.role==='admin'?`
               <button class="btn btn-sm btn-danger" onclick="doAdminDeleteWorkout('${w.id}')">Удалить</button>`:
-              (!w.is_debt&&(!w.session_notes?.accomplishments||canEdit(w.created_at))?`
-              <button class="btn btn-sm btn-danger" onclick="doDeleteWorkout('${w.id}')">Удалить</button>`:'')}
+              (!w.is_debt?(canEdit(w.created_at)?`
+              <button class="btn btn-sm btn-danger" onclick="doDeleteWorkout('${w.id}')">Удалить</button>`:
+              `<button class="btn btn-sm" style="background:rgba(239,68,68,.1);color:#ef4444;border:1px solid rgba(239,68,68,.25)"
+                onclick="doRequestWorkoutDelete('${w.id}','${w.workout_date}','${encodeURIComponent(w.clients?.fio||'')}','${w.branch||''}')">Запрос на удаление</button>`
+              ):'')}
             ${isToday(w.workout_date)&&!w.is_debt?`
               <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
                 onclick="renderEditWorkoutModal('${w.id}','${w.client_id}','${w.workout_date}',${w.category_at_moment})">✏️</button>`:''}
@@ -2057,6 +2060,18 @@ async function doAdminDeleteWorkout(id) {
   if(!confirm('Удалить запись? (Без ограничений по времени)'))return;
   try{await DB.deleteWorkout(id);toast('Удалено','success');renderReportTab();}
   catch(e){console.error(e);toast('Ошибка','error');}
+}
+async function doRequestWorkoutDelete(workoutId, workoutDate, clientNameEnc, branch) {
+  const clientName = decodeURIComponent(clientNameEnc);
+  const dateStr = fmtDate(workoutDate);
+  if (!confirm(`Запросить удаление ПТ?\n${clientName} · ${dateStr}\n\nЗапрос уйдёт координатору на подтверждение.`)) return;
+  if (_pending.has('wdr_'+workoutId)) return;
+  _pending.add('wdr_'+workoutId);
+  try {
+    await DB.requestWorkoutDelete(workoutId, STATE.profile.id, clientName, workoutDate, branch);
+    toast('Запрос отправлен координатору','success');
+  } catch(e) { console.error(e); toast('Ошибка','error'); }
+  finally { _pending.delete('wdr_'+workoutId); }
 }
 
 async function renderEditWorkoutModal(workoutId, clientId, workoutDate, category) {
@@ -4800,7 +4815,8 @@ async function doAssignGroup() {
 }
 
 async function doUnassignGroup(id) {
-  if (!confirm('Открепить тренера от группы?')) return;
+  if (!confirm('Открепить тренера от группы?\n\nГруппа исчезнет из его списка. Это действие нельзя отменить автоматически.')) return;
+  if (!confirm('Подтвердите ещё раз: открепить тренера?')) return;
   try {
     await DB.unassignTrainerGroup(id);
     toast('Откреплено','success');
@@ -5496,6 +5512,20 @@ async function renderAdminControl() {
         }).join('')}
       </div>`);
     }
+    // Запросы на удаление ПТ
+    const workoutDelReqs = await DB.getAllWorkoutDeleteRequests().catch(()=>[]);
+    if (workoutDelReqs.length) sections.unshift(`<div class="control-section">
+      <div class="control-title danger">🗑 Запросы на удаление ПТ (${workoutDelReqs.length})</div>
+      ${workoutDelReqs.map(r=>`<div class="control-item">
+        <div class="ci-main">${r.client_name||'—'} · ${fmtDate(r.workout_date)}</div>
+        <div class="ci-sub">Тренер: ${r.profiles?.fio||'?'} · ${r.branch||''}</div>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <button class="btn btn-sm btn-danger" onclick="doApproveWorkoutDelete('${r.id}','${r.workout_id}')">Удалить</button>
+          <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
+            onclick="doRejectWorkoutDelete('${r.id}')">Отклонить</button>
+        </div>
+      </div>`).join('')}
+    </div>`);
     // Add delete requests
     const deleteReqs = await DB.getAllDeleteRequests().catch(()=>[]);
     if (deleteReqs.length) sections.unshift(`<div class="control-section">
@@ -6401,6 +6431,46 @@ async function doDeleteClientCheck(clientId, fioEnc, createdAt) {
 }
 
 // Для координатора — список запросов на удаление в Контроле
+async function renderWorkoutDeleteRequests() {
+  try {
+    const reqs = await DB.getAllWorkoutDeleteRequests();
+    if (!reqs.length) return '';
+    return `<div class="control-section">
+      <div class="control-title danger">🗑 Запросы на удаление ПТ (${reqs.length})</div>
+      ${reqs.map(r=>`<div class="control-item">
+        <div class="ci-main">${r.client_name||'—'} · ${fmtDate(r.workout_date)}</div>
+        <div class="ci-sub">Тренер: ${r.profiles?.fio||'?'} · ${r.branch||''}</div>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <button class="btn btn-sm btn-danger" onclick="doApproveWorkoutDelete('${r.id}','${r.workout_id}')">Удалить</button>
+          <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
+            onclick="doRejectWorkoutDelete('${r.id}')">Отклонить</button>
+        </div>
+      </div>`).join('')}
+    </div>`;
+  } catch(e) { return ''; }
+}
+async function doApproveWorkoutDelete(reqId, workoutId) {
+  if (_pending.has('wda_'+reqId)) return;
+  if (!confirm('Удалить тренировку окончательно?')) return;
+  _pending.add('wda_'+reqId);
+  try {
+    await DB.approveWorkoutDeleteRequest(reqId, workoutId);
+    toast('Тренировка удалена','success');
+    adminTab('control');
+  } catch(e) { console.error(e); toast('Ошибка','error'); }
+  finally { _pending.delete('wda_'+reqId); }
+}
+async function doRejectWorkoutDelete(reqId) {
+  if (_pending.has('wdr2_'+reqId)) return;
+  _pending.add('wdr2_'+reqId);
+  try {
+    await DB.rejectWorkoutDeleteRequest(reqId);
+    toast('Запрос отклонён','success');
+    adminTab('control');
+  } catch(e) { console.error(e); toast('Ошибка','error'); }
+  finally { _pending.delete('wdr2_'+reqId); }
+}
+
 async function renderDeleteRequests() {
   try {
     const reqs = await DB.getAllDeleteRequests();
