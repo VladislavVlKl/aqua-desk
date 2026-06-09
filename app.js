@@ -353,6 +353,16 @@ async function checkNoteBadge() {
     if (badge) {
       badge.style.display = pending > 0 ? '' : 'none';
       badge.textContent   = pending > 0 ? `📝 ${pending}` : '📝';
+      if (pending > 0) {
+        window._overdueMap = overdueMap;
+        badge.onclick = () => {
+          if (window._clientsList?.length) {
+            renderOverdueNotesModal(window._overdueMap, window._clientsList);
+          } else {
+            switchTab('clients');
+          }
+        };
+      }
     }
   } catch(e) { /* тихо */ }
 }
@@ -1378,7 +1388,7 @@ async function renderAddSlotModal() {
   const branches=STATE.profile.branches||[];
   const clients=await DB.getClients(STATE.profile.id);
   const groupList=await DB.getTrainerGroups(STATE.profile.id);
-  window._slotClients=clients; window._slotGroupList=groupList;
+  window._slotClients=clients.filter(c=>!c.is_archived); window._slotGroupList=groupList;
 
   // Даты текущей недели для разового слота
   const {mon} = getWeekBounds(_schedWeekOffset);
@@ -1718,7 +1728,7 @@ async function doLogDuty() {
 
 // ── ПОЗДНИЕ ТРЕНИРОВКИ (>48ч) ─────────────────
 async function renderLateRequestModal() {
-  const clients = await DB.getClients(STATE.profile.id);
+  const clients = (await DB.getClients(STATE.profile.id)).filter(c=>!c.is_archived);
   if (!clients.length) return toast('Нет клиентов','error');
   const m = el('div','modal-overlay');
   m.innerHTML=`<div class="modal">
@@ -2176,7 +2186,7 @@ async function doRequestWorkoutDelete(workoutId, workoutDate, clientNameEnc, bra
 }
 
 async function renderEditWorkoutModal(workoutId, clientId, workoutDate, category) {
-  const clients = await DB.getClients(STATE.profile.id);
+  const clients = (await DB.getClients(STATE.profile.id)).filter(c=>!c.is_archived);
   const dateLocal = new Date(workoutDate).toISOString().slice(0,16);
   const m = el('div','modal-overlay');
   m.innerHTML=`<div class="modal">
