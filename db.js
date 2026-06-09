@@ -540,12 +540,16 @@ async unassignTrainerGroup(id) {
     if (error) throw error; return data||[];
   },
   async setGroupPayment(groupId, groupClientId, month, amount, paid, subStart=null, subEnd=null, groupInstanceId=null) {
+    // Сохраняем оригинальную дату оплаты если уже была оплачена
+    const {data:existing} = await sb().from('group_payments')
+      .select('paid_at').eq('group_client_id',groupClientId).eq('month',month).maybeSingle();
+    const paid_at = paid ? (existing?.paid_at || new Date().toISOString()) : null;
     const {error} = await sb().from('group_payments')
       .upsert({group_id:groupId, group_client_id:groupClientId,
                month, amount, paid,
                sub_start: subStart||null,
                sub_end:   subEnd||null,
-               paid_at: paid ? new Date().toISOString() : null,
+               paid_at,
                ...(groupInstanceId ? {group_instance_id:groupInstanceId} : {})},
               {onConflict:'group_client_id,month'});
     if (error) throw error;
@@ -596,6 +600,16 @@ async unassignTrainerGroup(id) {
 
     const instanceId = tgRow?.group_instance_id;
 
+    // Если есть instance — заранее грузим список тренеров для зависимых запросов
+    let instanceTgRows = [];
+    if (instanceId) {
+      const {data:tgList} = await sb().from('trainer_groups')
+        .select('id,trainer_id').eq('group_instance_id',instanceId).is('subscription_end',null);
+      instanceTgRows = tgList||[];
+    }
+    const instanceGroupIds    = instanceTgRows.map(t=>t.id);
+    const instanceTrainerIds  = instanceTgRows.map(t=>t.trainer_id);
+
     // Загружаем всё параллельно
     const [clients, payments, notes, attendance, payouts, instanceTrainers, instanceSessions] = await Promise.all([
       // Клиенты и оплаты — по instance если есть, иначе по groupId
@@ -613,10 +627,7 @@ async unassignTrainerGroup(id) {
             .gte('session_date',month).lt('session_date',nextMonthStr),
       // Все payouts по instance за месяц
       instanceId
-        ? sb().from('group_trainer_payouts').select('*').eq('month',month)
-            .in('group_id', (await sb().from('trainer_groups')
-              .select('id').eq('group_instance_id',instanceId).is('subscription_end',null)
-              .then(r=>(r.data||[]).map(t=>t.id))))
+        ? sb().from('group_trainer_payouts').select('*').eq('month',month).in('group_id',instanceGroupIds)
         : sb().from('group_trainer_payouts').select('*').eq('group_id',groupId).eq('month',month),
       // Все тренеры этого instance
       instanceId
@@ -628,9 +639,7 @@ async unassignTrainerGroup(id) {
       instanceId
         ? sb().from('group_sessions').select('*')
             .gte('session_date',month).lt('session_date',nextMonthStr)
-            .in('trainer_id', (await sb().from('trainer_groups')
-              .select('trainer_id').eq('group_instance_id',instanceId).is('subscription_end',null)
-              .then(r=>(r.data||[]).map(t=>t.trainer_id))))
+            .in('trainer_id',instanceTrainerIds)
         : sb().from('group_sessions').select('*')
             .gte('session_date',month).lt('session_date',nextMonthStr)
             .eq('trainer_id', tgRow?.trainer_id),
