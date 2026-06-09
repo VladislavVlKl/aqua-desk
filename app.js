@@ -829,6 +829,9 @@ function showLogWithNotesModal(overdueNotes, clientId, dates) {
     </div>`).join('');
 
   const newDate = dates[0];
+  const extraDatesHint = dates.length > 1
+    ? `<p class="hint" style="margin-top:10px;margin-bottom:0">💡 Конспекты за ${dates.slice(1).map(fmtDate).join(', ')} — напишите в течение 48 часов</p>`
+    : '';
   const newNoteHtml = `
     <div style="border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:16px">
       <div style="font-weight:600;font-size:13px;margin-bottom:8px">📝 Конспект за ${fmtDate(newDate)} <span class="hint" style="font-weight:400">(можно позже)</span></div>
@@ -847,6 +850,7 @@ function showLogWithNotesModal(overdueNotes, clientId, dates) {
     ${overdueNotes.length>0?'<p class="hint" style="margin-bottom:12px">Заполните все конспекты — они обязательны.</p>':''}
     ${overdueHtml}
     ${newNoteHtml}
+    ${extraDatesHint}
     <button class="btn btn-primary btn-full" id="btn-confirm-log"
       onclick="doConfirmLogWorkout()">✅ Списать</button>
   </div>`;
@@ -1074,8 +1078,7 @@ async function doAddClient() {
   } catch(e) {
     _addingClient=false;
     if (btn) { btn.disabled=false; btn.textContent='Добавить'; }
-    toast('Ошибка при добавлении','error');
-    console.error(e);
+    console.error(e); toast('Ошибка при добавлении','error');
   }
 }
 
@@ -1282,14 +1285,14 @@ async function doSkipSlotDate(slotId, date) {
     await DB.cancelSlotDate(slotId, date);
     toast(`Слот ${date} пропущен`,'success');
     loadScheduleWeek(_schedWeekOffset);
-  } catch(e) { toast('Ошибка','error'); }
+  } catch(e) { console.error(e); toast('Ошибка','error'); }
 }
 
 async function doDeleteSlot(slotId, type, isOneTime) {
   const msg = isOneTime ? 'Удалить разовый слот?' : `Удалить слот (${SLOT_COLORS[type]?.label||type}) навсегда?`;
   if (!confirm(msg)) return;
   try { await DB.deactivateSlot(slotId); toast('Удалено','success'); loadScheduleWeek(_schedWeekOffset); }
-  catch(e) { toast('Ошибка','error'); }
+  catch(e) { console.error(e); toast('Ошибка','error'); }
 }
 
 async function confirmDeleteSlot(id,type) {
@@ -1554,7 +1557,7 @@ async function doConfirmCancel(slotId,date) {
     await DB.upsertConfirmation(slotId,date,{status:'cancelled',cancel_reason:reason||null});
     document.querySelector('.modal-overlay')?.remove();
     toast('Отменено','success'); renderTodayTab();
-  } catch(e) { toast('Ошибка','error'); }
+  } catch(e) { console.error(e); toast('Ошибка','error'); }
 }
 
 // ── ТАБ: ДЕЖУРСТВО (РУЧНОЙ ВВОД) ────────────
@@ -1825,9 +1828,9 @@ function renderEventCard(ev) {
     </div>
   </div>`;
 }
-async function doJoinEvent(id)  { try { await DB.joinEvent(id,STATE.profile.id);  toast('✅ Записаны','success'); renderEventsTab(); } catch(e){toast('Ошибка','error');} }
-async function doLeaveEvent(id) { try { await DB.leaveEvent(id,STATE.profile.id); toast('Отменено','success'); renderEventsTab(); } catch(e){toast('Ошибка','error');} }
-async function doDeleteEvent(id){ if(!confirm('Удалить событие?'))return; try{await DB.deleteEvent(id);toast('Удалено','success');renderEventsTab();}catch(e){toast('Ошибка','error');} }
+async function doJoinEvent(id)  { try { await DB.joinEvent(id,STATE.profile.id);  toast('✅ Записаны','success'); renderEventsTab(); } catch(e){console.error(e);toast('Ошибка','error');} }
+async function doLeaveEvent(id) { try { await DB.leaveEvent(id,STATE.profile.id); toast('Отменено','success'); renderEventsTab(); } catch(e){console.error(e);toast('Ошибка','error');} }
+async function doDeleteEvent(id){ if(!confirm('Удалить событие?'))return; try{await DB.deleteEvent(id);toast('Удалено','success');renderEventsTab();}catch(e){console.error(e);toast('Ошибка','error');} }
 
 function renderCreateEventModal() {
   const branches=STATE.profile.branches||[];
@@ -2043,17 +2046,17 @@ async function loadTrainerReport(year,month) {
 async function doConfirmDebt(wid,cid) {
   if(!confirm('Подтвердить оплату?'))return;
   try{await DB.confirmDebt(wid,cid);toast('✅ Долг закрыт','success');renderReportTab();}
-  catch(e){toast('Ошибка','error');}
+  catch(e){console.error(e);toast('Ошибка','error');}
 }
 async function doDeleteWorkout(id) {
   if(!confirm('Удалить запись?'))return;
   try{await DB.deleteWorkout(id);toast('Удалено','success');renderReportTab();}
-  catch(e){toast('Ошибка','error');}
+  catch(e){console.error(e);toast('Ошибка','error');}
 }
 async function doAdminDeleteWorkout(id) {
   if(!confirm('Удалить запись? (Без ограничений по времени)'))return;
   try{await DB.deleteWorkout(id);toast('Удалено','success');renderReportTab();}
-  catch(e){toast('Ошибка','error');}
+  catch(e){console.error(e);toast('Ошибка','error');}
 }
 
 async function renderEditWorkoutModal(workoutId, clientId, workoutDate, category) {
@@ -2559,12 +2562,12 @@ async function doAddGoal(subId,clientId) {
     await DB.addGoal(subId,clientId,text);
     document.querySelector('.modal-overlay')?.remove();
     toast('✅ Цель добавлена','success'); renderClientProfile(clientId);
-  } catch(e) { toast('Ошибка','error'); }
+  } catch(e) { console.error(e); toast('Ошибка','error'); }
 }
 async function doDeleteGoal(goalId,clientId) {
   if (!confirm('Удалить цель?')) return;
   try { await DB.deleteGoal(goalId); toast('Удалено','success'); renderClientProfile(clientId); }
-  catch(e) { toast('Ошибка','error'); }
+  catch(e) { console.error(e); toast('Ошибка','error'); }
 }
 
 // Модал: начать абонемент
@@ -3788,7 +3791,7 @@ async function doSaveAdj(trainerId,year,month) {
   const penalty=parseInt(document.getElementById('adj-penalty')?.value||0);
   const notes=document.getElementById('adj-notes')?.value.trim()||'';
   try { await DB.upsertAdjustment(trainerId,year,month,bonus,penalty,notes); toast('Сохранено ✅','success'); }
-  catch(e) { toast('Ошибка','error'); }
+  catch(e) { console.error(e); toast('Ошибка','error'); }
 }
 
 // ─ ADMIN: ПЕРСОНАЛ
@@ -3829,7 +3832,7 @@ async function loadStaffList() {
             onclick="doDeleteTrainer(${t.id},'${encodeURIComponent(t.fio)}')">🗑</button>
         </div>
       </div>`).join('');
-  } catch(e) { body.innerHTML='<p class="hint">Ошибка</p>'; }
+  } catch(e) { console.error(e); body.innerHTML='<p class="hint">Ошибка</p>'; }
 }
 async function renderAddTrainerModal() {
   const branches = await cached('branches',()=>DB.getBranches());
@@ -4217,7 +4220,7 @@ async function loadBranchesList() {
           <button class="btn btn-sm btn-danger" onclick="doDeleteBranch(${b.id},'${b.name}')">🗑</button>
         </div>
       </div>`).join('');
-  } catch(e) { body.innerHTML='<p class="hint">Ошибка</p>'; }
+  } catch(e) { console.error(e); body.innerHTML='<p class="hint">Ошибка</p>'; }
 }
 function renderAddBranchModal() {
   const m=el('div','modal-overlay');
@@ -4233,7 +4236,7 @@ async function doAddBranch() {
   const name=document.getElementById('br-name')?.value.trim();
   if (!name) return toast('Введите название','error');
   try { await DB.addBranch(name); invalidateCache('branches'); document.querySelector('.modal-overlay')?.remove(); toast('✅','success'); loadBranchesList(); }
-  catch(e) { toast('Такой уже есть','error'); }
+  catch(e) { console.error(e); toast('Такой уже есть','error'); }
 }
 function renderRenameBranchModal(nameEnc) {
   const name=decodeURIComponent(nameEnc);
@@ -4258,7 +4261,7 @@ async function doRenameBranch(oldEnc) {
 async function doDeleteBranch(id,name) {
   if (!confirm(`Удалить «${name}»?`)) return;
   try { await DB.deleteBranch(id); toast('Удалено','success'); loadBranchesList(); }
-  catch(e) { toast('Ошибка','error'); }
+  catch(e) { console.error(e); toast('Ошибка','error'); }
 }
 
 // ─ ADMIN: ГРУППЫ
@@ -4642,7 +4645,7 @@ async function doAddGroupType() {
       price_per_month:type==='children'?price:0,trainer_percentage:type==='children'?pct:0});
     invalidateCache('groupTypes');
     document.querySelector('.modal-overlay')?.remove(); toast('✅','success'); loadGroupsList();
-  } catch(e) { toast('Ошибка','error'); }
+  } catch(e) { console.error(e); toast('Ошибка','error'); }
 }
 async function renderAddSecondTrainerModal(groupTypeId, groupNameEnc, branch, groupType, existingTgId) {
   const groupName = decodeURIComponent(groupNameEnc);
@@ -4764,7 +4767,7 @@ async function renderAssignGroupForm() {
       <button class="btn btn-primary btn-full" onclick="doAssignGroup()">Назначить</button>`;
     const sel = document.getElementById('ag-type');
 if (sel) onAgTypeChange(sel);
-  } catch(e) { form.innerHTML='<p class="hint">Ошибка</p>'; }
+  } catch(e) { console.error(e); form.innerHTML='<p class="hint">Ошибка</p>'; }
 }
 function onAgTypeChange(sel) {
   const opt = sel.options[sel.selectedIndex];
@@ -5897,7 +5900,7 @@ async function doAddChlorine(branch) {
 async function deleteChlorineOrder(id) {
   if (!confirm('Удалить запись?')) return;
   try { await sb().from('chlorine_orders').delete().eq('id',id); toast('Удалено','success'); loadTechSection(); }
-  catch(e) { toast('Ошибка','error'); }
+  catch(e) { console.error(e); toast('Ошибка','error'); }
 }
 
 // ── ПЛАНЫ ─────────────────────────────────────
@@ -5978,7 +5981,7 @@ async function doAddPlan() {
 }
 async function updatePlanStatus(id, status) {
   try { await sb().from('ops_plans').update({status}).eq('id',id); toast('Обновлено','success'); loadTechSection(); }
-  catch(e) { toast('Ошибка','error'); }
+  catch(e) { console.error(e); toast('Ошибка','error'); }
 }
 
 // ── ОБЩЕЕ УДАЛЕНИЕ ────────────────────────────
