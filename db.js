@@ -4,9 +4,7 @@
 
 let _sb = null;
 function sb() {
-  if (!_sb) _sb = supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY, {
-    auth: { persistSession: true, storageKey: 'aquadesk_session' }
-  });
+  if (!_sb) _sb = supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
   return _sb;
 }
 
