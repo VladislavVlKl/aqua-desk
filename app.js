@@ -895,6 +895,12 @@ async function doConfirmLogWorkout() {
     document.querySelector('.modal-overlay')?.remove();
     _pendingLogData = null;
     toast(`✅ ПТ`,'success');
+    // Реестр: одна запись на весь батч
+    const firstRow = rows[0];
+    DB.auditLog('workout_add', STATE.profile.id, STATE.profile.fio, clientId, 'workout', {
+      count, dates: rows.map(r=>r.workout_date?.slice(0,10)),
+      category: firstRow?.category_at_moment, is_drop_in: firstRow?.is_drop_in||false,
+    }, firstRow?.branch);
     renderWorkoutsTab();
   } catch(e) {
     toast('Ошибка','error'); console.error(e);
@@ -1073,6 +1079,8 @@ async function doAddClient() {
     }
     _addingClient=false;
     document.querySelector('.modal-overlay')?.remove();
+    DB.auditLog('client_add', STATE.profile.id, STATE.profile.fio, null, 'client',
+      { fio, category: cat, age }, STATE.profile.branches?.[0]);
     toast('Клиент добавлен ✅','success');
     renderClientsTab();
   } catch(e) {
@@ -2053,13 +2061,19 @@ async function doConfirmDebt(wid,cid) {
 }
 async function doDeleteWorkout(id) {
   if(!confirm('Удалить запись?'))return;
-  try{await DB.deleteWorkout(id);toast('Удалено','success');renderReportTab();}
-  catch(e){console.error(e);toast('Ошибка','error');}
+  try{
+    await DB.deleteWorkout(id);
+    DB.auditLog('workout_delete', STATE.profile.id, STATE.profile.fio, id, 'workout', {}, STATE.profile.branches?.[0]);
+    toast('Удалено','success');renderReportTab();
+  } catch(e){console.error(e);toast('Ошибка','error');}
 }
 async function doAdminDeleteWorkout(id) {
   if(!confirm('Удалить запись? (Без ограничений по времени)'))return;
-  try{await DB.deleteWorkout(id);toast('Удалено','success');renderReportTab();}
-  catch(e){console.error(e);toast('Ошибка','error');}
+  try{
+    await DB.deleteWorkout(id);
+    DB.auditLog('workout_delete_admin', STATE.profile.id, STATE.profile.fio, id, 'workout', {force:true}, STATE.profile.branches?.[0]);
+    toast('Удалено','success');renderReportTab();
+  } catch(e){console.error(e);toast('Ошибка','error');}
 }
 async function doRequestWorkoutDelete(workoutId, workoutDate, clientNameEnc, branch) {
   const clientName = decodeURIComponent(clientNameEnc);
@@ -2069,6 +2083,8 @@ async function doRequestWorkoutDelete(workoutId, workoutDate, clientNameEnc, bra
   _pending.add('wdr_'+workoutId);
   try {
     await DB.requestWorkoutDelete(workoutId, STATE.profile.id, clientName, workoutDate, branch);
+    DB.auditLog('workout_delete_request', STATE.profile.id, STATE.profile.fio, workoutId, 'workout',
+      { client: clientName, date: workoutDate?.slice(0,10) }, branch);
     toast('Запрос отправлен координатору','success');
   } catch(e) { console.error(e); toast('Ошибка','error'); }
   finally { _pending.delete('wdr_'+workoutId); }
@@ -2244,6 +2260,8 @@ async function doBuyPackage(clientId, isChildClient) {
   const start = document.getElementById('pkg-start')?.value||todayStr();
   try {
     await DB.buyNewPackage(clientId, STATE.profile.id, isChildClient, qty, start);
+    DB.auditLog('sub_buy', STATE.profile.id, STATE.profile.fio, clientId, 'subscription',
+      { qty, start, is_child: isChildClient }, STATE.profile.branches?.[0]);
     document.querySelector('.modal-overlay')?.remove();
     toast(`✅ Пакет ${qty} ПТ оформлен`,'success');
     renderClientProfile(clientId, STATE.currentTab||'clients');
@@ -2638,6 +2656,8 @@ async function doCloseSubEarly(subId, clientId, isChild) {
   if (btn) { btn.disabled=true; btn.textContent='Закрываем...'; }
   try {
     await DB.closeSubEarly(subId, clientId, isChild, note, todayStr());
+    DB.auditLog('sub_close_early', STATE.profile.id, STATE.profile.fio, subId, 'subscription',
+      { client_id: clientId, is_child: isChild, note }, STATE.profile.branches?.[0]);
     document.querySelector('.modal-overlay')?.remove();
     toast(isChild?'✅ Абонемент закрыт, остаток сгорел':'✅ Абонемент закрыт, остаток сохранён','success');
     renderClientProfile(clientId, STATE.currentTab||'clients');
@@ -3022,12 +3042,15 @@ async function doSeniorAssignGroup() {
   const groupTypeId = parseInt(document.getElementById('sa-type')?.value);
   const branch      = document.getElementById('sa-branch')?.value;
   const opt         = document.querySelector('#sa-type option:checked');
+  const groupName   = opt?.textContent||'';
   const isAdult     = opt?.dataset.type === 'adult';
   const rateType    = isAdult ? 'headcount' : 'percent';
   const rateValue   = isAdult ? 0 : (parseFloat(document.getElementById('sa-rate')?.value)||40);
   if (!trainerId||!groupTypeId||!branch) return toast('Заполните все поля','error');
   try {
     await DB.addTrainerGroup(trainerId, groupTypeId, branch, todayStr(), rateType, rateValue, null);
+    DB.auditLog('group_assign', STATE.profile.id, STATE.profile.fio, trainerId, 'trainer_group',
+      { group: groupName, trainer_id: trainerId }, branch);
     toast('✅ Назначено','success');
     await loadSeniorGroupsList();
     await renderSeniorAssignForm();
@@ -3294,6 +3317,8 @@ async function renderAdminMore() {
         onclick="renderCoordinatorSchedule()">📅 Расписание</button>
       <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);text-align:left;padding:14px 16px;border-radius:12px"
         onclick="renderAdminSessionNotes()">📝 Конспекты и цели</button>
+      <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);text-align:left;padding:14px 16px;border-radius:12px"
+        onclick="renderAuditLog()">🗂 Реестр действий</button>
     </div>
 
     <!-- Ссылки расписания для ОП -->
@@ -3326,6 +3351,96 @@ function copyScheduleLink(url) {
     document.body.removeChild(inp);
     toast('✅ Ссылка скопирована','success');
   });
+}
+
+// ══════════════════════════════════════════════════════════════
+// РЕЕСТР ДЕЙСТВИЙ (AUDIT LOG)
+// ══════════════════════════════════════════════════════════════
+const AUDIT_LABELS = {
+  workout_add:               { icon:'💪', label:'ПТ списана' },
+  workout_delete:            { icon:'🗑', label:'ПТ удалена' },
+  workout_delete_admin:      { icon:'🗑', label:'ПТ удалена (координатор)' },
+  workout_delete_request:    { icon:'📋', label:'Запрос на удаление ПТ' },
+  client_add:                { icon:'👤', label:'Клиент добавлен' },
+  client_delete:             { icon:'❌', label:'Клиент удалён' },
+  sub_buy:                   { icon:'💳', label:'Абонемент куплен' },
+  sub_close_early:           { icon:'❄️', label:'Абонемент закрыт досрочно' },
+  group_assign:              { icon:'📌', label:'Назначение в группу' },
+  group_unassign:            { icon:'📌', label:'Открепление от группы' },
+  group_client_add:          { icon:'🧒', label:'Ребёнок добавлен в группу' },
+  group_client_remove:       { icon:'🧒', label:'Ребёнок удалён из группы' },
+  group_session:             { icon:'🏊', label:'Занятие проведено' },
+  group_payment:             { icon:'💰', label:'Оплата выставлена' },
+  group_payout:              { icon:'💸', label:'Выплата утверждена' },
+  group_substitution_create: { icon:'🔄', label:'Замена создана' },
+  group_substitution_approve:{ icon:'✅', label:'Замена одобрена' },
+  group_progress_note:       { icon:'📝', label:'Заметка о прогрессе' },
+};
+async function renderAuditLog() {
+  setupBack(()=>{renderAdminApp();adminTab('more');setupBack(null);});
+  $('#tab-content').innerHTML=`<div class="tab-pad">
+    <div class="section-header"><h3>🗂 Реестр действий</h3></div>
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+      <select id="al-action" style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text);font-size:13px">
+        <option value="">Все события</option>
+        ${Object.entries(AUDIT_LABELS).map(([k,v])=>`<option value="${k}">${v.icon} ${v.label}</option>`).join('')}
+      </select>
+      <select id="al-period" style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text);font-size:13px">
+        <option value="7">7 дней</option>
+        <option value="30" selected>30 дней</option>
+        <option value="90">3 месяца</option>
+        <option value="0">Всё время</option>
+      </select>
+    </div>
+    <div id="audit-list"><div class="center-screen"><div class="spinner"></div></div></div>
+  </div>`;
+  document.getElementById('al-action').addEventListener('change', loadAuditLog);
+  document.getElementById('al-period').addEventListener('change', loadAuditLog);
+  await loadAuditLog();
+}
+async function loadAuditLog() {
+  const body = document.getElementById('audit-list'); if (!body) return;
+  body.innerHTML = '<div class="center-screen"><div class="spinner"></div></div>';
+  try {
+    const action = document.getElementById('al-action')?.value || '';
+    const days   = parseInt(document.getElementById('al-period')?.value || '30');
+    const logs   = await DB.getAuditLog({ action: action||undefined, limit: 300 });
+    // Фильтр по периоду на клиенте
+    const cutoff = days > 0 ? new Date(Date.now() - days*86400000) : null;
+    const filtered = cutoff ? logs.filter(l=>new Date(l.created_at)>=cutoff) : logs;
+    if (!filtered.length) { body.innerHTML='<p class="hint" style="padding:16px">Нет записей</p>'; return; }
+    body.innerHTML = filtered.map(l=>{
+      const meta = AUDIT_LABELS[l.action] || { icon:'📋', label: l.action };
+      const dt = new Date(l.created_at);
+      const dtStr = dt.toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+      const d = l.details || {};
+      let detail = '';
+      if (d.count)   detail += ` · ${d.count} ПТ`;
+      if (d.dates?.length) detail += ` · ${d.dates.map(fmtDate).join(', ')}`;
+      if (d.fio)     detail += ` · ${d.fio}`;
+      if (d.name)    detail += ` · ${d.name}`;
+      if (d.qty)     detail += ` · ${d.qty} ПТ`;
+      if (d.amount)  detail += ` · ${fmt(d.amount)} сум`;
+      if (d.month)   detail += ` · ${d.month?.slice(0,7)}`;
+      if (d.date)    detail += ` · ${fmtDate(d.date)}`;
+      if (d.headcount) detail += ` · ${d.headcount} чел.`;
+      if (d.group)   detail += ` · ${d.group}`;
+      if (d.note)    detail += ` · "${d.note}"`;
+      if (d.force)   detail += ' · принудительно';
+      return `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+          <div style="flex:1">
+            <span style="font-size:15px">${meta.icon}</span>
+            <span style="font-size:13px;font-weight:500;margin-left:4px">${meta.label}</span>
+            <div style="font-size:12px;color:var(--hint);margin-top:2px">
+              ${l.actor_fio||'—'}${l.branch?' · '+l.branch:''}${detail}
+            </div>
+          </div>
+          <div style="font-size:11px;color:var(--hint);white-space:nowrap">${dtStr}</div>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) { body.innerHTML='<p class="hint">Ошибка загрузки</p>'; console.error(e); }
 }
 
 async function renderAdminSessionNotes() {
@@ -3952,6 +4067,8 @@ async function doAddGroupClient(groupId) {
     const instanceId = tg?.group_instance_id||null;
 
     const newClient = await DB.addGroupClient(groupId, name, age, price, todayStr(), instanceId);
+    DB.auditLog('group_client_add', STATE.profile.id, STATE.profile.fio, groupId, 'group_client',
+      { name, age, price }, STATE.profile.branches?.[0]);
 
     // Проверка дублей по instance
     if (instanceId && newClient) {
@@ -4014,6 +4131,8 @@ async function doSetGroupPayment(groupId, clientId, month, paid) {
       .select('group_instance_id').eq('id',groupId).single();
     const instanceId = tg?.group_instance_id||null;
     await DB.setGroupPayment(groupId, clientId, month, amount, paid, subStart, subEnd, instanceId);
+    DB.auditLog('group_payment', STATE.profile.id, STATE.profile.fio, groupId, 'group_payment',
+      { client_id: clientId, amount, month, paid }, STATE.profile.branches?.[0]);
     toast('Оплата отмечена ✅','success');
     renderGroupDetail(groupId);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
@@ -4043,6 +4162,8 @@ async function doSaveGroupNote(groupId, clientId, month) {
   const note = document.getElementById('gn-note')?.value.trim();
   try {
     await DB.saveGroupProgressNote(groupId, clientId, STATE.profile.id, month, note);
+    DB.auditLog('group_progress_note', STATE.profile.id, STATE.profile.fio, groupId, 'group_progress',
+      { client_id: clientId, month }, STATE.profile.branches?.[0]);
     document.querySelector('.modal-overlay')?.remove();
     toast('Заметка сохранена ✅','success');
     renderGroupDetail(groupId);
@@ -4077,6 +4198,8 @@ async function doDeleteGroupClient(clientId, groupId) {
   if (!confirm('Удалить безвозвратно?')) return;
   try {
     await DB.deleteGroupClient(clientId);
+    DB.auditLog('group_client_remove', STATE.profile.id, STATE.profile.fio, clientId, 'group_client',
+      { group_id: groupId }, STATE.profile.branches?.[0]);
     toast('Удалён','success');
     renderGroupDetail(groupId);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
@@ -4819,6 +4942,7 @@ async function doUnassignGroup(id) {
   if (!confirm('Подтвердите ещё раз: открепить тренера?')) return;
   try {
     await DB.unassignTrainerGroup(id);
+    DB.auditLog('group_unassign', STATE.profile.id, STATE.profile.fio, id, 'trainer_group', {}, STATE.profile.branches?.[0]);
     toast('Откреплено','success');
     await loadGroupsList();
   } catch(e) { toast('Ошибка','error'); console.error(e); }
@@ -5197,6 +5321,8 @@ async function doApproveGroupPayoutAuto(tgId, trainerId, monthStr, autoAmt, rate
   _pending.add(`payout_${tgId}_${trainerId}`);
   try {
     await DB.setGroupTrainerPayout(parseInt(tgId), parseInt(trainerId), monthStr, 'fixed', final, STATE.profile.id, note);
+    DB.auditLog('group_payout', STATE.profile.id, STATE.profile.fio, trainerId, 'group_payout',
+      { group_id: tgId, month: monthStr, amount: final, note }, STATE.profile.branches?.[0]);
     toast('ЗП утверждена ✅','success');
     renderGroupMonthReport(tgId, monthStr);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
@@ -6516,6 +6642,8 @@ async function doApproveDelete(reqId, clientId, nameEnc) {
       _pending.add('approve_'+reqId);
       await DB.approveDeleteRequest(reqId, clientId);
       _pending.delete('approve_'+reqId);
+      DB.auditLog('client_delete', STATE.profile.id, STATE.profile.fio, clientId, 'client',
+        { fio, force: false }, STATE.profile.branches?.[0]);
       toast('Клиент удалён','success');
       adminTab('control');
     }
@@ -6526,7 +6654,10 @@ async function doForceDelete(reqId, clientId, nameEnc) {
   _pending.add('force_'+reqId);
   document.querySelector('.modal-overlay')?.remove();
   try {
+    const fioDecoded = decodeURIComponent(nameEnc);
     await DB.approveDeleteRequest(reqId, clientId);
+    DB.auditLog('client_delete', STATE.profile.id, STATE.profile.fio, clientId, 'client',
+      { fio: fioDecoded, force: true }, STATE.profile.branches?.[0]);
     toast('Клиент удалён вместе с историей','success');
     adminTab('control');
   } catch(e) { toast('Ошибка удаления','error'); console.error(e); }
@@ -6847,6 +6978,8 @@ async function doCreateSubstitution(groupId) {
   if (!date || !subId) return toast('Заполните все поля','error');
   try {
     await DB.createGroupSubstitution(groupId, STATE.profile.id, subId, date);
+    DB.auditLog('group_substitution_create', STATE.profile.id, STATE.profile.fio, groupId, 'group_substitution',
+      { substitute_id: subId, date }, STATE.profile.branches?.[0]);
     document.querySelector('.modal-overlay')?.remove();
     toast('Запрос отправлен старшему тренеру ✅','success');
   } catch(e) { toast('Ошибка','error'); console.error(e); }
@@ -6877,6 +7010,8 @@ async function doApproveSubstitution(id) {
   if (!rate) return toast('Укажите ставку','error');
   try {
     await DB.approveSubstitution(id, rate);
+    DB.auditLog('group_substitution_approve', STATE.profile.id, STATE.profile.fio, id, 'group_substitution',
+      { rate }, STATE.profile.branches?.[0]);
     toast('Замена одобрена ✅','success');
     renderPendingSubstitutions();
   } catch(e) { toast('Ошибка','error'); console.error(e); }
@@ -7265,6 +7400,8 @@ async function doLogAdultGroupSession(groupId) {
     const {data:tg} = await sb().from('trainer_groups')
       .select('branch,group_type_id').eq('id',groupId).single();
     await DB.logGroupSession(STATE.profile.id, tg?.group_type_id||null, tg?.branch||STATE.profile.branches?.[0]||'', date, headcount);
+    DB.auditLog('group_session', STATE.profile.id, STATE.profile.fio, groupId, 'group_session',
+      { date, headcount, branch: tg?.branch }, tg?.branch||STATE.profile.branches?.[0]);
     document.querySelector('.modal-overlay')?.remove();
     const rate = headcount>=7?130000:headcount>=4?120000:110000;
     toast(`Записано: ${headcount} чел. · ${(rate/1000).toFixed(0)}к сум · ${time} ✅`,'success');

@@ -1753,6 +1753,32 @@ Object.assign(DB, {
     if (error) throw error;
   },
 
+  // ─── РЕЕСТР (AUDIT LOG) ──────────────────────
+  async auditLog(action, actorId, actorFio, targetId, targetType, details, branch) {
+    // Fire-and-forget: никогда не бросает исключение наружу
+    try {
+      await sb().from('audit_log').insert({
+        action,
+        actor_id: actorId || null,
+        actor_fio: actorFio || null,
+        target_id: targetId ? String(targetId) : null,
+        target_type: targetType || null,
+        details: details || {},
+        branch: branch || null,
+      });
+    } catch(e) { console.error('[audit]', e); }
+  },
+  async getAuditLog({ branch, actorId, action, limit = 200 } = {}) {
+    let q = sb().from('audit_log').select('*')
+      .order('created_at', { ascending: false }).limit(limit);
+    if (branch)   q = q.eq('branch', branch);
+    if (actorId)  q = q.eq('actor_id', actorId);
+    if (action)   q = q.eq('action', action);
+    const { data, error } = await q;
+    if (error) throw error;
+    return data || [];
+  },
+
   // ─── ВЗРОСЛЫЕ ГРУППЫ — КЛИЕНТЫ ───────────────
   async getAdultGroupClients(groupId) {
     const {data,error} = await sb().from('adult_group_clients')
