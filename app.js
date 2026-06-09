@@ -3149,11 +3149,16 @@ async function renderGroupDetail(groupId) {
       <div class="section-header"><h3>Состав группы</h3>
         <button class="btn btn-sm" onclick="renderAddGroupClientModal('${groupId}')">+ Ребёнок</button>
       </div>
-      <div style="display:flex;gap:8px;margin-bottom:16px">
+      <div style="display:flex;gap:8px;margin-bottom:8px">
         <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);flex:1"
           onclick="renderGroupAttendance('${groupId}')">✅ Отметить посещаемость</button>
         <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
           onclick="renderGroupAttendanceByDate('${groupId}')">📅 За другую дату</button>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:16px">
+        ${(()=>{const debtors=clients.filter(c=>!paidMap[c.id]?.paid);return debtors.length?`<button class="btn btn-sm" style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#ef4444;font-size:12px" onclick="renderGroupDebtorsModal(${JSON.stringify(debtors.map(c=>c.name))})">⚠️ Должники: ${debtors.length}</button>`:''})()}
+        <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border);font-size:12px"
+          onclick="renderGroupArchiveModal('${groupId}','${instanceId||''}')">📦 Архив</button>
       </div>
       ${!clients.length?'<p class="hint">Детей пока нет</p>':
         clients.map(c=>{
@@ -4169,6 +4174,54 @@ async function doSaveGroupNote(groupId, clientId, month) {
     renderGroupDetail(groupId);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
+function renderGroupDebtorsModal(names) {
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>⚠️ Должники (${names.length})</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <p class="hint" style="margin-bottom:12px">Абонемент не оплачен за текущий месяц:</p>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      ${names.map(n=>`<div style="padding:10px 12px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);border-radius:10px;font-weight:500">${n}</div>`).join('')}
+    </div>
+  </div>`;
+  document.body.appendChild(m);
+}
+
+async function renderGroupArchiveModal(groupId, instanceId) {
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal"><div class="modal-header"><h3>📦 Архив группы</h3>
+    <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div id="archive-body"><div class="center-screen"><div class="spinner"></div></div></div>
+  </div>`;
+  document.body.appendChild(m);
+  try {
+    const archived = instanceId
+      ? await DB.getArchivedGroupClientsByInstance(instanceId)
+      : await DB.getArchivedGroupClients(groupId);
+    const body = document.getElementById('archive-body');
+    if (!archived.length) { body.innerHTML='<p class="hint">Архив пуст</p>'; return; }
+    body.innerHTML=`<p class="hint" style="margin-bottom:12px">Нажмите «Вернуть», чтобы восстановить ребёнка в группу:</p>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        ${archived.map(c=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:var(--card);border:1px solid var(--border);border-radius:10px">
+          <div>
+            <div style="font-weight:500">${c.name}</div>
+            <div style="font-size:12px;color:var(--hint)">${fmt(c.monthly_price||0)} сум/мес</div>
+          </div>
+          <button class="btn btn-sm btn-primary" style="font-size:12px" onclick="doRestoreGroupClient('${c.id}','${groupId}','${instanceId||''}')">Вернуть</button>
+        </div>`).join('')}
+      </div>`;
+  } catch(e) { document.getElementById('archive-body').innerHTML='<p class="hint">Ошибка загрузки</p>'; console.error(e); }
+}
+
+async function doRestoreGroupClient(clientId, groupId, instanceId) {
+  try {
+    await DB.restoreGroupClient(clientId);
+    toast('Ребёнок восстановлен','success');
+    document.querySelector('.modal-overlay')?.remove();
+    renderGroupDetail(groupId);
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+
 function archiveGroupClientConfirm(clientId, nameEnc, groupId) {
   const name = decodeURIComponent(nameEnc);
   const m = el('div','modal-overlay');

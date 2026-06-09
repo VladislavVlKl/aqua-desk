@@ -496,6 +496,21 @@ async unassignTrainerGroup(id) {
       .update({is_active:false}).eq('id',id);
     if (error) throw error;
   },
+  async restoreGroupClient(id) {
+    const {error} = await sb().from('group_clients')
+      .update({is_active:true}).eq('id',id);
+    if (error) throw error;
+  },
+  async getArchivedGroupClients(groupId) {
+    const {data,error} = await sb().from('group_clients')
+      .select('*').eq('group_id',groupId).eq('is_active',false).order('name');
+    if (error) throw error; return data||[];
+  },
+  async getArchivedGroupClientsByInstance(groupInstanceId) {
+    const {data,error} = await sb().from('group_clients')
+      .select('*').eq('group_instance_id',groupInstanceId).eq('is_active',false).order('name');
+    if (error) throw error; return data||[];
+  },
 
   async deleteGroupClient(id) {
     const {error} = await sb().from('group_clients').delete().eq('id',id);
