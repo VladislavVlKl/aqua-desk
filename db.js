@@ -317,6 +317,8 @@ const DB = {
     if (error) throw error;
   },
   async deleteWorkout(id) {
+    // schedule_confirmations ссылается на workouts без CASCADE — удаляем вручную
+    await sb().from('schedule_confirmations').delete().eq('workout_id', id);
     const {error} = await sb().from('workouts').delete().eq('id',id);
     if (error) throw error;
   },
