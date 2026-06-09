@@ -9,6 +9,7 @@ const STATE = {
 
 // ── ЗАЩИТА ОТ ДВОЙНЫХ НАЖАТИЙ ────────────────
 const _pending = new Set();
+let _pendingLogData = null; // данные текущего списания (для модала конспектов)
 
 // ── RATE LIMITING ─────────────────────────────
 // Ограничивает вызовы: не чаще 1 раза в ms миллисекунд
@@ -750,18 +751,7 @@ async function _doLogWorkoutInner() {
   const branch=getBranch();
   if (!branch) return toast('Выберите филиал','error');
 
-  if (!isDropIn&&!isDebt) {
-    const overdue=await DB.getOverdueNotes(clientId,STATE.profile.id);
-    if (overdue.length>0) {
-      const warn=document.getElementById('overdue-warning');
-      if (warn) warn.innerHTML=`<div class="overdue-block">
-        ⛔ Напишите конспект к тренировке от ${fmtDate(overdue[0].workout_date)} — это обязательно.
-        <button class="btn btn-sm btn-primary" style="margin-top:8px;width:100%"
-          onclick="renderSessionNoteModal('${overdue[0].id}','${clientId}')">Написать конспект</button>
-      </div>`;
-      return;
-    }
-  }
+  // Долговые конспекты соберём ниже — не блокируем здесь
   const notes=$('#wk-notes')?.value.trim()||'';
   if (count>1&&!notes) return toast('Введите примечание','error');
   if (isDropIn) {
@@ -804,32 +794,106 @@ async function _doLogWorkoutInner() {
     notes:notes||null,is_debt:isDebt,is_drop_in:isDropIn,
     drop_in_category:dropInCat,
   }));
-  try {
-    let result;
-    if (isSubstitute) {
-      result = await DB.logSubstituteWorkout(rows, STATE.profile.id, subTrainerId);
+  // Замена и долг/разовое — прямое списание без конспектов
+  if (isSubstitute) {
+    try {
+      await DB.logSubstituteWorkout(rows, STATE.profile.id, subTrainerId);
       toast('✅ Замена записана — тренер получит уведомление для подтверждения','success');
-      renderHomeTab(); return;
-    } else {
-      result = await DB.logWorkouts(rows);
-      toast(isDebt?'✅ В долг':isDropIn?'✅ Разовое':`✅ ${count} ПТ`,'success');
+      renderHomeTab();
+    } catch(e) { toast('Ошибка','error'); console.error(e); }
+    return;
+  }
+  if (isDebt||isDropIn) {
+    try {
+      await DB.logWorkouts(rows);
+      toast(isDebt?'✅ В долг':'✅ Разовое','success');
+      renderWorkoutsTab();
+    } catch(e) { toast('Ошибка','error'); console.error(e); }
+    return;
+  }
+
+  // Обычные ПТ: собираем долговые конспекты и показываем один экран
+  const overdueNotes = await DB.getOverdueNotes(clientId, STATE.profile.id);
+  _pendingLogData = { rows, clientId, count };
+  showLogWithNotesModal(overdueNotes, clientId, dates);
+}
+
+function showLogWithNotesModal(overdueNotes, clientId, dates) {
+  const overdueHtml = overdueNotes.map(w=>`
+    <div style="border:1px solid var(--danger);border-radius:10px;padding:12px;margin-bottom:12px">
+      <div style="color:var(--danger);font-weight:600;font-size:13px;margin-bottom:8px">⛔ Конспект за ${fmtDate(w.workout_date)}</div>
+      <div class="form-group" style="margin-bottom:8px"><label>Что сделали</label>
+        <textarea id="note-acc-${w.id}" rows="2" placeholder="Освоили..."></textarea></div>
+      <div class="form-group" style="margin-bottom:0"><label>Задача на следующее</label>
+        <textarea id="note-next-${w.id}" rows="2" placeholder="Откорректировать..."></textarea></div>
+    </div>`).join('');
+
+  const newDate = dates[0];
+  const newNoteHtml = `
+    <div style="border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:16px">
+      <div style="font-weight:600;font-size:13px;margin-bottom:8px">📝 Конспект за ${fmtDate(newDate)} <span class="hint" style="font-weight:400">(можно позже)</span></div>
+      <div class="form-group" style="margin-bottom:8px"><label>Что сделали</label>
+        <textarea id="note-acc-new" rows="2" placeholder="Освоили..."></textarea></div>
+      <div class="form-group" style="margin-bottom:0"><label>Задача на следующее</label>
+        <textarea id="note-next-new" rows="2" placeholder="Откорректировать..."></textarea></div>
+    </div>`;
+
+  const idsJson = JSON.stringify(overdueNotes.map(w=>w.id));
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal" style="max-height:90vh;overflow-y:auto">
+    <div class="modal-header">
+      <h3>${overdueNotes.length>0?'Конспекты + Списать':'Конспект + Списать'}</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove();_pendingLogData=null">✕</button>
+    </div>
+    ${overdueNotes.length>0?'<p class="hint" style="margin-bottom:12px">Заполните все конспекты — они обязательны.</p>':''}
+    ${overdueHtml}
+    ${newNoteHtml}
+    <button class="btn btn-primary btn-full" id="btn-confirm-log"
+      onclick="doConfirmLogWorkout(${idsJson.replace(/"/g,'&quot;')},'${clientId}')">✅ Списать</button>
+  </div>`;
+  document.body.appendChild(m);
+}
+
+async function doConfirmLogWorkout(overdueIds, clientId) {
+  if (!_pendingLogData) return;
+  const { rows, count } = _pendingLogData;
+
+  // Валидация долговых конспектов
+  for (const id of overdueIds) {
+    const acc = document.getElementById(`note-acc-${id}`)?.value.trim();
+    if (!acc) return toast('Заполните все долговые конспекты','error');
+  }
+
+  const btn = document.getElementById('btn-confirm-log');
+  if (btn) { btn.disabled=true; btn.textContent='Сохраняем...'; }
+
+  try {
+    // Сохраняем долговые конспекты
+    if (overdueIds.length>0) {
+      const sub = await DB.getActiveSubscription(clientId);
+      for (const id of overdueIds) {
+        const acc  = document.getElementById(`note-acc-${id}`)?.value.trim();
+        const next = document.getElementById(`note-next-${id}`)?.value.trim()||null;
+        await DB.upsertNote(id, clientId, STATE.profile.id, sub?.id||null, acc, next, null);
+      }
     }
-    if (!isDropIn&&!isDebt&&!isSubstitute&&result?.[0]) {
-      const wid=result[0].id;
-      const m=el('div','modal-overlay');
-      m.innerHTML=`<div class="modal">
-        <div class="modal-header"><h3>Написать конспект?</h3>
-          <button class="btn-close" onclick="this.closest('.modal-overlay').remove();renderWorkoutsTab()">✕</button></div>
-        <p class="hint" style="margin-bottom:16px">Можно сейчас или в течение 48 часов.</p>
-        <button class="btn btn-primary btn-full"
-          onclick="this.closest('.modal-overlay').remove();renderSessionNoteModal('${wid}','${clientId}')">
-          Написать сейчас</button>
-        <button class="btn btn-full" style="margin-top:8px;background:var(--card)"
-          onclick="this.closest('.modal-overlay').remove();renderWorkoutsTab()">Позже</button>
-      </div>`;
-      document.body.appendChild(m);
-    } else { renderWorkoutsTab(); }
-  } catch(e) { toast('Ошибка','error'); console.error(e); }
+    // Списываем тренировки
+    const result = await DB.logWorkouts(rows);
+    // Сохраняем конспект за новую тренировку если заполнен
+    const newAcc = document.getElementById('note-acc-new')?.value.trim();
+    if (newAcc && result?.[0]) {
+      const sub = await DB.getActiveSubscription(clientId);
+      const newNext = document.getElementById('note-next-new')?.value.trim()||null;
+      await DB.upsertNote(result[0].id, clientId, STATE.profile.id, sub?.id||null, newAcc, newNext, null);
+    }
+    document.querySelector('.modal-overlay')?.remove();
+    _pendingLogData = null;
+    toast(`✅ ${count} ПТ`,'success');
+    renderWorkoutsTab();
+  } catch(e) {
+    toast('Ошибка','error'); console.error(e);
+    if (btn) { btn.disabled=false; btn.textContent='✅ Списать'; }
+  }
 }
 
 // Модал: добавить клиента
