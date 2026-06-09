@@ -895,13 +895,13 @@ async function doConfirmLogWorkout() {
     document.querySelector('.modal-overlay')?.remove();
     _pendingLogData = null;
     toast(`✅ ПТ`,'success');
-    // Реестр: одна запись на весь батч
+    renderWorkoutsTab();
+    // Реестр: одна запись на весь батч (вне try — fire-and-forget)
     const firstRow = rows[0];
     DB.auditLog('workout_add', STATE.profile.id, STATE.profile.fio, clientId, 'workout', {
       count, dates: rows.map(r=>r.workout_date?.slice(0,10)),
       category: firstRow?.category_at_moment, is_drop_in: firstRow?.is_drop_in||false,
     }, firstRow?.branch);
-    renderWorkoutsTab();
   } catch(e) {
     toast('Ошибка','error'); console.error(e);
     if (btn) { btn.disabled=false; btn.textContent='✅ Списать'; }
@@ -3403,7 +3403,7 @@ async function loadAuditLog() {
   body.innerHTML = '<div class="center-screen"><div class="spinner"></div></div>';
   try {
     const action = document.getElementById('al-action')?.value || '';
-    const days   = parseInt(document.getElementById('al-period')?.value || '30');
+    const days   = parseInt(document.getElementById('al-period')?.value || '30') || 30;
     const logs   = await DB.getAuditLog({ action: action||undefined, limit: 300 });
     // Фильтр по периоду на клиенте
     const cutoff = days > 0 ? new Date(Date.now() - days*86400000) : null;
@@ -6556,25 +6556,7 @@ async function doDeleteClientCheck(clientId, fioEnc, createdAt) {
   }
 }
 
-// Для координатора — список запросов на удаление в Контроле
-async function renderWorkoutDeleteRequests() {
-  try {
-    const reqs = await DB.getAllWorkoutDeleteRequests();
-    if (!reqs.length) return '';
-    return `<div class="control-section">
-      <div class="control-title danger">🗑 Запросы на удаление ПТ (${reqs.length})</div>
-      ${reqs.map(r=>`<div class="control-item">
-        <div class="ci-main">${r.client_name||'—'} · ${fmtDate(r.workout_date)}</div>
-        <div class="ci-sub">Тренер: ${r.profiles?.fio||'?'} · ${r.branch||''}</div>
-        <div style="display:flex;gap:6px;margin-top:6px">
-          <button class="btn btn-sm btn-danger" onclick="doApproveWorkoutDelete('${r.id}','${r.workout_id}')">Удалить</button>
-          <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
-            onclick="doRejectWorkoutDelete('${r.id}')">Отклонить</button>
-        </div>
-      </div>`).join('')}
-    </div>`;
-  } catch(e) { return ''; }
-}
+// Для координатора — список запросов на удаление в Контроле (мёртвый код — логика встроена в renderAdminControl)
 async function doApproveWorkoutDelete(reqId, workoutId) {
   if (_pending.has('wda_'+reqId)) return;
   if (!confirm('Удалить тренировку окончательно?')) return;
