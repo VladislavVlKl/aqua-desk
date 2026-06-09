@@ -181,11 +181,10 @@ const DB = {
     const nonDebtNonDropin = rows.filter(r=>!r.is_debt&&!r.is_drop_in);
     if (nonDebtNonDropin.length) {
       const cid = nonDebtNonDropin[0].client_id;
-      const {data:cl} = await sb().from('clients').select('balance').eq('id',cid).single();
-      await sb().from('clients').update({
-        balance:Math.max(0,(cl?.balance||0)-nonDebtNonDropin.length),
-        last_used:new Date().toISOString(),
-      }).eq('id',cid);
+      // Атомарное списание через RPC — исключает race condition при двух устройствах
+      const {error:balErr} = await sb().rpc('increment_balance', {client_id: cid, delta: -nonDebtNonDropin.length});
+      if (balErr) throw balErr;
+      await sb().from('clients').update({last_used:new Date().toISOString()}).eq('id',cid);
     } else {
       await sb().from('clients')
         .update({last_used:new Date().toISOString()}).eq('id',rows[0].client_id);
@@ -286,8 +285,9 @@ const DB = {
       pending_confirmation: false,
     });
     if (we) throw we;
-    // Списываем баланс клиента
-    await sb().rpc('increment_balance', {client_id: req.client_id, delta: -1}).catch(()=>{});
+    // Списываем баланс клиента — ошибка пробрасывается наверх
+    const {error:be} = await sb().rpc('increment_balance', {client_id: req.client_id, delta: -1});
+    if (be) throw be;
     // Обновляем статус запроса
     const {error:ue} = await sb().from('late_workout_requests')
       .update({status:'approved', reviewed_by:reviewerId, reviewed_at:new Date().toISOString()})
