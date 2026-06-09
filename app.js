@@ -894,7 +894,7 @@ async function doConfirmLogWorkout() {
 
     document.querySelector('.modal-overlay')?.remove();
     _pendingLogData = null;
-    toast(`✅ ${count} ПТ`,'success');
+    toast(`✅ ПТ`,'success');
     renderWorkoutsTab();
   } catch(e) {
     toast('Ошибка','error'); console.error(e);
@@ -2345,7 +2345,7 @@ async function renderClientProfile(clientId, backTab='home') {
         <div class="client-avatar">${client.fio.charAt(0)}</div>
         <div style="flex:1">
           <div class="client-name">${client.fio}</div>
-          <div class="client-meta">${client.age?client.age+' лет · ':''}Кат.${client.category} · Баланс: ${client.balance}</div>
+          <div class="client-meta">${client.age?client.age+' лет · ':''}Кат.${client.category} · Баланс: <span${client.balance<=0?' style="color:var(--danger);font-weight:600"':''}>${client.balance}</span></div>
           <div class="client-meta">Тренер: ${client.profiles?.fio||'—'}</div>
           ${!canEdit&&!isAdmin?'<div class="hint" style="margin-top:4px;font-size:11px">👁 Только просмотр</div>':''}
           <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
