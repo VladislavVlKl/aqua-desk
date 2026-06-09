@@ -10,6 +10,21 @@ function sb() {
 
 const DB = {
 
+  // ─── SESSION LOG ────────────────────────────
+  async logSession(tgId, fio, role, jsVersion) {
+    const ua = navigator.userAgent||'';
+    const device = /iPhone|iPad/.test(ua) ? 'iOS'
+                 : /Android/.test(ua)     ? 'Android'
+                 : /Macintosh|Windows|Linux/.test(ua) ? 'Desktop' : 'Unknown';
+    await sb().from('user_sessions').insert({tg_id:tgId, fio, role, device, js_version:jsVersion});
+  },
+  async getRecentSessions(days=30) {
+    const since = new Date(Date.now() - days*86400000).toISOString();
+    const {data,error} = await sb().from('user_sessions')
+      .select('*').gte('opened_at',since).order('opened_at',{ascending:false}).limit(100);
+    if (error) throw error; return data||[];
+  },
+
   // ─── AUTH ───────────────────────────────────
   async getProfileByTgId(id) {
     const {data,error} = await sb().rpc('get_profile_by_tg_id',{p_tg_id:id});

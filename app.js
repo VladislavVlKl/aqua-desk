@@ -163,6 +163,9 @@ async function init() {
   } catch(e) { toast('Ошибка подключения','error'); console.error(e); }
 }
 async function enterApp() {
+  // Логируем вход (fire-and-forget, не блокируем UI)
+  const jsVer = document.querySelector('script[src*="app.js"]')?.src?.match(/v=([^&]+)/)?.[1] || '?';
+  DB.logSession(STATE.tgId, STATE.profile.fio, STATE.profile.role, jsVer).catch(()=>{});
   checkShowTutorial(() => {
     if      (STATE.profile.role==='admin')          renderAdminApp();
     else if (STATE.profile.role==='senior_trainer') renderSeniorApp();
@@ -5347,6 +5350,23 @@ async function renderAdminControl() {
         </div>
       </div>`).join('')}
     </div>`);
+    // Последние входы в систему
+    const sessions = await DB.getRecentSessions(30).catch(()=>[]);
+    if (sessions.length) {
+      const rows = sessions.map(s=>{
+        const dt = new Date(s.opened_at);
+        const dtStr = dt.toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+        const deviceIcon = s.device==='iOS'?'🍎':s.device==='Android'?'🤖':s.device==='Desktop'?'💻':'📱';
+        return `<div class="control-item">
+          <div class="ci-main">${s.fio||s.tg_id} <span class="hint">${s.role||''}</span></div>
+          <div class="ci-sub">${deviceIcon} ${s.device} · v${s.js_version||'?'} · ${dtStr}</div>
+        </div>`;
+      }).join('');
+      sections.push(`<div class="control-section">
+        <div class="control-title" style="background:rgba(16,185,129,.12);color:#10b981">🟢 Входы за последние 30 дней (${sessions.length})</div>
+        ${rows}
+      </div>`);
+    }
     $('#tab-content').innerHTML=`<div class="tab-pad">
       <h3>Контроль</h3><p class="hint" style="margin-bottom:16px">На ${todayStr()}</p>
       ${sections.length?sections.join(''):'<div class="empty-state">✅<p>Проблем не обнаружено</p></div>'}
