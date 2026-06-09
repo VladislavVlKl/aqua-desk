@@ -150,14 +150,8 @@ async function init() {
     </div>`);
     return;
   }
-  loading('Проверяем аккаунт...');
+  loading('Загружаем...');
   try {
-    // Верифицируем Telegram initData на сервере и получаем сессию
-    const initData = window.Telegram?.WebApp?.initData || '';
-    if (initData) {
-      try { await DB.authenticateWithTelegram(initData); }
-      catch(authErr) { console.warn('Telegram auth warn:', authErr?.message); }
-    }
     const p=await DB.getProfileByTgId(STATE.tgId);
     if (!p) { renderRegister(); return; }
     STATE.profile=p;

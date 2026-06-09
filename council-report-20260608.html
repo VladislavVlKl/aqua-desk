@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Council Report — AquaDesk</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f8f9fa; color: #1a1a2e; line-height: 1.6; }
+  .container { max-width: 820px; margin: 0 auto; padding: 32px 20px; }
+
+  .header { background: #1a1a2e; color: white; border-radius: 16px; padding: 32px; margin-bottom: 28px; }
+  .header h1 { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+  .header .subtitle { font-size: 13px; color: rgba(255,255,255,0.55); }
+  .header .question { margin-top: 16px; background: rgba(255,255,255,0.08); border-radius: 10px; padding: 14px 16px; font-size: 14px; color: rgba(255,255,255,0.85); line-height: 1.5; }
+
+  .verdict { background: white; border-radius: 16px; padding: 28px; margin-bottom: 20px; border: 1px solid #e8ecf0; box-shadow: 0 2px 12px rgba(0,0,0,0.05); }
+  .verdict h2 { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.2px; color: #888; margin-bottom: 16px; }
+
+  .agree { border-left: 4px solid #10b981; }
+  .clash { border-left: 4px solid #f59e0b; }
+  .blind { border-left: 4px solid #8b5cf6; }
+  .recommendation { border-left: 4px solid #3b82f6; }
+  .one-thing { background: linear-gradient(135deg, #1a1a2e, #2d2d5e); color: white; border: none; }
+  .one-thing h2 { color: rgba(255,255,255,0.5); }
+  .one-thing p, .one-thing li { color: rgba(255,255,255,0.9); }
+  .one-thing strong { color: #60a5fa; }
+
+  .verdict p { font-size: 14px; color: #333; margin-bottom: 10px; }
+  .verdict p:last-child { margin-bottom: 0; }
+  .verdict strong { color: #1a1a2e; }
+  .verdict ol, .verdict ul { padding-left: 20px; font-size: 14px; color: #333; }
+  .verdict li { margin-bottom: 8px; }
+
+  .alignment-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 20px; }
+  .advisor-card { background: white; border-radius: 12px; padding: 14px 10px; text-align: center; border: 1px solid #e8ecf0; }
+  .advisor-card .icon { font-size: 22px; margin-bottom: 6px; }
+  .advisor-card .name { font-size: 11px; font-weight: 600; color: #555; margin-bottom: 6px; }
+  .advisor-card .tag { font-size: 10px; padding: 2px 8px; border-radius: 20px; display: inline-block; }
+  .tag-risk { background: #fee2e2; color: #dc2626; }
+  .tag-strategy { background: #dbeafe; color: #2563eb; }
+  .tag-scale { background: #d1fae5; color: #059669; }
+  .tag-tactical { background: #fef3c7; color: #d97706; }
+  .tag-fresh { background: #ede9fe; color: #7c3aed; }
+
+  details { background: white; border-radius: 12px; margin-bottom: 10px; border: 1px solid #e8ecf0; overflow: hidden; }
+  summary { padding: 16px 20px; cursor: pointer; font-size: 14px; font-weight: 600; color: #1a1a2e; list-style: none; display: flex; align-items: center; gap: 10px; user-select: none; }
+  summary::-webkit-details-marker { display: none; }
+  summary::after { content: '▸'; margin-left: auto; color: #aaa; font-size: 12px; transition: transform 0.2s; }
+  details[open] summary::after { transform: rotate(90deg); }
+  .advisor-body { padding: 0 20px 20px; font-size: 13px; color: #444; line-height: 1.65; border-top: 1px solid #f0f0f0; padding-top: 16px; }
+
+  .peer-section details { background: #fafafa; }
+  .peer-body { padding: 0 20px 20px; font-size: 13px; color: #444; line-height: 1.65; border-top: 1px solid #f0f0f0; padding-top: 16px; }
+
+  .section-title { font-size: 13px; font-weight: 700; color: #888; text-transform: uppercase; letter-spacing: 1px; margin: 28px 0 12px; }
+
+  .highlight-box { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px; padding: 14px 16px; font-size: 14px; color: #1e40af; margin-bottom: 10px; }
+  .highlight-box strong { color: #1e3a8a; }
+
+  .footer { text-align: center; font-size: 12px; color: #aaa; margin-top: 32px; padding-top: 20px; border-top: 1px solid #e8ecf0; }
+
+  @media (max-width: 600px) {
+    .alignment-grid { grid-template-columns: repeat(3, 1fr); }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="header">
+    <h1>🏊 AquaDesk — Вердикт совета</h1>
+    <div class="subtitle">LLM Council · 8 июня 2026 · 5 советников + 5 рецензентов + Председатель</div>
+    <div class="question">Оцени идею AquaDesk в целом, детальные функции и дай предложения по улучшению и развитию. Стек: Vanilla JS + Supabase + GitHub Pages. Узбекистан, фитнес-центр с бассейном.</div>
+  </div>
+
+  <!-- Alignment Grid -->
+  <div class="section-title">Позиции советников</div>
+  <div class="alignment-grid">
+    <div class="advisor-card">
+      <div class="icon">🔍</div>
+      <div class="name">Первопринципный</div>
+      <div class="tag tag-strategy">Замкни петлю</div>
+    </div>
+    <div class="advisor-card">
+      <div class="icon">⚠️</div>
+      <div class="name">Контрарианец</div>
+      <div class="tag tag-risk">Безопасность</div>
+    </div>
+    <div class="advisor-card">
+      <div class="icon">🚀</div>
+      <div class="name">Экспансионист</div>
+      <div class="tag tag-scale">SaaS x100</div>
+    </div>
+    <div class="advisor-card">
+      <div class="icon">👁</div>
+      <div class="name">Посторонний</div>
+      <div class="tag tag-fresh">Дыры везде</div>
+    </div>
+    <div class="advisor-card">
+      <div class="icon">⚡</div>
+      <div class="name">Исполнитель</div>
+      <div class="tag tag-tactical">Пн-Вт план</div>
+    </div>
+  </div>
+
+  <!-- Verdict sections -->
+  <div class="verdict agree">
+    <h2>✅ Где совет согласен</h2>
+    <p><strong>Учёт решён — рост выручки не решён.</strong> Все пятеро видят одно: система автоматизирует фиксацию фактов, но не замыкает петлю до действия. Сигнал о ребёнке без оплаты есть — кнопки «написать родителю» нет.</p>
+    <p><strong>Безопасность — фундаментальная проблема.</strong> Авторизация по tg_id без серверной валидации подписи Telegram (HMAC-SHA256) — это не авторизация. PIN через RPC — косметика. Бизнес-логика в браузере обходится DevTools. Консенсус: закрыть до масштабирования.</p>
+    <p><strong>5000 строк app.js без тестов — технический долг.</strong> Не убьёт сейчас, но убьёт при следующей серьёзной итерации.</p>
+  </div>
+
+  <div class="verdict clash">
+    <h2>⚖️ Где совет расходится</h2>
+    <p><strong>SaaS-экспансия (Экспансионист) против «сначала докажи PMF» (рецензенты).</strong> Экспансионист строит модель на 100 клубов. Рецензенты отвечают: один клуб — пилот, не продукт. Нет второго платящего клиента. Для multi-tenancy нужно переписать RLS, изоляцию данных, биллинг, онбординг — это не «держит 50-100 клубов без рефакторинга».</p>
+    <p><strong>Тактика (Исполнитель) против стратегии (Первопринципный).</strong> Исполнитель даёт план на понедельник-вторник. Первопринципный говорит: ты решаешь не ту задачу. Оба правы на разных горизонтах — конфликт не в ответах, а в вопросе.</p>
+  </div>
+
+  <div class="verdict blind">
+    <h2>🔦 Слепые пятна, которые выявил совет</h2>
+    <p>Это самое ценное из разбора — то, что не попало ни в один из пяти ответов:</p>
+    <ol>
+      <li><strong>Узбекское законодательство.</strong> Онлайн-ККМ обязателен. Система фиксирует начисление, но не факт получения денег и не формирует фискальный чек. Это юридическое требование при масштабировании.</li>
+      <li><strong>Локализация данных.</strong> ФИО детей, история оплат, зарплаты хранятся в Supabase EU (eu-central-1). Законодательство Узбекистана о персональных данных требует хранения данных граждан на территории страны.</li>
+      <li><strong>Локальные платёжные системы.</strong> Payme, Click, Uzcard — без интеграции масштабирование на рынке невозможно. Наличные доминируют, но digital-оплата растёт.</li>
+      <li><strong>Метрика использования.</strong> Никто не спросил: сколько тренеров открывают приложение ежедневно? Если дропаут высокий — никакая архитектура не поможет.</li>
+      <li><strong>Конкурентное преимущество Telegram.</strong> В Узбекистане Telegram — основной деловой мессенджер. Это реальный ров, который никто не отметил как актив.</li>
+    </ol>
+  </div>
+
+  <div class="verdict recommendation">
+    <h2>📋 Рекомендация</h2>
+    <p><strong>Горизонт 1 (1-2 недели):</strong> Замкнуть петлю «сигнал → действие». Кнопка «написать родителю в Telegram» прямо из карточки ребёнка с долгом. Единственная фича, которая напрямую влияет на выручку.</p>
+    <p><strong>Горизонт 2 (1-2 месяца):</strong> Серверная валидация подписи Telegram (HMAC-SHA256 + bot token через Supabase Edge Function). Без этого разговор о безопасности бессмысленен.</p>
+    <p><strong>Горизонт 3 (после второго клиента):</strong> Тарифы и пакеты в базе, не в config.js. Это разблокирует мультиарендность без переписывания логики.</p>
+    <p><strong>SaaS — не сейчас.</strong> Сначала второй платящий клуб. Экспансия на дырявом фундаменте — технический долг в квадрате.</p>
+  </div>
+
+  <div class="verdict one-thing">
+    <h2>⚡ Одно действие первым</h2>
+    <div class="highlight-box" style="background:rgba(96,165,250,0.15);border-color:rgba(96,165,250,0.3)">
+      <strong style="color:#93c5fd">Добавить кнопку <code>tg://resolve?domain=...</code> в карточку ребёнка с долгом &gt;2 занятий.</strong>
+    </div>
+    <p>Это занимает 2 часа. Не требует изменений архитектуры. Напрямую замыкает петлю между сигналом системы и действием координатора. Единственное изменение, которое можно измерить деньгами уже на следующей неделе.</p>
+  </div>
+
+  <!-- Advisor details -->
+  <div class="section-title">Полные ответы советников</div>
+
+  <details>
+    <summary>🔍 Первопринципный мыслитель</summary>
+    <div class="advisor-body">
+      <p>Задача учёта и расчёта — решена. Координатор больше не держит в голове кто сколько отработал. Это главная боль операционного менеджмента малого фитнес-бизнеса, и она закрыта.</p>
+      <p>Что не решается: удержание клиентов. Всё что сделано — это учёт фактов. Проблема фитнес-бизнеса не в учёте — а в том, что клиент перестаёт ходить. Сигнал «ребёнок без оплаты >2 занятий» — это постфактум. Настоящий вопрос: почему ребёнок перестал платить? Система не даёт ответа.</p>
+      <p>Неправильный вопрос в самом проекте: вопрос был «как автоматизировать учёт?» — а надо было спросить «что мешает росту выручки?». Учёт — это не рост, это гигиена.</p>
+      <p>Что реально ценно: PIN через Supabase RPC + Telegram auth — бесплатная безопасная авторизация без собственного бэкенда. Архитектурно грамотно.</p>
+      <p>Что стоит добавить: воронку сигналов с действием. Не просто «дети без оплаты», а кнопка «написать родителю в Telegram» прямо из интерфейса. Это превращает систему из дашборда наблюдения в инструмент управления.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>⚠️ Контрарианец</summary>
+    <div class="advisor-body">
+      <p><strong>Главная уязвимость — авторизация через tg_id.</strong> tg_id — это публичный идентификатор. На GitHub Pages нет серверной валидации подписи Telegram (HMAC-SHA256 через bot token). Это дыра прямо сейчас. Координатор и CEO видят зарплаты всех сотрудников.</p>
+      <p><strong>Supabase free tier — бомба замедленного действия.</strong> Засыпает после 1 недели неактивности. Лимит 500 МБ БД + 2 ГБ трафика. Нет резервного плана.</p>
+      <p><strong>5000 строк в app.js — катастрофа поддержки.</strong> Первый новый разработчик потратит неделю на ориентацию. Баги будут прятаться месяцами.</p>
+      <p><strong>PIN через Supabase RPC не спасает от перехвата сессии.</strong> После верификации PIN что происходит? Если просто флаг в памяти — перезагрузка страницы обходит защиту.</p>
+      <p><strong>Офлайн — ноль.</strong> Тренер в бассейне теряет интернет → не может внести тренировку → теряет 48-часовое окно → зарплата не считается.</p>
+      <p>Что упущено критически: аудит-лог изменений зарплат, backup стратегия, уведомления о сбоях системы.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>🚀 Экспансионист</summary>
+    <div class="advisor-body">
+      <p>AquaDesk — это уже готовый продукт, который просто не знает о своём масштабе.</p>
+      <p><strong>Самое недооцененное:</strong> уже работает полный операционный стек для фитнес-центра. Это SaaS-шаблон. В Узбекистане сотни бассейнов, в СНГ — тысячи. Никто из них не имеет нормальной автоматизации.</p>
+      <p><strong>Мультиарендность:</strong> один инстанс Supabase, разные organization_id — и каждый клуб платит 20-50$/мес. 100 клубов = 2-5k$/мес без единой новой фичи.</p>
+      <p><strong>Белый лейбл через Telegram:</strong> каждый клуб получает своего Telegram-бота со своим брендингом. Стоимость входа для клиента — ноль.</p>
+      <p><strong>Скрытый джекпот:</strong> агрегированная отраслевая аналитика. Посещаемость, платёжная дисциплина, активность тренеров — данные, которых не существует в СНГ для малого спорта.</p>
+      <p><strong>Самая быстрая экспансия:</strong> партнёрство с одной-двумя сетями (5-10 клубов). Один договор = x10 к текущей базе.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>👁 Посторонний</summary>
+    <div class="advisor-body">
+      <p><strong>Безопасность — дыра.</strong> Авторизация по tg_id — это не авторизация. PIN через RPC — костыль поверх фундаментальной проблемы. Supabase free tier с RLS хорошо, но кто проверяет подлинность Telegram-запроса?</p>
+      <p><strong>Суммы в сумах жёстко зашиты.</strong> 85/110/135 тысяч сум — константы в config.js. Инфляция в Узбекистане реальна. Что происходит при изменении тарифов? Нет UI.</p>
+      <p><strong>GitHub Pages — нет бэкенда.</strong> Бизнес-логика (расчёт ЗП, проверки) живёт в браузере. Её можно обойти или сломать DevTools.</p>
+      <p><strong>«Арт Свим»</strong> упоминается как будто это очевидно. Для нового человека — загадка.</p>
+      <p><strong>Офлайн = смерть.</strong> Wi-Fi в бассейне нестабилен. Что видит пользователь при потере соединения?</p>
+      <p><strong>Нет тестов.</strong> 5000 строк в app.js без тестов — технический долг, который будет расти.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>⚡ Исполнитель</summary>
+    <div class="advisor-body">
+      <p><strong>1. Уведомления-автотриггеры</strong> — в БД уже есть notification_rules, но они мертвы. Самая высокая отдача: просроченный абонемент, нет конспекта 48ч, ребёнок без оплаты. Первый шаг — написать cron-функцию в Supabase Edge Functions, которая раз в час прогоняет правила. Один файл, одна Edge Function.</p>
+      <p><strong>2. Переименование группы</strong> — это 30 минут работы: инпут + один UPDATE. Висит в бэклоге.</p>
+      <p><strong>3. Проверить экспорт филиала</strong> — технический долг, который вылезет в самый неудобный момент. Прогнать по всем четырём филиалам, убедиться что цифры сходятся.</p>
+      <p><strong>Что отложить:</strong> рефакторинг app.js (5000 строк работают), новые роли, CEO-аналитику если не просит активно.</p>
+      <p>Понедельник — автотриггеры уведомлений. Вторник — переименование групп + проверка экспорта.</p>
+    </div>
+  </details>
+
+  <!-- Peer reviews -->
+  <div class="section-title peer-section">Рецензии (перекрёстная проверка)</div>
+
+  <details>
+    <summary>📝 Рецензент 1</summary>
+    <div class="peer-body">
+      <p><strong>Сильнейший — E (Экспансионист).</strong> Единственный, кто вышел за рамки и увидел рыночный потенциал. Конкретная бизнес-модель: multi-tenancy, 20-50$/мес, 100 клубов = реальные деньги.</p>
+      <p><strong>Наибольший слепой угол — D (Исполнитель).</strong> Даёт тактический план поверх системы с дырявой авторизацией. Строить на фундаменте с трещиной.</p>
+      <p><strong>Что пропустили все:</strong> Узбекистан — специфический рынок. Payme, Click, Uzcard — нет интеграции с местными платёжными системами. Онлайн-ККМ обязателен. Без локальных платежей и фискализации масштабирование невозможно — это блокер, который перевешивает все технические долги.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>📝 Рецензент 2</summary>
+    <div class="peer-body">
+      <p><strong>Сильнейший — B (Посторонний).</strong> Называет фундаментальную проблему прямо: авторизация по tg_id — это не авторизация. Конкретные уязвимости без абстракций.</p>
+      <p><strong>Наибольший слепой угол — E (Экспансионист).</strong> Строит SaaS-стратегию на дырявой авторизации. Масштабирование сломанной авторизации = масштабирование уязвимости.</p>
+      <p><strong>Что пропустили все:</strong> есть ли реальный платящий пользователь кроме «Арт Свим»? Один клуб — пилот, не продукт. Пока нет второго клиента, любые разговоры о multi-tenancy — планирование экспансии без доказательства PMF.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>📝 Рецензент 3</summary>
+    <div class="peer-body">
+      <p><strong>Сильнейший — B (Посторонний).</strong> Конкретные технические проблемы с доказательствами. Не философствует — даёт список дыр.</p>
+      <p><strong>Наибольший слепой угол — E (Экспансионист).</strong> 100 клубов на текущем фундаменте (5000 строк, tg_id авторизация, free tier) — это 100 точек отказа, не выручка.</p>
+      <p><strong>Что пропустили все:</strong> GDPR и местное законодательство. Система хранит ФИО детей, историю оплат, зарплаты в Supabase EU region. Кто несёт ответственность за утечку? Согласие на обработку персональных данных? Законодательство о локализации данных граждан Узбекистана.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>📝 Рецензент 4</summary>
+    <div class="peer-body">
+      <p><strong>Сильнейший — A (Первопринципный).</strong> Единственный отвечает на правильный вопрос: система решает учёт, но не решает удержание клиентов. Конкретная критика + конкретное предложение.</p>
+      <p><strong>Наибольший слепой угол — E (Экспансионист).</strong> Прыжок от «работает в одном клубе» к «SaaS на 100 клубов» без слова о том, что для мультиарендности нужно переписать половину архитектуры.</p>
+      <p><strong>Что пропустили все:</strong> человеческий фактор. Сколько тренеров открывают приложение ежедневно? Если тренер забывает открыть — никакая архитектура не поможет. Метрика дропаута использования.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>📝 Рецензент 5</summary>
+    <div class="peer-body">
+      <p><strong>Сильнейший — A (Первопринципный).</strong> Замыкание петли «сигнал → действие → результат». Практично, не теоретично.</p>
+      <p><strong>Наибольший слепой угол — E (Экспансионист).</strong> Проект не валидирован даже на одном клубе. Масштабировать нечего — сначала PMF.</p>
+      <p><strong>Что пропустили все:</strong> Telegram в Узбекистане — основной деловой мессенджер, это конкурентное преимущество которое никто не отметил. Оплата наличными доминирует — система не фиксирует факт получения денег. Supabase EU хранит данные граждан Узбекистана — потенциальный конфликт с законодательством о локализации данных.</p>
+    </div>
+  </details>
+
+  <div class="footer">
+    LLM Council · AquaDesk · 8 июня 2026<br>
+    Методология: <a href="https://x.com/karpathy" style="color:#aaa">Andrej Karpathy</a>
+  </div>
+
+</div>
+</body>
+</html>

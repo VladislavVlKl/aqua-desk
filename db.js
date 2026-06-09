@@ -10,24 +10,6 @@ function sb() {
 
 const DB = {
 
-  // ─── TELEGRAM AUTH ──────────────────────────
-  async authenticateWithTelegram(initData) {
-    // Проверяем есть ли уже живая сессия
-    const { data: { session } } = await sb().auth.getSession();
-    if (session) return session;
-
-    const url = `${CONFIG.SUPABASE_URL}/functions/v1/telegram-auth`;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'apikey': CONFIG.SUPABASE_ANON_KEY },
-      body: JSON.stringify({ initData })
-    });
-    const json = await res.json();
-    if (json.error) throw new Error(json.error);
-    await sb().auth.setSession(json.session);
-    return json.session;
-  },
-
   // ─── AUTH ───────────────────────────────────
   async getProfileByTgId(id) {
     const {data,error} = await sb().rpc('get_profile_by_tg_id',{p_tg_id:id});

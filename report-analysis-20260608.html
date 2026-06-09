@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AquaDesk — Полный анализ</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f6fa; color: #1a1a2e; line-height: 1.65; }
+.container { max-width: 860px; margin: 0 auto; padding: 32px 20px 60px; }
+
+.hero { background: linear-gradient(135deg, #1a1a2e 0%, #2d2d5e 100%); color: white; border-radius: 18px; padding: 36px; margin-bottom: 32px; }
+.hero h1 { font-size: 24px; font-weight: 700; margin-bottom: 6px; }
+.hero .sub { font-size: 13px; color: rgba(255,255,255,.5); margin-bottom: 20px; }
+.hero-steps { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; }
+.hero-step { background: rgba(255,255,255,.09); border-radius: 12px; padding: 14px 12px; text-align: center; }
+.hero-step .icon { font-size: 22px; margin-bottom: 6px; }
+.hero-step .label { font-size: 11px; color: rgba(255,255,255,.7); line-height: 1.3; }
+
+.section { margin-bottom: 28px; }
+.section-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.section-badge { width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
+.section-title { font-size: 18px; font-weight: 700; }
+.section-sub { font-size: 12px; color: #888; margin-top: 2px; }
+
+.card { background: white; border-radius: 14px; padding: 22px; margin-bottom: 12px; border: 1px solid #e8ecf0; }
+.card h3 { font-size: 15px; font-weight: 700; margin-bottom: 10px; }
+.card p { font-size: 14px; color: #444; margin-bottom: 8px; }
+.card p:last-child { margin-bottom: 0; }
+.card ul, .card ol { padding-left: 18px; font-size: 14px; color: #444; }
+.card li { margin-bottom: 6px; }
+
+.tag { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 20px; margin-right: 6px; margin-bottom: 4px; }
+.tag-red { background: #fee2e2; color: #dc2626; }
+.tag-yellow { background: #fef3c7; color: #d97706; }
+.tag-green { background: #d1fae5; color: #059669; }
+.tag-blue { background: #dbeafe; color: #2563eb; }
+.tag-purple { background: #ede9fe; color: #7c3aed; }
+
+.alert { border-radius: 10px; padding: 14px 16px; margin-bottom: 10px; font-size: 14px; }
+.alert-red { background: #fef2f2; border: 1px solid #fecaca; }
+.alert-yellow { background: #fffbeb; border: 1px solid #fde68a; }
+.alert-green { background: #f0fdf4; border: 1px solid #bbf7d0; }
+.alert-blue { background: #eff6ff; border: 1px solid #bfdbfe; }
+.alert strong { display: block; margin-bottom: 4px; }
+
+.priority-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.priority-table th { text-align: left; padding: 10px 12px; background: #f8f9fa; border-bottom: 2px solid #e8ecf0; font-weight: 600; color: #555; }
+.priority-table td { padding: 10px 12px; border-bottom: 1px solid #f0f0f0; vertical-align: top; }
+.priority-table tr:last-child td { border-bottom: none; }
+
+.scenario { background: white; border-radius: 14px; padding: 22px; margin-bottom: 12px; border: 1px solid #e8ecf0; }
+.scenario-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
+.scenario-name { font-size: 16px; font-weight: 700; }
+.score { font-size: 22px; font-weight: 800; }
+.score-high { color: #10b981; }
+.score-mid { color: #f59e0b; }
+.score-low { color: #ef4444; }
+
+.code { background: #1e1e2e; color: #cdd6f4; border-radius: 10px; padding: 16px; font-size: 12px; font-family: 'SF Mono', 'Fira Code', monospace; overflow-x: auto; margin: 10px 0; line-height: 1.6; }
+.code .comment { color: #6c7086; }
+.code .keyword { color: #cba6f7; }
+.code .string { color: #a6e3a1; }
+
+details { background: white; border-radius: 12px; margin-bottom: 8px; border: 1px solid #e8ecf0; overflow: hidden; }
+summary { padding: 14px 18px; cursor: pointer; font-size: 14px; font-weight: 600; list-style: none; display: flex; align-items: center; gap: 8px; user-select: none; }
+summary::-webkit-details-marker { display: none; }
+summary::after { content: '▸'; margin-left: auto; color: #aaa; font-size: 11px; }
+details[open] summary::after { transform: rotate(90deg); }
+.detail-body { padding: 0 18px 18px; font-size: 13px; color: #444; border-top: 1px solid #f5f5f5; padding-top: 14px; line-height: 1.65; }
+.detail-body p { margin-bottom: 8px; }
+.detail-body ul, .detail-body ol { padding-left: 18px; margin-bottom: 8px; }
+.detail-body li { margin-bottom: 5px; }
+
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.action-box { background: linear-gradient(135deg, #10b981, #059669); color: white; border-radius: 14px; padding: 22px; margin-top: 20px; }
+.action-box h3 { font-size: 16px; margin-bottom: 8px; }
+.action-box p { font-size: 14px; color: rgba(255,255,255,.9); }
+
+@media(max-width:600px){
+  .hero-steps { grid-template-columns: repeat(2,1fr); }
+  .two-col { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="container">
+
+<div class="hero">
+  <h1>🏊 AquaDesk — Полный анализ</h1>
+  <div class="sub">4 специалиста · 8 июня 2026 · автономный режим</div>
+  <div class="hero-steps">
+    <div class="hero-step"><div class="icon">🏦</div><div class="label">Платёжные системы Узбекистана</div></div>
+    <div class="hero-step"><div class="icon">🔐</div><div class="label">Аудит безопасности</div></div>
+    <div class="hero-step"><div class="icon">🔧</div><div class="label">Функциональный аудит</div></div>
+    <div class="hero-step"><div class="icon">💰</div><div class="label">Монетизация</div></div>
+  </div>
+</div>
+
+<!-- ШАГ 1: ПЛАТЕЖИ -->
+<div class="section">
+  <div class="section-header">
+    <div class="section-badge" style="background:#dbeafe">🏦</div>
+    <div>
+      <div class="section-title">Шаг 1 — Платёжные системы Узбекистана</div>
+      <div class="section-sub">Юридический и технический анализ</div>
+    </div>
+  </div>
+
+  <div class="alert alert-blue">
+    <strong>Вывод: реально, но не быстро</strong>
+    Подключить Payme/Click технически можно через Supabase Edge Functions. Главный барьер — верификация мерчанта занимает 2–6 недель. Без юрлица ничего не заработает.
+  </div>
+
+  <div class="two-col">
+    <div class="card">
+      <h3>🟢 Payme (рекомендуется)</h3>
+      <p><span class="tag tag-green">Есть API</span><span class="tag tag-blue">Webhook</span></p>
+      <p>Subscribe API + Checkout. Webhook идёт на Supabase Edge Function URL. Принимает Uzcard и Humo.</p>
+      <p><strong>developer.paycom.uz</strong></p>
+    </div>
+    <div class="card">
+      <h3>🟡 Click.uz</h3>
+      <p><span class="tag tag-green">Есть API</span><span class="tag tag-yellow">Проще</span></p>
+      <p>Click Invoicing — проще для старта: создаёшь инвойс, отправляешь ссылку клиенту. Без полной интеграции.</p>
+      <p><strong>docs.click.uz</strong></p>
+    </div>
+  </div>
+
+  <details>
+    <summary>📋 Что нужно для мерчанта</summary>
+    <div class="detail-body">
+      <p><strong>Минимум — ИП:</strong> регистрация через my.gov.uz, 1–3 дня, минимальная госпошлина. Достаточно для оплаты абонементов внутри одного клуба.</p>
+      <p><strong>Для SaaS — ООО:</strong> выглядит серьёзнее, проще заключать договоры с другими клубами, привлекать соучредителей.</p>
+      <p><strong>Лицензия не нужна.</strong> Лицензируются только операторы платёжных систем (банки). Вы — мерчант. Основание: Закон РУз «О платёжах и платёжных системах» №ЗРУ-598 от 2019 г., ст. 5.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>🧾 Онлайн-ККМ — обязателен по закону</summary>
+    <div class="detail-body">
+      <p><strong>Да, обязателен.</strong> Налоговый кодекс РУз, ст. 272 + Постановление Президента №ПП-4611 от 2020 г. Касается всех безналичных расчётов с физлицами, включая Payme/Click.</p>
+      <p><strong>Как работает:</strong> Payme и Click имеют встроенную интеграцию с ОФД — при правильной настройке мерчанта чек формируется автоматически. Нужно зарегистрировать виртуальный ККМ в Налоговом комитете и подключить к ОФД.</p>
+      <p><strong>Штрафы за отсутствие:</strong> 5–30 БРВ (1,7–10 млн сум) по ст. 175 КоАО РУз. Налоговые органы делают контрольные закупки.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>⚡ Техническая схема для AquaDesk</summary>
+    <div class="detail-body">
+      <div class="code"><span class="comment">// Схема оплаты через Supabase Edge Function</span>
+Mini App → Telegram.WebApp.openLink(payme_checkout_url)
+→ Пользователь оплачивает в Payme
+→ Payme callback → Supabase Edge Function (публичный HTTPS URL)
+→ Edge Function обновляет баланс клиента в БД
+→ Mini App polling обнаруживает обновление</div>
+      <p><strong>UX:</strong> пользователь уходит из Telegram в приложение Payme, потом возвращается. Нативного платёжного экрана внутри Mini App нет — это нормально для рынка.</p>
+      <p><strong>Секреты мерчанта</strong> должны быть только в Edge Functions, не во фронтовом JS!</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>💳 Расчёты в долларах (SaaS)</summary>
+    <div class="detail-body">
+      <p><strong>Важно:</strong> расчёты между юрлицами Узбекистана в иностранной валюте запрещены (Закон «О валютном регулировании» ЗРУ-561). Если клиент — узбекское ООО/ИП, счёт нужно выставлять в сумах по курсу ЦБ.</p>
+      <p>Для зарубежных клиентов — нужен валютный счёт и обязательная продажа части валютной выручки.</p>
+    </div>
+  </details>
+
+  <div class="alert alert-yellow">
+    <strong>Если монетизация маловероятна → HR-инструмент</strong>
+    Для внутреннего использования без приёма внешних платежей — ничего из вышеперечисленного не нужно. Работайте как есть, никаких юридических рисков.
+  </div>
+</div>
+
+<!-- ШАГ 2: БЕЗОПАСНОСТЬ -->
+<div class="section">
+  <div class="section-header">
+    <div class="section-badge" style="background:#fee2e2">🔐</div>
+    <div>
+      <div class="section-title">Шаг 2 — Аудит безопасности</div>
+      <div class="section-sub">Найдено: 4 критических + 5 средних уязвимостей</div>
+    </div>
+  </div>
+
+  <div class="alert alert-red">
+    <strong>Критично: dev-режим активен в продакшне</strong>
+    Любой человек, открывший приложение вне Telegram, видит prompt() с запросом ID — и может ввести чужой. Закрывается за 10 минут.
+  </div>
+
+  <details open>
+    <summary><span class="tag tag-red">КРИТИЧНО</span> Dev-режим активен в продакшне (app.js:146–153)</summary>
+    <div class="detail-body">
+      <p>Fallback с <code>prompt('Dev mode: Telegram ID')</code> срабатывает когда приложение открыто вне Telegram. GitHub Pages доступен в любом браузере — любой может ввести чужой tg_id и войти под его профилем.</p>
+      <div class="code"><span class="comment">// Исправление — 3 строки:</span>
+STATE.tgId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id || <span class="keyword">null</span>;
+<span class="keyword">if</span> (!STATE.tgId) {
+  setScreen(<span class="string">'&lt;div class="center-screen"&gt;&lt;p&gt;Откройте приложение через Telegram&lt;/p&gt;&lt;/div&gt;'</span>);
+  <span class="keyword">return</span>;
+}</div>
+      <p><strong>Время исправления: 10 минут.</strong></p>
+    </div>
+  </details>
+
+  <details>
+    <summary><span class="tag tag-red">КРИТИЧНО</span> Авторизация по tg_id без верификации initData</summary>
+    <div class="detail-body">
+      <p>Приложение доверяет <code>initDataUnsafe</code> без проверки HMAC-SHA256 подписи Telegram. Знающий tg_id другого сотрудника может обратиться к Supabase API напрямую от его имени — если RLS это не блокирует.</p>
+      <p><strong>Решение:</strong> Supabase Edge Function, которая верифицирует <code>initData</code> через bot token и выдаёт JWT. Требует ~1 день работы. Для 20 внутренних пользователей — приоритет средний.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary><span class="tag tag-red">КРИТИЧНО</span> Проверка ролей только в JS (не в базе)</summary>
+    <div class="detail-body">
+      <p>Разграничение доступа (<code>renderAdminApp</code>, <code>renderTrainerApp</code>) происходит только в браузере. Тренер, зная Supabase URL и anon key, может вызвать <code>getAllClients</code>, <code>getSummary</code>, <code>getControlData</code> напрямую и получить данные всех коллег и зарплаты.</p>
+      <p><strong>Решение:</strong> Проверить RLS-политики в Supabase Dashboard. Они должны ограничивать доступ на уровне базы, а не только в коде.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary><span class="tag tag-red">КРИТИЧНО</span> Brute-force PIN — счётчик сбрасывается при перезагрузке</summary>
+    <div class="detail-body">
+      <p>Переменные <code>_pinFailCount</code> и <code>_pinBlockedUntil</code> живут только в памяти браузера. Обновление страницы = сброс счётчика. 4-значный PIN можно перебрать за 10 000 попыток.</p>
+      <div class="code"><span class="comment">-- Добавить в RPC verify_pin (PostgreSQL):</span>
+<span class="keyword">IF</span> (SELECT COUNT(*) FROM pin_attempts
+    WHERE tg_id = p_tg_id
+    AND attempt_at > NOW() - INTERVAL <span class="string">'5 minutes'</span>
+) >= 5 THEN
+  RETURN FALSE;
+END IF;</div>
+    </div>
+  </details>
+
+  <details>
+    <summary><span class="tag tag-yellow">СРЕДНЕ</span> anon key в публичном репозитории GitHub</summary>
+    <div class="detail-body">
+      <p>Это ожидаемо для Supabase — anon key предназначен для клиентов. Критичным становится только если RLS настроен неверно. <strong>Проверьте RLS — это важнее, чем скрывать ключ.</strong></p>
+    </div>
+  </details>
+
+  <details>
+    <summary><span class="tag tag-yellow">СРЕДНЕ</span> XSS через innerHTML с данными из БД</summary>
+    <div class="detail-body">
+      <p>ФИО клиентов, названия групп, заметки вставляются в HTML через шаблонные строки без экранирования. Если кто-то введёт <code>&lt;script&gt;...&lt;/script&gt;</code> в поле ФИО — JS выполнится у других пользователей. Для внутренней системы с доверенными пользователями — низкий реальный риск.</p>
+    </div>
+  </details>
+
+  <div class="card" style="border-color:#d1fae5">
+    <h3>✅ Что сделано правильно</h3>
+    <ul>
+      <li>PIN хранится хешированным, проверяется через RPC — не виден клиенту ✓</li>
+      <li>Защита от двойных нажатий (<code>once()</code>, <code>_pending</code>) — нет дублей тренировок ✓</li>
+      <li>Атомарное списание баланса через RPC <code>increment_balance</code> ✓</li>
+      <li>Архивирование вместо удаления — история сохраняется ✓</li>
+      <li>Лимит 48ч с аудит-треком поздних запросов ✓</li>
+    </ul>
+  </div>
+
+  <div class="alert alert-green">
+    <strong>После внедрения защиты — разработка не усложнится</strong>
+    Все существующие DB.* функции остаются без изменений. Только инициализация клиента Supabase изменится (JWT вместо anon key напрямую). RLS работает прозрачно.
+  </div>
+</div>
+
+<!-- ШАГ 3: ФУНКЦИИ И ТЕСТЫ -->
+<div class="section">
+  <div class="section-header">
+    <div class="section-badge" style="background:#ede9fe">🔧</div>
+    <div>
+      <div class="section-title">Шаг 3 — Функциональный аудит</div>
+      <div class="section-sub">Слабые места + объяснение про "5000 строк без тестов"</div>
+    </div>
+  </div>
+
+  <div class="card" style="background:#fffbeb; border-color:#fde68a">
+    <h3>💡 Что значит "5000 строк без тестов" — простым языком</h3>
+    <p>Представьте сложную машину из 5000 деталей. Тесты — это автопроверки: нажал кнопку, машина сама прогнала 50 сценариев и говорит "всё ОК" или "вот здесь сломалось". В AquaDesk таких проверок нет — каждое изменение нужно проверять руками.</p>
+    <p><strong>Опасно ли это при 20 пользователях?</strong> Умеренно. Реальный риск не в падении системы, а в <em>тихих ошибках</em>: тренер отработал, но в ЗП не попало; баланс клиента стал 0 хотя ПТ ещё есть. Такое может долго не замечаться.</p>
+    <p><strong>Нужно ли исправлять сейчас?</strong> Нет. При 20 внутренних пользователях правильнее исправить конкретные баги (таблица ниже), а не писать тесты. Тесты понадобятся при 100+ пользователях или втором разработчике.</p>
+  </div>
+
+  <h3 style="margin: 20px 0 12px; font-size: 15px;">Приоритизированный список правок</h3>
+  <table class="priority-table">
+    <thead>
+      <tr>
+        <th>№</th>
+        <th>Проблема</th>
+        <th>Риск</th>
+        <th>Время</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>1</strong></td>
+        <td>Неатомарное списание в <code>logWorkouts</code> — <code>select→update</code> вместо RPC <code>increment_balance</code></td>
+        <td><span class="tag tag-red">Деньги</span></td>
+        <td>1–2 ч</td>
+      </tr>
+      <tr>
+        <td><strong>2</strong></td>
+        <td>В <code>approveLateRequest</code> ошибка списания баланса молча проглатывается (<code>.catch(()=>{})</code>)</td>
+        <td><span class="tag tag-red">Деньги</span></td>
+        <td>30 мин</td>
+      </tr>
+      <tr>
+        <td><strong>3</strong></td>
+        <td>Закрыть dev-режим в продакшне (prompt с tg_id)</td>
+        <td><span class="tag tag-red">Безопасность</span></td>
+        <td>10 мин</td>
+      </tr>
+      <tr>
+        <td><strong>4</strong></td>
+        <td><code>setGroupPayment</code>: <code>paid_at</code> не обнуляется при <code>paid=false</code> — вводит в заблуждение в отчётах</td>
+        <td><span class="tag tag-yellow">Данные</span></td>
+        <td>30 мин</td>
+      </tr>
+      <tr>
+        <td><strong>5</strong></td>
+        <td>Нет лимита на длину дежурства — техошибка может дать 24+ часа без предупреждения</td>
+        <td><span class="tag tag-yellow">ЗП</span></td>
+        <td>1 ч</td>
+      </tr>
+      <tr>
+        <td><strong>6</strong></td>
+        <td><code>await</code> внутри <code>Promise.all</code> в <code>getGroupMonthReport</code> — замедляет загрузку отчёта</td>
+        <td><span class="tag tag-blue">Скорость</span></td>
+        <td>1 ч</td>
+      </tr>
+      <tr>
+        <td><strong>7</strong></td>
+        <td>Валидация даты в <code>approveLateRequest</code> — координатор может одобрить тренировку 2-месячной давности</td>
+        <td><span class="tag tag-yellow">Данные</span></td>
+        <td>1 ч</td>
+      </tr>
+      <tr>
+        <td><strong>8</strong></td>
+        <td>Сигнал о неоплате в Арт Свим — проверять явку (0 занятий = не должник)</td>
+        <td><span class="tag tag-blue">UX</span></td>
+        <td>1–2 ч</td>
+      </tr>
+      <tr>
+        <td><strong>9</strong></td>
+        <td><code>category_at_moment = null</code> в старых записях — тренер тихо теряет деньги</td>
+        <td><span class="tag tag-yellow">ЗП</span></td>
+        <td>30 мин</td>
+      </tr>
+      <tr>
+        <td><strong>10</strong></td>
+        <td>Вынести формирование дат месяца в хелпер <code>monthRange()</code> — дублируется 5+ раз</td>
+        <td><span class="tag tag-blue">Код</span></td>
+        <td>1 ч</td>
+      </tr>
+    </tbody>
+  </table>
+  <p style="font-size: 13px; color: #888; margin-top: 8px;">Пункты 1–3: ~2 часа, прямо влияют на деньги и безопасность. Пункты 4–10: по мере возможности.</p>
+</div>
+
+<!-- ШАГ 4: МОНЕТИЗАЦИЯ -->
+<div class="section">
+  <div class="section-header">
+    <div class="section-badge" style="background:#d1fae5">💰</div>
+    <div>
+      <div class="section-title">Шаг 4 — Монетизация</div>
+      <div class="section-sub">3 сценария с реальными цифрами для Узбекистана</div>
+    </div>
+  </div>
+
+  <div class="scenario">
+    <div class="scenario-header">
+      <div>
+        <div class="scenario-name">Сценарий 1: HR-инструмент для себя</div>
+        <div style="font-size:13px;color:#888;margin-top:4px">Использовать только внутри своего клуба, без продаж</div>
+      </div>
+      <div class="score score-high">9/10</div>
+    </div>
+    <p style="font-size:14px;color:#444">Уже работает. Экономия ~$500–800/год на административных ошибках и времени координатора. Снижение конфликтов по ЗП = меньше текучки тренеров. <strong>Никаких юридических рисков.</strong></p>
+    <p style="font-size:13px;color:#888;margin-top:8px">→ Первое действие: замерить реальную экономию времени за 2–3 месяца. Это станет главным аргументом при продаже другим клубам.</p>
+  </div>
+
+  <div class="scenario">
+    <div class="scenario-header">
+      <div>
+        <div class="scenario-name">Сценарий 2: Белый лейбл / установка под ключ</div>
+        <div style="font-size:13px;color:#888;margin-top:4px">Настройка системы для другого клуба как услуга</div>
+      </div>
+      <div class="score score-high">7/10</div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0">
+      <div style="background:#f8f9fa;border-radius:10px;padding:12px">
+        <div style="font-size:12px;font-weight:700;color:#555;margin-bottom:6px">Модель оплаты</div>
+        <div style="font-size:13px">Установка: $200–400</div>
+        <div style="font-size:13px">Поддержка: $30–50/мес</div>
+        <div style="font-size:13px">Доработки: $20–40/час</div>
+      </div>
+      <div style="background:#f8f9fa;border-radius:10px;padding:12px">
+        <div style="font-size:12px;font-weight:700;color:#555;margin-bottom:6px">Потенциал</div>
+        <div style="font-size:13px">5 клубов → $200/мес</div>
+        <div style="font-size:13px">20 клубов → $800/мес</div>
+        <div style="font-size:13px">50 клубов → $2 000/мес</div>
+      </div>
+    </div>
+    <p style="font-size:13px;color:#666">Почему работает в Узбекистане: малый бизнес понимает "заплатил один раз, оно работает". Telegram знают все. Личный контакт при установке = доверие = сарафанное радио.</p>
+  </div>
+
+  <div class="scenario">
+    <div class="scenario-header">
+      <div>
+        <div class="scenario-name">Сценарий 3: SaaS подписка</div>
+        <div style="font-size:13px;color:#888;margin-top:4px">Разные уровни доступа по цене</div>
+      </div>
+      <div class="score score-mid">5/10</div>
+    </div>
+    <table class="priority-table" style="margin-bottom:12px">
+      <thead><tr><th>Тариф</th><th>Цена/мес</th><th>Что включает</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Старт</strong></td><td>$15–20</td><td>Учёт ПТ, балансы, до 5 тренеров</td></tr>
+        <tr><td><strong>Про</strong></td><td>$35–50</td><td>+ Группы, ЗП, дежурства, до 15 тренеров</td></tr>
+        <tr><td><strong>Клуб</strong></td><td>$70–100</td><td>+ Несколько филиалов, Excel, аналитика, безлимит</td></tr>
+      </tbody>
+    </table>
+    <p style="font-size:13px;color:#666"><strong>Что нужно технически:</strong> поле <code>club_id</code> во всех таблицах + RLS + онбординг + изоляция данных. ~3–4 недели работы. <strong>Главный риск:</strong> в Узбекистане продажи через холодный outreach не работают — нужен личный контакт.</p>
+  </div>
+
+  <div class="card">
+    <h3>🚀 5 функций которые максимально увеличат готовность платить</h3>
+    <ol>
+      <li><strong>Автоматические уведомления клиентам</strong> — напоминание об истекающем абонементе в Telegram клиента. ROI виден сразу: "напомнил 10, 7 продлили".</li>
+      <li><strong>Касса / учёт оплат наличными</strong> — Узбекистан наличный рынок. Журнал: кто, сколько, за что. Убийца Excel-таблицы у администратора.</li>
+      <li><strong>Дашборд выручки для владельца</strong> — простой экран: сколько заработал клуб, какой тренер приносит больше, заполненность групп. Владелец платит — ему нужны цифры.</li>
+      <li><strong>Онлайн-запись клиентов через Telegram</strong> — клиент сам записывается к тренеру. Снимает нагрузку с администратора, выглядит современно.</li>
+      <li><strong>Фото прогресса клиента</strong> — тренер загружает фото раз в месяц, клиент видит результат. Инструмент удержания клиентов = аргумент для владельца клуба.</li>
+    </ol>
+  </div>
+
+  <div class="action-box">
+    <h3>📋 Рекомендуемая последовательность</h3>
+    <p><strong>0–3 мес:</strong> HR-инструмент для себя + добавить кассу наличных + дашборд владельца. Замерить экономию.</p>
+    <p style="margin-top:8px"><strong>3–9 мес:</strong> 3–5 клубов по модели "установка под ключ" ($200–300 + $40/мес поддержка). Реальные кейсы и отзывы.</p>
+    <p style="margin-top:8px"><strong>9–24 мес:</strong> при 15–20 клубах — инвестировать в мультиарендность и переходить к SaaS.</p>
+    <p style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.3)"><strong>Главный вывод:</strong> Узбекский рынок покупает через доверие и личный контакт. Не пытайтесь сразу строить SaaS. Белый лейбл — и быстрые деньги, и путь к пониманию рынка.</p>
+  </div>
+</div>
+
+<!-- ИТОГ -->
+<div class="card" style="background:#1a1a2e;color:white;border:none">
+  <h3 style="color:white;margin-bottom:16px">⚡ Три действия прямо сейчас (суммарно ~3 часа)</h3>
+  <ol style="color:rgba(255,255,255,.85)">
+    <li style="margin-bottom:10px"><strong style="color:#60a5fa">10 минут:</strong> Закрыть dev-режим — убрать prompt() для tg_id вне Telegram. <em>Критично.</em></li>
+    <li style="margin-bottom:10px"><strong style="color:#60a5fa">1–2 часа:</strong> Исправить неатомарное списание в logWorkouts + убрать молчащий .catch в approveLateRequest. <em>Деньги.</em></li>
+    <li><strong style="color:#60a5fa">30 минут:</strong> Проверить RLS-политики в Supabase Dashboard — они могут уже быть неверно настроены. <em>Безопасность.</em></li>
+  </ol>
+</div>
+
+<div style="text-align:center;font-size:12px;color:#aaa;margin-top:32px">
+  AquaDesk Analysis Report · 8 июня 2026 · 4 специалиста параллельно
+</div>
+
+</div>
+</body>
+</html>
