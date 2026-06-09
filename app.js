@@ -2352,6 +2352,9 @@ async function renderClientProfile(clientId, backTab='home') {
             ${canEdit&&(balanceZero||subExpired)?`<button class="btn btn-sm btn-primary"
               onclick="renderBuyPackageModal('${clientId}',${isChildClient},${client.balance||0})">
               🛒 Новый пакет</button>`:''}
+            <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
+              onclick="renderClientReportModal('${clientId}')">
+              📊 Отчёт</button>
             ${canEdit?`<button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
               onclick="renderTransferClientModal('${clientId}','${client.fio}',${STATE.profile.id})">
               🔄 Передать</button>`:''}
@@ -2426,6 +2429,80 @@ function togglePastSub(id) {
   const open=div.style.display==='none';
   div.style.display=open?'':'none';
   if (arrow) arrow.textContent=open?'∨':'›';
+}
+
+// ── ОТЧЁТ ПО АБОНЕМЕНТУ ──────────────────────
+async function renderClientReportModal(clientId) {
+  const m=el('div','modal-overlay');
+  m.innerHTML=`<div class="modal"><div class="modal-header"><h3>Отчёт по абонементу</h3>
+    <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="center-screen"><div class="spinner"></div></div></div>`;
+  document.body.appendChild(m);
+  try {
+    const {subscriptions,workouts}=await DB.getClientProfile(clientId,STATE.profile.role,STATE.profile.branches);
+    const validSubs=subscriptions.filter(s=>s.start_date);
+    const modal=m.querySelector('.modal');
+    if (!validSubs.length) {
+      modal.innerHTML=`<div class="modal-header"><h3>Отчёт по абонементу</h3>
+        <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+        <p class="hint" style="margin-top:12px">Нет абонементов</p>`;
+      return;
+    }
+    // Только обычные ПТ (без разовых)
+    window._reportWorkouts=workouts.filter(w=>!w.is_drop_in&&(!w.is_debt||w.debt_confirmed_at));
+    window._reportSubs=validSubs;
+    modal.innerHTML=`
+      <div class="modal-header"><h3>Отчёт по абонементу</h3>
+        <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+      <div class="form-group" style="margin-bottom:12px">
+        <select id="report-sub-select" onchange="renderSubReport()" style="width:100%">
+          ${validSubs.map((s,i)=>`<option value="${i}">${s.is_active?'Абонемент с '+s.start_date:s.start_date+' — '+(s.end_date||'?')}</option>`).join('')}
+        </select>
+      </div>
+      <div id="report-body"></div>`;
+    renderSubReport();
+  } catch(e) { console.error(e); toast('Ошибка','error'); }
+}
+
+function renderSubReport() {
+  const sel=document.getElementById('report-sub-select');
+  const idx=parseInt(sel?.value||0);
+  const sub=window._reportSubs?.[idx];
+  const body=document.getElementById('report-body');
+  if (!sub||!body) return;
+
+  const from=new Date(sub.start_date+'T00:00:00');
+  const to=sub.end_date ? new Date(sub.end_date+'T23:59:59') : new Date();
+
+  const subWorkouts=(window._reportWorkouts||[])
+    .filter(w=>{ const d=new Date(w.workout_date); return d>=from&&d<=to; })
+    .sort((a,b)=>new Date(a.workout_date)-new Date(b.workout_date));
+
+  if (!subWorkouts.length) {
+    body.innerHTML='<p class="hint">Нет тренировок в этом периоде</p>'; return;
+  }
+
+  const MONTHS=['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+  const DAYS=['ВС','ПН','ВТ','СР','ЧТ','ПТ','СБ'];
+  const byMonth={};
+  for (const w of subWorkouts) {
+    const d=new Date(w.workout_date);
+    const key=`${d.getFullYear()}-${d.getMonth()}`;
+    if (!byMonth[key]) byMonth[key]={label:MONTHS[d.getMonth()],dates:[]};
+    byMonth[key].dates.push(d);
+  }
+
+  body.innerHTML=Object.values(byMonth).map(mo=>`
+    <div style="margin-bottom:16px">
+      <div style="font-weight:600;margin-bottom:8px">${mo.label} (${mo.dates.length})</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">
+        ${mo.dates.map(d=>`
+          <div style="display:flex;flex-direction:column;align-items:center;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:6px 10px;min-width:36px">
+            <span style="font-size:10px;color:var(--hint);font-weight:600;letter-spacing:.5px">${DAYS[d.getDay()]}</span>
+            <span style="font-size:20px;font-weight:700;line-height:1.2">${d.getDate()}</span>
+          </div>`).join('')}
+      </div>
+    </div>`).join('');
 }
 
 function renderSessionsList(workouts, activeSubId, clientId, canEdit=true) {
