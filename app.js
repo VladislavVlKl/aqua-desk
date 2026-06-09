@@ -152,6 +152,8 @@ async function init() {
   }
   loading('Загружаем...');
   try {
+    // Очищаем любую старую auth сессию (после rollback telegram-auth)
+    try { const {data:{session}}=await sb().auth.getSession(); if(session) await sb().auth.signOut(); } catch(e){}
     const p=await DB.getProfileByTgId(STATE.tgId);
     if (!p) { renderRegister(); return; }
     STATE.profile=p;
