@@ -2619,7 +2619,7 @@ async function doCloseSubEarly(subId, clientId, isChild) {
   const btn=document.querySelector('.modal .btn-danger');
   if (btn) { btn.disabled=true; btn.textContent='Закрываем...'; }
   try {
-    await DB.closeSubEarly(subId, clientId, isChild, note);
+    await DB.closeSubEarly(subId, clientId, isChild, note, todayStr());
     document.querySelector('.modal-overlay')?.remove();
     toast(isChild?'✅ Абонемент закрыт, остаток сгорел':'✅ Абонемент закрыт, остаток сохранён','success');
     renderClientProfile(clientId, STATE.currentTab||'clients');
