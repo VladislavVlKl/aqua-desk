@@ -2384,7 +2384,7 @@ async function renderClientProfile(clientId, backTab='home') {
         <div class="sub-card active-sub">
           <div class="sub-card-header">
             <span>📅 Абонемент с ${activeSub.start_date}</span>
-            ${canEdit?`<button class="btn btn-sm btn-warn" onclick="renderCloseSubModal(${activeSub.id})">❄️ Заморозить</button>`:''}
+            ${canEdit?`<button class="btn btn-sm btn-warn" onclick="renderCloseSubEarlyModal(${activeSub.id},'${clientId}',${isChildClient})">❄️ Закрыть досрочно</button>`:''}
           </div>
           <div class="goals-section">
             <div class="goals-header">
@@ -2595,28 +2595,37 @@ async function doCreateSub(clientId) {
 }
 
 // Модал: закрыть абонемент
-function renderCloseSubModal(subId) {
+function renderCloseSubEarlyModal(subId, clientId, isChild) {
   const m=el('div','modal-overlay');
+  const balanceInfo = isChild
+    ? `<div class="warn-banner" style="background:rgba(239,68,68,.08);border-color:rgba(239,68,68,.3);margin-bottom:12px">
+        ⚠️ Ребёнок: остаток тренировок <strong>сгорит</strong> при досрочном закрытии.
+       </div>`
+    : `<div class="warn-banner" style="background:rgba(16,185,129,.08);border-color:rgba(16,185,129,.3);margin-bottom:12px">
+        ✅ Взрослый: остаток тренировок <strong>сохранится</strong>. При покупке нового пакета восстановится автоматически.
+       </div>`;
   m.innerHTML=`<div class="modal">
-    <div class="modal-header"><h3>Закрыть абонемент</h3>
+    <div class="modal-header"><h3>Закрыть абонемент досрочно</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
-    <div class="form-group"><label>Дата окончания</label>
-      <input type="date" id="sub-end" value="${todayStr()}"></div>
-    <div class="form-group"><label>Примечание (необязательно)</label>
-      <textarea id="sub-closing" rows="2" placeholder="Клиент уехал в командировку..."></textarea></div>
-    <button class="btn btn-danger btn-full" onclick="doCloseSub(${subId})">Закрыть</button>
+    ${balanceInfo}
+    <div class="form-group"><label>Причина (необязательно)</label>
+      <textarea id="sub-closing" rows="2" placeholder="Клиент уехал, перешёл в другую группу..."></textarea></div>
+    <button class="btn btn-danger btn-full" onclick="doCloseSubEarly(${subId},'${clientId}',${isChild})">❄️ Закрыть досрочно</button>
   </div>`;
   document.body.appendChild(m);
 }
-async function doCloseSub(subId) {
-  const end=document.getElementById('sub-end')?.value;
+async function doCloseSubEarly(subId, clientId, isChild) {
   const note=document.getElementById('sub-closing')?.value.trim()||'';
-  if (!end) return toast('Введите дату','error');
+  const btn=document.querySelector('.modal .btn-danger');
+  if (btn) { btn.disabled=true; btn.textContent='Закрываем...'; }
   try {
-    await DB.closeSubscription(subId,note,end);
+    await DB.closeSubEarly(subId, clientId, isChild, note);
     document.querySelector('.modal-overlay')?.remove();
-    toast('✅ Абонемент закрыт','success'); history.back();
-  } catch(e) { toast('Ошибка','error'); }
+    toast(isChild?'✅ Абонемент закрыт, остаток сгорел':'✅ Абонемент закрыт, остаток сохранён','success');
+    renderClientProfile(clientId, STATE.currentTab||'clients');
+  } catch(e) { toast('Ошибка','error'); console.error(e);
+    if (btn) { btn.disabled=false; btn.textContent='❄️ Закрыть досрочно'; }
+  }
 }
 
 // Модал: конспект занятия

@@ -952,6 +952,18 @@ async unassignTrainerGroup(id) {
       .eq('id',subId).select().single();
     if (error) throw error; return data;
   },
+  async closeSubEarly(subId, clientId, isChild, closingNote) {
+    const today = new Date().toISOString().slice(0,10);
+    const note = closingNote || (isChild ? 'Досрочное закрытие. Остаток сгорел.' : 'Досрочное закрытие. Остаток сохранён.');
+    const {error} = await sb().from('subscriptions')
+      .update({is_active:false, end_date:today, closing_note:note})
+      .eq('id',subId);
+    if (error) throw error;
+    if (isChild) {
+      const {error:be} = await sb().from('clients').update({balance:0}).eq('id',clientId);
+      if (be) throw be;
+    }
+  },
 
   // ─── TRAINING GOALS ──────────────────────────
   async addGoal(subscriptionId, clientId, goalText) {
