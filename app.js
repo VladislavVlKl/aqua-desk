@@ -3317,7 +3317,7 @@ async function renderGroupDetail(groupId) {
           return `<div class="staff-card" style="flex-direction:column;gap:8px">
             <div style="display:flex;justify-content:space-between;align-items:center">
               <div>
-                <div class="staff-fio">${c.name}${c.age?`, ${c.age} лет`:''}</div>
+                <div class="staff-fio">${c.name}</div>
                 <div class="staff-meta">${c.level} · ${fmt(c.monthly_price)} сум/мес</div>
               </div>
               <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
