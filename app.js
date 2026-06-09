@@ -389,9 +389,10 @@ async function renderHomeTab() {
           ${clients.map(c=>{
             const days=daysUntil(c.subscription_end);
             const warn=days!==null&&days<=SUBSCRIPTION_WARN_DAYS&&days>=0?' ⚠️':'';
+            const isFrozen = c.freeze_start && c.freeze_end && todayStr() >= c.freeze_start && todayStr() <= c.freeze_end;
             return `<option value="${c.id}" data-cat="${c.category}" data-bal="${c.balance}"
-              data-age="${c.age||''}" data-di="${c.drop_in_used}">
-              ${c.fio}${warn}</option>`;
+              data-age="${c.age||''}" data-di="${c.drop_in_used}" data-archived="${c.is_archived?'1':''}" data-frozen="${isFrozen?'1':''}">
+              ${c.is_archived?'[Архив] ':isFrozen?'[Заморожен] ':''}${c.fio}${warn}</option>`;
           }).join('')}
         </select>
         <div id="wk-client-chip" style="display:none;padding:10px 12px;background:var(--card);border:1px solid var(--accent);border-radius:8px;justify-content:space-between;align-items:center;cursor:pointer;margin-bottom:0">
@@ -459,9 +460,11 @@ async function renderHomeTab() {
       <div class="home-block-title">⏱ Запись дежурства</div>
       <div class="form-group" style="display:flex;gap:10px">
         <div style="flex:1"><label>Начало</label>
-          <input type="datetime-local" id="duty-start" value="${defStart}"></div>
+          <input type="datetime-local" id="duty-start" value="${defStart}" step="3600"
+            onchange="this.value=this.value.slice(0,13)+':00'"></div>
         <div style="flex:1"><label>Конец</label>
-          <input type="datetime-local" id="duty-end" value="${defEnd}"></div>
+          <input type="datetime-local" id="duty-end" value="${defEnd.slice(0,13)+':00'}" step="3600"
+            onchange="this.value=this.value.slice(0,13)+':00'"></div>
       </div>
       ${branchSelect('duty-branch',branches)}
       <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border)"
@@ -523,15 +526,18 @@ async function renderClientsTab() {
     DB.getOverdueNotesBatch(STATE.profile.id).catch(()=>({})),
   ]);
   const pendingNotes = Object.values(overdueMap).reduce((s,n)=>s+n, 0);
+  window._overdueMap = overdueMap;
+  window._clientsList = clients;
 
   const renderList = (filter='') => {
     const body = document.getElementById('cl-list');
     if (!body) return;
     let arr = filter ? clients.filter(c=>c.fio.toLowerCase().includes(filter.toLowerCase())) : clients;
     if (!arr.length) { body.innerHTML='<p class="hint" style="text-align:center;padding:20px">Не найдено</p>'; return; }
-    // Сортировка: просроченные → истекающие/нулевой баланс → остальные
+    // Сортировка: просроченные → истекающие/нулевой баланс → остальные → архивные в конец
     arr = [...arr].sort((a,b)=>{
       const score = c=>{
+        if (c.is_archived) return 10;           // архивные — в самый конец
         const d=daysUntil(c.subscription_end);
         if (d!==null&&d<0) return 0;           // просрочен
         if (c.balance<=0) return 1;             // нулевой баланс
@@ -545,33 +551,64 @@ async function renderClientsTab() {
       const warn = days!==null&&days<=SUBSCRIPTION_WARN_DAYS&&days>=0;
       const exp  = days!==null&&days<0;
       const noBalance = c.balance<=0;
+      const today0 = todayStr();
+      const isFrozen = c.freeze_start && c.freeze_end && today0 >= c.freeze_start && today0 <= c.freeze_end;
       const dot  = c.color?`<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${c.color};margin-right:4px;vertical-align:middle"></span>`:'';
       let rowBg = '';
-      if (exp)           rowBg = 'background:rgba(239,68,68,.08);border-left:3px solid rgba(239,68,68,.5)';
+      if (c.is_archived)     rowBg = 'background:rgba(100,116,139,.07);border-left:3px solid rgba(100,116,139,.3);opacity:.75';
+      else if (isFrozen)     rowBg = 'background:rgba(96,165,250,.08);border-left:3px solid rgba(96,165,250,.4)';
+      else if (exp)          rowBg = 'background:rgba(239,68,68,.08);border-left:3px solid rgba(239,68,68,.5)';
       else if (warn||noBalance) rowBg = 'background:rgba(245,158,11,.08);border-left:3px solid rgba(245,158,11,.5)';
       return `<div class="client-row" style="${rowBg}" onclick="renderClientProfile('${c.id}','clients')">
         <div style="flex:1;min-width:0">
-          <div class="cr-name" style="font-size:16px;font-weight:600">${dot}${c.fio}</div>
+          <div class="cr-name" style="font-size:16px;font-weight:600">${dot}${c.is_archived?'<span style="font-size:11px;color:var(--hint);font-weight:400;margin-right:4px">[Архив]</span>':''}${c.fio}</div>
           <div class="cr-meta" style="margin-top:2px;display:flex;flex-wrap:wrap;gap:4px;align-items:center">
             <span class="hi-cat cat-${c.category}" style="font-size:11px;padding:1px 7px;border-radius:8px;font-weight:600">Кат.${c.category}</span>
             <span style="font-size:12px;color:var(--hint)">${c.balance} ПТ</span>
             ${c.age?`<span style="font-size:12px;color:var(--hint)">${c.age} лет</span>`:''}
-            ${c.subscription_end?`<span style="font-size:12px;color:${exp?'#ef4444':warn?'#f59e0b':'var(--hint)'}">до ${c.subscription_end}</span>`:''}
+            ${isFrozen?`<span style="font-size:12px;color:#3b82f6">🧊 до ${c.freeze_end}</span>`:''}
+            ${!isFrozen&&c.subscription_end?`<span style="font-size:12px;color:${exp?'#ef4444':warn?'#f59e0b':'var(--hint)'}">до ${c.subscription_end}</span>`:''}
           </div>
         </div>
         <span class="cr-arrow">›</span>
       </div>`;
     }).join('');
   };
+  // Считаем активных (баланс > 0 и абонемент не истёк)
+  const now = new Date(); now.setHours(0,0,0,0);
+  const activeClients = clients.filter(c => {
+    if (c.is_archived) return false;
+    if ((c.balance||0) <= 0) return false;
+    if (c.subscription_end && new Date(c.subscription_end) < now) return false;
+    const t = todayStr();
+    if (c.freeze_start && c.freeze_end && t >= c.freeze_start && t <= c.freeze_end) return false;
+    return true;
+  });
+
+  // Обновляем значок конспектов в хедере
+  const noteBadge = document.getElementById('note-badge');
+  if (noteBadge) {
+    if (pendingNotes > 0) {
+      noteBadge.innerHTML = `📝<span style="position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;border-radius:50%;font-size:9px;width:16px;height:16px;line-height:16px;text-align:center;display:inline-block">${pendingNotes}</span>`;
+      noteBadge.style.cssText = 'display:inline-flex;position:relative';
+      noteBadge.onclick = () => renderOverdueNotesModal(overdueMap, clients);
+    } else {
+      noteBadge.style.display = 'none';
+    }
+  }
+
   $('#tab-content').innerHTML=`<div class="tab-pad">
     <div class="section-header">
       <h3>Мои клиенты</h3>
       <button class="btn btn-sm" onclick="renderAddClientModal()">+ Клиент</button>
     </div>
+    <div style="font-size:12px;color:var(--hint);margin-bottom:8px">
+      Всего: <b>${clients.length}</b> · Активных: <b style="color:#10b981">${activeClients.length}</b>
+    </div>
     <input type="text" id="cl-search" placeholder="🔍 Поиск..." oninput="(()=>{const f=this.value;const b=document.getElementById('cl-list');if(b){const arr=${JSON.stringify('clients')};}})()"
       style="width:100%;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text);font-size:14px;margin-bottom:8px;box-sizing:border-box">
-    ${pendingNotes>0?`<div class="warn-banner">
-      📝 ${pendingNotes} незакрытых конспектов — нажмите на клиента ниже чтобы написать
+    ${pendingNotes>0?`<div class="warn-banner" style="cursor:pointer" onclick="renderOverdueNotesModal(window._overdueMap, window._clientsList)">
+      📝 ${pendingNotes} незакрытых конспектов — нажмите чтобы посмотреть
     </div>`:''}
     ${!clients.length?'<div class="empty-state">👥<p>Клиентов нет.<br>Нажмите + Клиент чтобы добавить.</p></div>':'<div id="cl-list"></div>'}
   </div>`;
@@ -579,6 +616,33 @@ async function renderClientsTab() {
     document.getElementById('cl-search').addEventListener('input', e => renderList(e.target.value));
     renderList();
   }
+}
+
+function renderOverdueNotesModal(overdueMap, clients) {
+  const clientMap = Object.fromEntries((clients||[]).map(c=>[c.id, c]));
+  const entries = Object.entries(overdueMap||{}).filter(([,n])=>n>0);
+  if (!entries.length) return;
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>📝 Незакрытые конспекты</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <p class="hint" style="margin-bottom:12px">Нажмите на клиента чтобы перейти и написать конспект:</p>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      ${entries.map(([clientId, count])=>{
+        const c = clientMap[clientId];
+        if (!c) return '';
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:12px;background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.2);border-radius:10px;cursor:pointer"
+          onclick="this.closest('.modal-overlay').remove();renderClientProfile('${clientId}','clients')">
+          <div>
+            <div style="font-weight:600">${c.fio}</div>
+            <div style="font-size:12px;color:var(--hint)">Кат.${c.category} · ${c.balance} ПТ</div>
+          </div>
+          <span style="background:rgba(239,68,68,.15);color:#ef4444;padding:3px 10px;border-radius:12px;font-weight:700;font-size:13px">${count} конспект${count>1?'а':''}</span>
+        </div>`;
+      }).join('')}
+    </div>
+  </div>`;
+  document.body.appendChild(m);
 }
 
 // ── ТАБ: СПИСАНИЕ ─────────────────────────────
@@ -743,6 +807,8 @@ async function _doLogWorkoutInner() {
   const clientId=clientSel?.value;
   if (!clientId) return toast('Выберите клиента','error');
   const opt=clientSel.options[clientSel.selectedIndex];
+  if (opt?.dataset.archived==='1') return toast('Клиент в архиве — списание недоступно','error');
+  if (opt?.dataset.frozen==='1') return toast('Абонемент заморожен — списание недоступно','error');
   const category=parseInt(opt.dataset.cat);
   const type=$('#wk-type')?.value||'regular';
   const isDropIn=type.startsWith('dropin'), isDebt=type==='debt';
@@ -1437,10 +1503,11 @@ async function renderTodayTab() {
   const yesterdayStr=yesterday.toISOString().slice(0,10);
   const dayName=DAYS_FULL[(new Date().getDay()+6)%7];
   try {
-    const [slots, yesterdaySlots, events] = await Promise.all([
+    const [slots, yesterdaySlots, events, todayWorkouts] = await Promise.all([
       DB.getTodaySlots(STATE.profile.id, date),
       DB.getTodaySlots(STATE.profile.id, yesterdayStr),
       DB.getUpcomingEvents(STATE.profile.branches?.[0]||null),
+      DB.getTodayWorkouts(STATE.profile.id, date),
     ]);
 
     // Вчерашние незакрытые (только PT и группы, без дежурств)
@@ -1482,6 +1549,21 @@ async function renderTodayTab() {
       ${ptSlots.length?`<h4>Персональные тренировки</h4>${ptSlots.map(s=>renderTodaySlot(s,date)).join('')}`:''}
       ${grpSlots.length?`<h4>Групповые занятия</h4>${grpSlots.map(s=>renderTodaySlot(s,date)).join('')}`:''}
       ${!slots.length&&!todayEvents.length&&!missedSlots.length?'<div class="empty-state">📭<p>На сегодня ничего нет</p></div>':''}
+      ${todayWorkouts.length?`
+      <h4 style="margin-top:20px">✅ Списано сегодня (${todayWorkouts.length})</h4>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        ${todayWorkouts.map(w=>{
+          const type = w.is_drop_in?'Разовое':w.is_debt?'В долг':'ПТ';
+          const color = w.is_debt?'#f59e0b':w.is_drop_in?'#7c3aed':'#10b981';
+          return `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:var(--card);border:1px solid var(--border);border-radius:10px">
+            <div>
+              <div style="font-weight:500">${w.clients?.fio||'—'}</div>
+              <div style="font-size:12px;color:var(--hint)">Кат.${w.clients?.category||w.category||'?'}</div>
+            </div>
+            <span style="font-size:12px;padding:2px 8px;border-radius:8px;background:rgba(16,185,129,.1);color:${color};font-weight:600">${type}</span>
+          </div>`;
+        }).join('')}
+      </div>`:''}
     </div>`;
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
@@ -1582,9 +1664,11 @@ async function renderDutyTab() {
     <p class="hint" style="margin-bottom:16px">Введите фактическое время начала и окончания.</p>
     <div class="form-group" style="display:flex;gap:10px">
       <div style="flex:1"><label>Начало</label>
-        <input type="datetime-local" id="duty-start" value="${defStart}"></div>
+        <input type="datetime-local" id="duty-start" value="${defStart}" step="3600"
+          onchange="this.value=this.value.slice(0,13)+':00'"></div>
       <div style="flex:1"><label>Конец</label>
-        <input type="datetime-local" id="duty-end" value="${defEnd}"></div>
+        <input type="datetime-local" id="duty-end" value="${defEnd.slice(0,13)+':00'}" step="3600"
+          onchange="this.value=this.value.slice(0,13)+':00'"></div>
     </div>
     ${branchSelect('sel-branch',branches)}
     <button class="btn btn-primary btn-full" onclick="doLogDuty()">Записать</button>
@@ -2397,8 +2481,9 @@ async function renderClientProfile(clientId, backTab='home') {
             ${isAdmin?`<button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
               onclick="renderAdminTransferModal('${clientId}','${client.fio}')">
               🔄 Передать (адм.)</button>`:''}
+            ${canEdit&&activeSub&&!activeSub.freeze_start?`<button class="btn btn-sm" style="background:rgba(96,165,250,.15);color:#3b82f6;border:1px solid rgba(96,165,250,.3)" onclick="renderFreezeModal(${activeSub.id},'${clientId}','${client.subscription_end||''}')">🧊 Заморозка</button>`:''}
             ${canEdit?`<button class="btn btn-sm" style="background:rgba(239,68,68,.15);color:#ef4444;border:1px solid rgba(239,68,68,.3)"
-              onclick="doArchiveClient('${clientId}','${encodeURIComponent(client.fio)}')">
+              onclick="renderArchiveClientModal('${clientId}','${encodeURIComponent(client.fio)}')">
               📦 Архив</button>`:''}
             ${canEdit?`<button class="btn btn-sm btn-danger"
               onclick="doDeleteClientCheck('${clientId}','${encodeURIComponent(client.fio)}','${client.created_at||''}')">
@@ -2420,8 +2505,11 @@ async function renderClientProfile(clientId, backTab='home') {
         <div class="sub-card active-sub">
           <div class="sub-card-header">
             <span>📅 Абонемент с ${activeSub.start_date}</span>
-            ${canEdit?`<button class="btn btn-sm btn-warn" onclick="renderCloseSubEarlyModal(${activeSub.id},'${clientId}',${isChildClient})">❄️ Закрыть досрочно</button>`:''}
           </div>
+          ${activeSub.freeze_start?`<div style="background:rgba(96,165,250,.12);border:1px solid rgba(96,165,250,.3);border-radius:8px;padding:8px 12px;margin-bottom:8px;font-size:13px;color:#3b82f6;font-weight:500">
+            🧊 Заморожен: ${activeSub.freeze_start} — ${activeSub.freeze_end}
+          </div>`:''}
+          <div class="goals-section">
           <div class="goals-section">
             <div class="goals-header">
               <span class="goals-title">🎯 Цели</span>
@@ -2631,6 +2719,56 @@ async function doCreateSub(clientId) {
 }
 
 // Модал: закрыть абонемент
+function renderFreezeModal(subId, clientId, currentSubEnd) {
+  const today = todayStr();
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>🧊 Заморозка абонемента</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <p class="hint" style="margin-bottom:16px">Укажите период заморозки. Конец абонемента сдвинется на количество замороженных дней.</p>
+    <div style="display:flex;gap:10px;margin-bottom:12px">
+      <div style="flex:1"><label style="font-size:12px;color:var(--hint)">Начало заморозки</label>
+        <input type="date" id="frz-start" value="${today}" min="${today}"
+          style="width:100%;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text);font-size:14px;box-sizing:border-box"></div>
+      <div style="flex:1"><label style="font-size:12px;color:var(--hint)">Конец заморозки</label>
+        <input type="date" id="frz-end" value="${today}" min="${today}"
+          oninput="calcFreezeResult('${currentSubEnd}')"
+          style="width:100%;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text);font-size:14px;box-sizing:border-box"></div>
+    </div>
+    <div id="frz-result" style="background:rgba(96,165,250,.1);border:1px solid rgba(96,165,250,.3);border-radius:8px;padding:10px;font-size:13px;margin-bottom:16px;display:none"></div>
+    <button class="btn btn-primary btn-full" onclick="doFreezeSubscription(${subId},'${clientId}','${currentSubEnd}')">Заморозить</button>
+  </div>`;
+  document.body.appendChild(m);
+  document.getElementById('frz-start').addEventListener('input', () => calcFreezeResult(currentSubEnd));
+}
+function calcFreezeResult(currentSubEnd) {
+  const start = document.getElementById('frz-start')?.value;
+  const end   = document.getElementById('frz-end')?.value;
+  const res   = document.getElementById('frz-result');
+  if (!start || !end || !res) return;
+  const days = Math.round((new Date(end) - new Date(start)) / 86400000);
+  if (days < 1) { res.style.display='none'; return; }
+  const newEnd = new Date(currentSubEnd);
+  newEnd.setDate(newEnd.getDate() + days);
+  res.style.display='';
+  res.innerHTML=`Дней заморозки: <b>${days}</b> · Новый конец абонемента: <b>${newEnd.toISOString().slice(0,10)}</b>`;
+}
+async function doFreezeSubscription(subId, clientId, currentSubEnd) {
+  const start = document.getElementById('frz-start')?.value;
+  const end   = document.getElementById('frz-end')?.value;
+  if (!start || !end) return toast('Укажите даты заморозки','error');
+  const days = Math.round((new Date(end) - new Date(start)) / 86400000);
+  if (days < 1) return toast('Конец заморозки должен быть позже начала','error');
+  const newEnd = new Date(currentSubEnd);
+  newEnd.setDate(newEnd.getDate() + days);
+  const newEndStr = newEnd.toISOString().slice(0,10);
+  try {
+    await DB.freezeSubscription(subId, clientId, start, end, newEndStr);
+    document.querySelector('.modal-overlay')?.remove();
+    toast('Абонемент заморожен 🧊','success');
+    renderClientProfile(clientId, STATE.currentTab||'clients');
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
 function renderCloseSubEarlyModal(subId, clientId, isChild) {
   const m=el('div','modal-overlay');
   const balanceInfo = isChild
@@ -4290,14 +4428,51 @@ async function saveAttendance(groupId, clientId, date, attended, instanceId='') 
     await DB.saveGroupAttendance(groupId, clientId, date, attended, instanceId||null);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
-async function doArchiveClient(id, fioEnc) {
+function renderArchiveClientModal(clientId, fioEnc) {
   const fio = decodeURIComponent(fioEnc);
-  if (!confirm(`Архивировать «${fio}»?\nКлиент исчезнет из списка. История сохранится.`)) return;
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>📦 Архивировать клиента</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <p style="margin-bottom:16px;font-weight:500">${fio}</p>
+    <p class="hint" style="margin-bottom:12px">Причина архивации:</p>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px">
+      <label style="display:flex;align-items:center;gap:10px;padding:12px;background:var(--card);border:1px solid var(--border);border-radius:10px;cursor:pointer">
+        <input type="radio" name="arch-reason" value="stopped" style="width:18px;height:18px"> Перестали ходить</label>
+      <label style="display:flex;align-items:center;gap:10px;padding:12px;background:var(--card);border:1px solid var(--border);border-radius:10px;cursor:pointer">
+        <input type="radio" name="arch-reason" value="refund" style="width:18px;height:18px"> Потребовали возврат</label>
+    </div>
+    <div id="arch-confirm-wrap" style="display:none;background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.2);border-radius:10px;padding:14px;margin-bottom:16px">
+      <p style="margin:0 0 12px;font-weight:600;color:#ef4444">Вы уверены?</p>
+      <p class="hint" style="margin:0 0 12px">Клиент уйдёт в архив. История тренировок сохранится. Новые списания будут недоступны.</p>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary" style="flex:1" onclick="doArchiveClientConfirmed('${clientId}')">Да, архивировать</button>
+        <button class="btn" style="flex:1;background:var(--card);border:1px solid var(--border)" onclick="this.closest('.modal-overlay').remove()">Нет</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.appendChild(m);
+  m.querySelectorAll('input[name="arch-reason"]').forEach(r => {
+    r.addEventListener('change', () => {
+      document.getElementById('arch-confirm-wrap').style.display = '';
+    });
+  });
+}
+async function doArchiveClientConfirmed(clientId) {
+  const reasonVal = document.querySelector('input[name="arch-reason"]:checked')?.value;
+  const reasonMap = { stopped: 'Перестали ходить', refund: 'Потребовали возврат' };
+  const reason = reasonMap[reasonVal] || '';
   try {
-    await DB.archiveClient(id);
+    await DB.archiveClient(clientId, reason);
+    document.querySelector('.modal-overlay')?.remove();
     toast('Клиент архивирован','success');
+    invalidateCache('clients');
     switchTab(STATE.currentTab||'clients');
   } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+async function doArchiveClient(id, fioEnc) {
+  // Устаревший алиас — на случай если где-то осталась ссылка
+  renderArchiveClientModal(id, fioEnc);
 }
 async function renderBranchAccessModal(trainerId, fioEnc) {
   const fio = decodeURIComponent(fioEnc);

@@ -152,7 +152,6 @@ const DB = {
   async getClients(trainerId) {
     const {data,error} = await sb().from('clients').select('*')
       .eq('trainer_id',trainerId)
-      .eq('is_archived',false)
       .order('last_used',{ascending:false,nullsFirst:false});
     if (error) throw error; return data||[];
   },
@@ -219,6 +218,15 @@ const DB = {
     const {data:cl} = await sb().from('clients').select('balance').eq('id',clientId).single();
     await sb().from('clients')
       .update({balance:Math.max(0,(cl?.balance||0)-1)}).eq('id',clientId);
+  },
+  async getTodayWorkouts(trainerId, dateStr) {
+    const from = dateStr + 'T00:00:00';
+    const to   = dateStr + 'T23:59:59';
+    const {data,error} = await sb().from('workouts')
+      .select('*, clients(fio,category)').eq('trainer_id',trainerId)
+      .gte('workout_date',from).lte('workout_date',to)
+      .order('workout_date',{ascending:false});
+    if (error) throw error; return data||[];
   },
   async getWorkouts(trainerId, year, month) {
     const from = new Date(year,month-1,1).toISOString();
@@ -326,9 +334,9 @@ async deleteClient(id) {
     const {error} = await sb().from('clients').delete().eq('id',id);
     if (error) throw error;
   },
-  async archiveClient(id) {
+  async archiveClient(id, reason='') {
     const {error} = await sb().from('clients')
-      .update({is_archived:true}).eq('id',id);
+      .update({is_archived:true, archive_reason:reason||null}).eq('id',id);
     if (error) throw error;
   },
   // ─── DUTIES ──────────────────────────────────
@@ -907,6 +915,14 @@ async unassignTrainerGroup(id) {
   },
 
   // ─── SUBSCRIPTIONS ───────────────────────────
+  async freezeSubscription(subId, clientId, freezeStart, freezeEnd, newSubEnd) {
+    const {error: e1} = await sb().from('subscriptions')
+      .update({freeze_start: freezeStart, freeze_end: freezeEnd}).eq('id', subId);
+    if (e1) throw e1;
+    const {error: e2} = await sb().from('clients')
+      .update({subscription_end: newSubEnd, freeze_start: freezeStart, freeze_end: freezeEnd}).eq('id', clientId);
+    if (e2) throw e2;
+  },
   async getActiveSubscription(clientId) {
     const {data,error} = await sb().from('subscriptions')
       .select('*, training_goals(*)')
