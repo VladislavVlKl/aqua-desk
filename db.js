@@ -606,11 +606,12 @@ async unassignTrainerGroup(id) {
       .select('*').eq('group_id',groupId).eq('trainer_id',trainerId).eq('month',month).maybeSingle();
     if (error) throw error; return data;
   },
-  async setGroupTrainerPayout(groupId, trainerId, month, payoutType, payoutValue, approvedBy, note='') {
+  async setGroupTrainerPayout(groupId, trainerId, month, payoutType, payoutValue, approvedBy, note='', bonus=0, penalty=0) {
     const {error} = await sb().from('group_trainer_payouts')
       .upsert({group_id:groupId, trainer_id:trainerId, month,
                payout_type:payoutType, payout_value:payoutValue,
-               note, approved_by:approvedBy, approved_at:new Date().toISOString()},
+               note, approved_by:approvedBy, approved_at:new Date().toISOString(),
+               bonus: bonus||0, penalty: penalty||0},
               {onConflict:'group_id,trainer_id,month'});
     if (error) throw error;
   },
@@ -643,7 +644,7 @@ async unassignTrainerGroup(id) {
     const instanceTrainerIds  = instanceTgRows.map(t=>t.trainer_id);
 
     // Загружаем всё параллельно
-    const [clients, payments, notes, attendance, payouts, instanceTrainers, instanceSessions] = await Promise.all([
+    const [clients, payments, notes, attendance, payouts, instanceTrainers, instanceSessions, substitutions] = await Promise.all([
       // Клиенты и оплаты — по instance если есть, иначе по groupId
       instanceId
         ? sb().from('group_clients').select('*').eq('group_instance_id',instanceId).eq('is_active',true).order('name')
@@ -675,6 +676,14 @@ async unassignTrainerGroup(id) {
         : sb().from('group_sessions').select('*')
             .gte('session_date',month).lt('session_date',nextMonthStr)
             .eq('trainer_id', tgRow?.trainer_id),
+      // Замены за месяц (по всем group_id instance)
+      instanceId
+        ? sb().from('group_substitutions').select('*, substitute:profiles!substitute_trainer_id(fio), original:profiles!original_trainer_id(fio)')
+            .in('group_id', instanceGroupIds.length ? instanceGroupIds : [groupId])
+            .gte('session_date',month).lt('session_date',nextMonthStr)
+        : sb().from('group_substitutions').select('*, substitute:profiles!substitute_trainer_id(fio), original:profiles!original_trainer_id(fio)')
+            .eq('group_id',groupId)
+            .gte('session_date',month).lt('session_date',nextMonthStr),
     ]);
 
     return {
@@ -685,8 +694,14 @@ async unassignTrainerGroup(id) {
       payouts:          payouts.data||[],
       trainers:         instanceTrainers.data||[tgRow].filter(Boolean),
       instanceSessions: instanceSessions.data||[],
+      substitutions:    substitutions.data||[],
       groupTypeInfo:    tgRow?.group_types||null,
     };
+  },
+
+  async updateGroupSubstitutionRate(id, rate) {
+    const {error} = await sb().from('group_substitutions').update({rate}).eq('id',id);
+    if (error) throw error;
   },
 
   // ─── PT SUBSTITUTIONS FOR MONTH ─────────────

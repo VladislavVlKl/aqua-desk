@@ -5010,7 +5010,7 @@ async function renderGroupMonthReport(groupId, monthStr) {
   loading('Загрузка...');
   try {
     const report = await DB.getGroupMonthReport(groupId, monthStr);
-    const {clients, payments, notes, attendance, payouts, trainers, instanceSessions, groupTypeInfo} = report;
+    const {clients, payments, notes, attendance, payouts, trainers, instanceSessions, substitutions, groupTypeInfo} = report;
 
     const payMap  = Object.fromEntries(payments.map(p=>[p.group_client_id, p]));
     const noteMap = Object.fromEntries(notes.map(n=>[n.group_client_id, n]));
@@ -5154,117 +5154,196 @@ async function renderGroupMonthReport(groupId, monthStr) {
         const isArtSwim = groupTypeInfo?.name?.toLowerCase().includes('art');
         const pricePerChild = groupTypeInfo?.price_per_month || 0;
         const activeCount  = clients.filter(c=>c.is_active!==false).length;
-        // База ЗП = активные дети × цена (не зависит от фактических оплат)
         const totalRevenue = activeCount * pricePerChild;
+        const pool         = Math.round(totalRevenue / 2); // пул = вал / 2
+
         const tgWithLeader = trainers.find(t=>t.leader_name);
         const leaderName   = tgWithLeader?.leader_name || '';
         const leaderPct    = tgWithLeader?.leader_fee_percent || 0;
-        const leaderFee    = leaderPct>0 ? Math.round(totalRevenue * leaderPct / 100) : 0;
+
+        // Замены за месяц
+        const subs = substitutions || [];
+
+        // Разделяем тренеров на процентных и ставочных
+        const percentTrainers = trainers.filter(t => t.rate_type === 'percent');
+        const flatTrainers    = trainers.filter(t => t.rate_type === 'flat');
+        const allFlat         = percentTrainers.length === 0 && flatTrainers.length > 0;
 
         // Расчёт ЗП каждого тренера
-        const trainerRows = trainers.map(t=>{
-          const existing = payouts.find(p=>p.trainer_id===t.trainer_id);
-          let autoAmt = 0;
+        const trainerRows = trainers.map(t => {
+          const existing     = payouts.find(p => p.trainer_id === t.trainer_id);
+          const mySessions   = (instanceSessions||[]).filter(s => s.trainer_id === t.trainer_id);
+          // Замены, где заменяли ЭТОГО тренера
+          const mySubs       = subs.filter(s => s.original_trainer_id === t.trainer_id);
+          const mySubCost    = mySubs.reduce((acc, s) => acc + Number(s.rate || 75000), 0);
+          // Замены, которые провёл ЭТОТ тренер (как заменяющий)
+          const subsICovered = subs.filter(s => s.substitute_trainer_id === t.trainer_id);
+          const subsICoveredCost = subsICovered.reduce((acc, s) => acc + Number(s.rate || 75000), 0);
+
+          let autoAmt  = 0;
           let calcNote = '';
 
           if (isArtSwim) {
-            // Арт-свим: процент от выручки (дети × цена) ИЛИ ставка за занятия
-            const sessions = (instanceSessions||[]).filter(s=>s.trainer_id===t.trainer_id);
-            const sessionCount = sessions.length;
-            if (t.rate_type==='percent') {
-              autoAmt = Math.round(totalRevenue * (t.rate_value||0) / 100);
-              calcNote = `${t.rate_value||0}% × ${fmt(totalRevenue)} сум (${activeCount} дет × ${fmt(pricePerChild)})`;
+            if (t.rate_type === 'percent') {
+              // Случай 1 и 2: процентный тренер
+              const base = Math.round(pool * (t.rate_value || 0) / 100);
+              if (!allFlat) {
+                // Если есть flat тренеры — вычитаем их ставки и замены этого тренера
+                const flatCost = flatTrainers.reduce((acc, ft) => {
+                  const ftSessions = (instanceSessions||[]).filter(s => s.trainer_id === ft.trainer_id).length;
+                  return acc + ftSessions * Number(ft.rate_value || 75000);
+                }, 0);
+                autoAmt  = Math.max(0, base - flatCost - mySubCost);
+                calcNote = `${t.rate_value||0}% × ${fmt(pool)} − ставки (${fmt(flatCost)}) − замены (${fmt(mySubCost)})`;
+              } else {
+                // Все процентные — считаем независимо, вычитаем только замены
+                autoAmt  = Math.max(0, base - mySubCost);
+                calcNote = `${t.rate_value||0}% × ${fmt(pool)}${mySubCost?` − замены (${fmt(mySubCost)})` : ''}`;
+              }
             } else {
-              autoAmt = sessionCount * (t.rate_value||75000);
-              calcNote = `${sessionCount} занятий × ${fmt(t.rate_value||75000)} сум`;
+              // Flat тренер
+              const sessionCount = mySessions.length;
+              const flatRate     = Number(t.rate_value || 75000);
+              autoAmt  = sessionCount * flatRate;
+              calcNote = `${sessionCount} занятий × ${fmt(flatRate)}`;
             }
           } else {
-            // Детская группа
-            if (t.rate_type==='flat') {
-              autoAmt = totalSessions * (t.rate_value||0);
-              calcNote = `${totalSessions} занятий × ${fmt(t.rate_value||0)} сум`;
+            // Детские группы (не Арт-свим) — старая логика
+            if (t.rate_type === 'flat') {
+              autoAmt  = totalSessions * (t.rate_value || 0);
+              calcNote = `${totalSessions} занятий × ${fmt(t.rate_value || 0)}`;
             } else {
-              autoAmt = Math.round(totalRevenue * (t.rate_value||40) / 100);
-              calcNote = `${t.rate_value||40}% × ${fmt(totalRevenue)} сум (${activeCount} дет × ${fmt(pricePerChild)})`;
+              autoAmt  = Math.round(totalRevenue * (t.rate_value || 40) / 100);
+              calcNote = `${t.rate_value||40}% × ${fmt(totalRevenue)}`;
             }
           }
 
-          const prevAdj = existing ? (Number(existing.payout_value) - autoAmt) : 0;
-          return {t, autoAmt, calcNote, existing, prevAdj};
+          return {t, autoAmt, calcNote, existing, mySubs, subsICovered, subsICoveredCost};
         });
 
-        // Остаток пула (только Арт-свим)
-        const totalTrainerPay = trainerRows.reduce((s,r)=>{
-          const adj = r.existing ? (Number(r.existing.payout_value) - r.autoAmt) : 0;
-          return s + r.autoAmt + adj;
-        }, 0);
-        const remainder = totalRevenue - totalTrainerPay - leaderFee;
+        // Замены от внешних тренеров (не прикреплённых к группе)
+        const attachedTrainerIds = new Set(trainers.map(t => t.trainer_id));
+        const externalSubs = subs.filter(s => !attachedTrainerIds.has(s.substitute_trainer_id));
+
+        // Случай 3: все flat → руководитель = остаток пула
+        let leaderFee = 0;
+        if (allFlat && isArtSwim) {
+          const totalFlatPay = trainerRows.reduce((s, r) => s + r.autoAmt, 0);
+          leaderFee = Math.max(0, pool - totalFlatPay);
+        } else if (isArtSwim) {
+          leaderFee = leaderPct > 0 ? Math.round(pool * leaderPct / 100) : 0;
+        } else {
+          // Детские группы — % от полного вала
+          leaderFee = leaderPct > 0 ? Math.round(totalRevenue * leaderPct / 100) : 0;
+        }
+
+        // Остаток пула для отображения
+        const totalTrainerPay = trainerRows.reduce((s, r) => s + r.autoAmt, 0);
+        const remainder = pool - totalTrainerPay - leaderFee;
 
         return `
         <div style="margin-top:20px">
           <h4 style="margin-bottom:12px">ЗП тренерам за месяц</h4>
 
-          ${isArtSwim?`<div style="background:rgba(124,58,237,.08);border:1px solid rgba(124,58,237,.3);border-radius:10px;padding:12px;margin-bottom:12px">
+          ${isArtSwim ? `<div style="background:rgba(124,58,237,.08);border:1px solid rgba(124,58,237,.3);border-radius:10px;padding:12px;margin-bottom:12px">
             <div style="display:flex;justify-content:space-between;margin-bottom:4px">
-              <span style="font-size:13px;color:var(--hint)">Выручка (${activeCount} дет × ${fmt(pricePerChild)})</span>
+              <span style="font-size:13px;color:var(--hint)">Вал (${activeCount} дет × ${fmt(pricePerChild)})</span>
               <span style="font-weight:700;font-size:15px">${fmt(totalRevenue)} сум</span>
             </div>
-            ${leaderName?`<div style="display:flex;justify-content:space-between;margin-bottom:4px">
-              <span style="font-size:12px;color:var(--hint)">Руководитель (${leaderPct}%): ${leaderName}</span>
+            <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+              <span style="font-size:13px;color:var(--hint)">Пул тренеров (50%)</span>
+              <span style="font-weight:600;font-size:14px">${fmt(pool)} сум</span>
+            </div>
+            ${leaderName ? `<div style="display:flex;justify-content:space-between;margin-bottom:4px">
+              <span style="font-size:12px;color:var(--hint)">Руководитель${allFlat ? ' (остаток)' : ` (${leaderPct}%)`}: ${leaderName}</span>
               <span style="font-size:13px;color:#f59e0b;font-weight:600">−${fmt(leaderFee)} сум</span>
-            </div>`:''}
+            </div>` : ''}
             <div style="display:flex;justify-content:space-between;padding-top:8px;border-top:1px solid rgba(124,58,237,.2)">
               <span style="font-size:12px;color:var(--hint)">Остаток</span>
               <span style="font-size:13px;font-weight:600;color:${remainder>=0?'#10b981':'#ef4444'}">${fmt(remainder)} сум</span>
             </div>
-          </div>`:''}
+          </div>` : ''}
 
-          ${trainerRows.map(({t,autoAmt,calcNote,existing,prevAdj})=>`
+          ${trainerRows.map(({t, autoAmt, calcNote, existing, mySubs, subsICovered, subsICoveredCost}) => {
+            const bonus   = Number(existing?.bonus || 0);
+            const penalty = Number(existing?.penalty || 0);
+            const finalAmt = autoAmt + bonus - penalty + subsICoveredCost;
+            return `
           <div class="staff-card" style="flex-direction:column;gap:8px;margin-bottom:10px">
             <div style="display:flex;justify-content:space-between;align-items:center">
               <div>
                 <div class="staff-fio">${t.profiles?.fio||'—'}</div>
-                <div class="staff-meta">${t.role||'основной'}</div>
+                <div class="staff-meta">${t.role||''} · ${t.rate_type==='percent'?t.rate_value+'%':fmt(t.rate_value||75000)+' сум/зан'}</div>
               </div>
-              ${existing?`<span style="font-size:13px;color:#10b981;font-weight:700">${fmt(existing.payout_value)} сум ✓</span>`
-                        :`<span style="font-size:12px;color:var(--hint)">Не утверждено</span>`}
+              ${existing ? `<span style="font-size:13px;color:#10b981;font-weight:700">${fmt(existing.payout_value)} сум ✓</span>`
+                         : `<span style="font-size:12px;color:var(--hint)">Не утверждено</span>`}
             </div>
             <div style="background:rgba(16,185,129,.07);border-radius:8px;padding:10px;font-size:13px">
               <div style="display:flex;justify-content:space-between">
-                <span style="color:var(--hint)">Авто (${calcNote})</span>
+                <span style="color:var(--hint)">${calcNote}</span>
                 <span style="font-weight:600">${fmt(autoAmt)} сум</span>
               </div>
-              <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
-                <label style="color:var(--hint);font-size:12px;white-space:nowrap">Корректировка:</label>
-                <input id="adj-${t.trainer_id}" type="number" value="${existing?prevAdj:0}" placeholder="0"
-                  oninput="updatePayoutTotal(${t.trainer_id},${autoAmt})"
-                  style="flex:1;min-width:0;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:6px 8px;color:var(--text);font-size:13px">
+              ${subsICovered.length ? `<div style="display:flex;justify-content:space-between;margin-top:4px">
+                <span style="color:#10b981;font-size:12px">+ замены (${subsICovered.length} зан)</span>
+                <span style="color:#10b981;font-weight:600">+${fmt(subsICoveredCost)} сум</span>
+              </div>` : ''}
+              ${mySubs.length ? `<div style="margin-top:6px;font-size:12px;color:#ef4444">
+                Заменили (${mySubs.length} зан): ${mySubs.map(s=>`${s.substitute?.fio||'?'} ${fmtDate(s.session_date)} ${canSee?`<button onclick="editSubRate('${s.id}',${s.rate||75000},'${groupId}','${monthStr}')" style="background:none;border:none;cursor:pointer;color:var(--hint);font-size:11px">✏️ ${fmt(s.rate||75000)}</button>`:fmt(s.rate||75000)+' сум'}`).join(', ')}
+              </div>` : ''}
+              <div style="display:flex;gap:8px;margin-top:8px">
+                <div style="flex:1">
+                  <label style="font-size:11px;color:var(--hint)">Премия</label>
+                  <input id="bonus-${t.trainer_id}" type="number" value="${bonus}" min="0" placeholder="0"
+                    oninput="updateGroupPayoutTotal('${t.trainer_id}',${autoAmt},${subsICoveredCost})"
+                    style="width:100%;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:6px 8px;color:var(--text);font-size:13px">
+                </div>
+                <div style="flex:1">
+                  <label style="font-size:11px;color:var(--hint)">Штраф</label>
+                  <input id="penalty-${t.trainer_id}" type="number" value="${penalty}" min="0" placeholder="0"
+                    oninput="updateGroupPayoutTotal('${t.trainer_id}',${autoAmt},${subsICoveredCost})"
+                    style="width:100%;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:6px 8px;color:var(--text);font-size:13px">
+                </div>
               </div>
               <div style="display:flex;justify-content:space-between;margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
-                <span style="font-weight:600">Итого:</span>
-                <span id="total-${t.trainer_id}" style="font-weight:700;color:var(--accent)">${fmt(autoAmt+(existing?prevAdj:0))} сум</span>
+                <span style="font-weight:600">К выплате:</span>
+                <span id="gtotal-${t.trainer_id}" style="font-weight:700;color:var(--accent)">${fmt(finalAmt)} сум</span>
               </div>
             </div>
             <button class="btn btn-sm btn-primary btn-full"
-              onclick="doApproveGroupPayoutAuto('${t.id}','${t.trainer_id}','${monthStr}',${autoAmt},${t.rate_value||40})">
+              onclick="doApproveGroupPayoutNew('${t.id}','${t.trainer_id}','${monthStr}',${autoAmt},${subsICoveredCost},'${groupId}')">
               Утвердить</button>
-          </div>`).join('')}
+          </div>`;
+          }).join('')}
 
-          ${leaderName?`<div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;margin-top:8px">
+          ${externalSubs.length ? `<div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px;margin-top:8px">
+            <div style="font-weight:600;margin-bottom:8px">Замены (внешние тренеры)</div>
+            ${externalSubs.map(s=>`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+              <div>
+                <div style="font-size:13px;font-weight:500">${s.substitute?.fio||'?'}</div>
+                <div style="font-size:11px;color:var(--hint)">${fmtDate(s.session_date)} · вместо ${s.original?.fio||'?'}</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:6px">
+                <span style="font-weight:600;color:var(--accent)">${fmt(s.rate||75000)} сум</span>
+                ${canSee?`<button onclick="editSubRate('${s.id}',${s.rate||75000},'${groupId}','${monthStr}')" style="background:none;border:none;cursor:pointer;color:var(--hint);font-size:13px">✏️</button>`:''}
+              </div>
+            </div>`).join('')}
+          </div>` : ''}
+
+          ${leaderName ? `<div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;margin-top:8px">
             <div style="display:flex;justify-content:space-between;align-items:center">
               <div>
                 <div style="font-weight:600;font-size:14px">Руководитель: ${leaderName}</div>
-                <div style="font-size:12px;color:var(--hint)">${leaderPct}% от ${fmt(totalRevenue)} сум</div>
+                <div style="font-size:12px;color:var(--hint)">${allFlat ? 'Остаток пула' : leaderPct+'% от '+fmt(pool)+' сум'}</div>
               </div>
               <div style="display:flex;align-items:center;gap:8px">
                 <span style="font-size:18px;font-weight:700;color:var(--accent)">${fmt(leaderFee)} сум</span>
-                ${isAdmin?`<button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
-                  onclick="renderLeaderFeeModal('${groupId}','${encodeURIComponent(leaderName)}',${leaderPct})">✏️</button>`:''}
+                ${isAdmin ? `<button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
+                  onclick="renderLeaderFeeModal('${groupId}','${encodeURIComponent(leaderName)}',${leaderPct})">✏️</button>` : ''}
               </div>
             </div>
-          </div>`:`
-          ${isAdmin?`<div style="margin-top:8px"><button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
-            onclick="renderLeaderFeeModal('${groupId}','',0)">+ Руководитель группы</button></div>`:''}`}
+          </div>` : `
+          ${isAdmin ? `<div style="margin-top:8px"><button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
+            onclick="renderLeaderFeeModal('${groupId}','',0)">+ Руководитель группы</button></div>` : ''}`}
         </div>`;
       })()}
 
@@ -5365,6 +5444,50 @@ function updatePayoutTotal(trainerId, autoAmt) {
   const adj = parseInt(document.getElementById(`adj-${trainerId}`)?.value)||0;
   const el  = document.getElementById(`total-${trainerId}`);
   if (el) el.textContent = fmt(autoAmt + adj) + ' сум';
+}
+function updateGroupPayoutTotal(trainerId, autoAmt, subsAmt) {
+  const bonus   = parseInt(document.getElementById(`bonus-${trainerId}`)?.value)||0;
+  const penalty = parseInt(document.getElementById(`penalty-${trainerId}`)?.value)||0;
+  const el = document.getElementById(`gtotal-${trainerId}`);
+  if (el) el.textContent = fmt(autoAmt + bonus - penalty + subsAmt) + ' сум';
+}
+async function doApproveGroupPayoutNew(tgId, trainerId, monthStr, autoAmt, subsAmt, groupId) {
+  const bonus   = parseInt(document.getElementById(`bonus-${trainerId}`)?.value)||0;
+  const penalty = parseInt(document.getElementById(`penalty-${trainerId}`)?.value)||0;
+  const final   = autoAmt + bonus - penalty + subsAmt;
+  const note    = `авто ${fmt(autoAmt)}${subsAmt?` + замены ${fmt(subsAmt)}`:''}${bonus?` + премия ${fmt(bonus)}`:''}${penalty?` − штраф ${fmt(penalty)}`:''}`;
+  if (_pending.has(`payout_${tgId}_${trainerId}`)) return;
+  _pending.add(`payout_${tgId}_${trainerId}`);
+  try {
+    await DB.setGroupTrainerPayout(parseInt(tgId), parseInt(trainerId), monthStr, 'fixed', final, STATE.profile.id, note, bonus, penalty);
+    DB.auditLog('group_payout', STATE.profile.id, STATE.profile.fio, trainerId, 'group_payout',
+      { group_id: tgId, month: monthStr, amount: final, note }, STATE.profile.branches?.[0]);
+    toast('ЗП утверждена ✅','success');
+    renderGroupMonthReport(groupId||tgId, monthStr);
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+  finally { _pending.delete(`payout_${tgId}_${trainerId}`); }
+}
+async function editSubRate(subId, currentRate, groupId, monthStr) {
+  const canEdit = ['admin','senior_trainer'].includes(STATE.profile.role);
+  if (!canEdit) return;
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>Ставка замены</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="form-group"><label>Ставка (сум)</label>
+      <input id="sub-rate-inp" type="number" value="${currentRate}" min="0"></div>
+    <button class="btn btn-primary btn-full" onclick="doSaveSubRate('${subId}','${groupId}','${monthStr}')">Сохранить</button>
+  </div>`;
+  document.body.appendChild(m);
+}
+async function doSaveSubRate(subId, groupId, monthStr) {
+  const rate = parseInt(document.getElementById('sub-rate-inp')?.value)||75000;
+  try {
+    await DB.updateGroupSubstitutionRate(subId, rate);
+    document.querySelector('.modal-overlay')?.remove();
+    toast('Ставка обновлена ✅','success');
+    renderGroupMonthReport(groupId, monthStr);
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 async function doApproveGroupPayoutAuto(tgId, trainerId, monthStr, autoAmt, rate) {
   const adj   = parseInt(document.getElementById(`adj-${trainerId}`)?.value)||0;
