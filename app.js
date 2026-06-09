@@ -814,7 +814,7 @@ async function _doLogWorkoutInner() {
 
   // Обычные ПТ: собираем долговые конспекты и показываем один экран
   const overdueNotes = await DB.getOverdueNotes(clientId, STATE.profile.id);
-  _pendingLogData = { rows, clientId, count };
+  _pendingLogData = { rows, clientId, count, overdueNotes };
   showLogWithNotesModal(overdueNotes, clientId, dates);
 }
 
@@ -838,7 +838,6 @@ function showLogWithNotesModal(overdueNotes, clientId, dates) {
         <textarea id="note-next-new" rows="2" placeholder="Откорректировать..."></textarea></div>
     </div>`;
 
-  const idsJson = JSON.stringify(overdueNotes.map(w=>w.id));
   const m = el('div','modal-overlay');
   m.innerHTML=`<div class="modal" style="max-height:90vh;overflow-y:auto">
     <div class="modal-header">
@@ -849,18 +848,18 @@ function showLogWithNotesModal(overdueNotes, clientId, dates) {
     ${overdueHtml}
     ${newNoteHtml}
     <button class="btn btn-primary btn-full" id="btn-confirm-log"
-      onclick="doConfirmLogWorkout(${idsJson.replace(/"/g,'&quot;')},'${clientId}')">✅ Списать</button>
+      onclick="doConfirmLogWorkout()">✅ Списать</button>
   </div>`;
   document.body.appendChild(m);
 }
 
-async function doConfirmLogWorkout(overdueIds, clientId) {
-  if (!_pendingLogData) return;
-  const { rows, count } = _pendingLogData;
+async function doConfirmLogWorkout() {
+  if (!_pendingLogData) return toast('Ошибка: нет данных','error');
+  const { rows, clientId, count, overdueNotes } = _pendingLogData;
 
   // Валидация долговых конспектов
-  for (const id of overdueIds) {
-    const acc = document.getElementById(`note-acc-${id}`)?.value.trim();
+  for (const w of overdueNotes) {
+    const acc = document.getElementById(`note-acc-${w.id}`)?.value.trim();
     if (!acc) return toast('Заполните все долговые конспекты','error');
   }
 
@@ -868,24 +867,27 @@ async function doConfirmLogWorkout(overdueIds, clientId) {
   if (btn) { btn.disabled=true; btn.textContent='Сохраняем...'; }
 
   try {
+    // Одна подписка на весь блок сохранений
+    const sub = overdueNotes.length>0 ? await DB.getActiveSubscription(clientId) : null;
+
     // Сохраняем долговые конспекты
-    if (overdueIds.length>0) {
-      const sub = await DB.getActiveSubscription(clientId);
-      for (const id of overdueIds) {
-        const acc  = document.getElementById(`note-acc-${id}`)?.value.trim();
-        const next = document.getElementById(`note-next-${id}`)?.value.trim()||null;
-        await DB.upsertNote(id, clientId, STATE.profile.id, sub?.id||null, acc, next, null);
-      }
+    for (const w of overdueNotes) {
+      const acc  = document.getElementById(`note-acc-${w.id}`)?.value.trim();
+      const next = document.getElementById(`note-next-${w.id}`)?.value.trim()||null;
+      await DB.upsertNote(w.id, clientId, STATE.profile.id, sub?.id||null, acc, next, null);
     }
+
     // Списываем тренировки
     const result = await DB.logWorkouts(rows);
+
     // Сохраняем конспект за новую тренировку если заполнен
     const newAcc = document.getElementById('note-acc-new')?.value.trim();
     if (newAcc && result?.[0]) {
-      const sub = await DB.getActiveSubscription(clientId);
+      const newSub = sub || await DB.getActiveSubscription(clientId);
       const newNext = document.getElementById('note-next-new')?.value.trim()||null;
-      await DB.upsertNote(result[0].id, clientId, STATE.profile.id, sub?.id||null, newAcc, newNext, null);
+      await DB.upsertNote(result[0].id, clientId, STATE.profile.id, newSub?.id||null, newAcc, newNext, null);
     }
+
     document.querySelector('.modal-overlay')?.remove();
     _pendingLogData = null;
     toast(`✅ ${count} ПТ`,'success');
