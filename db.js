@@ -150,7 +150,7 @@ const DB = {
 
   // ─── CLIENTS ─────────────────────────────────
   async getClients(trainerId) {
-    const {data,error} = await sb().from('clients').select('*')
+    const {data,error} = await sb().from('clients').select('*, workouts(count)')
       .eq('trainer_id',trainerId)
       .order('last_used',{ascending:false,nullsFirst:false});
     if (error) throw error; return data||[];
@@ -158,7 +158,7 @@ const DB = {
   // Все клиенты всех тренеров за один запрос (для админа)
   async getAllClients() {
     const {data,error} = await sb().from('clients')
-      .select('*, profiles!trainer_id(fio,branches)')
+      .select('*, profiles!trainer_id(fio,branches), workouts(count)')
       .eq('is_archived',false)
       .order('fio');
     if (error) throw error; return data||[];

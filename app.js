@@ -529,6 +529,38 @@ end_time:   new Date(end).toISOString(),
 }
 
 // ── ТАБ: КЛИЕНТЫ ──────────────────────────────
+// Определяет дубли клиентов по fio и выбирает "главного"
+// История = есть реальные тренировки (workouts_count > 0)
+// Главный: больше тренировок → позже дата абонемента → больше баланс → если ничья — оба ⚠️
+function _findDuplicates(clients) {
+  const nameCount = {};
+  clients.forEach(c => { const k = c.fio.trim().toLowerCase(); nameCount[k] = (nameCount[k]||0)+1; });
+  const _dupNames = new Set(Object.keys(nameCount).filter(k => nameCount[k] > 1));
+  const _primaryIds = new Set();
+  if (_dupNames.size) {
+    const groups = {};
+    clients.forEach(c => { const k = c.fio.trim().toLowerCase(); if(_dupNames.has(k)){if(!groups[k])groups[k]=[];groups[k].push(c);} });
+    Object.values(groups).forEach(g => {
+      const wCount = c => c.workouts?.[0]?.count || 0;
+      const sorted = [...g].sort((a,b) => {
+        const wDiff = wCount(b) - wCount(a);
+        if (wDiff !== 0) return wDiff;
+        const ae = a.subscription_end||'', be = b.subscription_end||'';
+        if (be > ae) return 1; if (ae > be) return -1;
+        return (b.balance||0) - (a.balance||0);
+      });
+      const top = sorted[0], second = sorted[1];
+      // Главный только если явно лучше второго по тренировкам или дате/балансу
+      if (wCount(top) !== wCount(second)) { _primaryIds.add(top.id); return; }
+      const topScore  = (top.subscription_end||'') + String(top.balance||0).padStart(6,'0');
+      const nextScore = (second.subscription_end||'') + String(second.balance||0).padStart(6,'0');
+      if (topScore !== nextScore) _primaryIds.add(top.id);
+      // иначе — оба ⚠️
+    });
+  }
+  return { _dupNames, _primaryIds };
+}
+
 async function renderClientsTab() {
   $('#tab-content').innerHTML=`<div class="center-screen"><div class="spinner"></div></div>`;
   // Параллельно: клиенты + батч конспектов
@@ -558,15 +590,7 @@ async function renderClientsTab() {
       return score(a)-score(b);
     });
     // Определяем дубли среди клиентов тренера
-    const _nameCount = {};
-    arr.forEach(c => { const k=c.fio.trim().toLowerCase(); _nameCount[k]=(_nameCount[k]||0)+1; });
-    const _dupNames = new Set(Object.keys(_nameCount).filter(k=>_nameCount[k]>1));
-    const _primaryIds = new Set();
-    if (_dupNames.size) {
-      const _groups = {};
-      arr.forEach(c => { const k=c.fio.trim().toLowerCase(); if(_dupNames.has(k)){if(!_groups[k])_groups[k]=[];_groups[k].push(c);} });
-      Object.values(_groups).forEach(g => { const wh=g.filter(c=>c.subscription_end||c.balance>0); if(wh.length===1)_primaryIds.add(wh[0].id); });
-    }
+    const {_dupNames, _primaryIds} = _findDuplicates(arr);
 
     body.innerHTML = arr.map(c=>{
       const days = daysUntil(c.subscription_end);
@@ -577,7 +601,8 @@ async function renderClientsTab() {
       const isFrozen = c.freeze_start && c.freeze_end && today0 >= c.freeze_start && today0 <= c.freeze_end;
       const dot  = c.color?`<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${c.color};margin-right:4px;vertical-align:middle"></span>`:'';
       const isDup = _dupNames.has(c.fio.trim().toLowerCase());
-      const dupBadge = isDup ? (_primaryIds.has(c.id) ? '✅ ' : '⚠️ ') : '';
+      const hasHistory = (c.workouts?.[0]?.count || 0) > 0;
+      const dupBadge = isDup ? (hasHistory ? '✅⚠️ ' : '⚠️ ') : '';
       let rowBg = '';
       if (c.is_archived)     rowBg = 'background:rgba(100,116,139,.07);border-left:3px solid rgba(100,116,139,.3);opacity:.75';
       else if (isFrozen)     rowBg = 'background:rgba(96,165,250,.08);border-left:3px solid rgba(96,165,250,.4)';
@@ -3835,41 +3860,19 @@ function renderClientList(clients) {
   const today = todayStr();
 
   // Определяем дубли по fio
-  const nameCount = {};
-  clients.forEach(c => {
-    const key = c.fio.trim().toLowerCase();
-    nameCount[key] = (nameCount[key] || 0) + 1;
-  });
-
-  // Среди дублей находим "главного" (с историей: есть sub_end или balance > 0)
-  const primaryById = new Set();
-  const dupNames = new Set(Object.keys(nameCount).filter(k => nameCount[k] > 1));
-  if (dupNames.size) {
-    const groups = {};
-    clients.forEach(c => {
-      const key = c.fio.trim().toLowerCase();
-      if (!dupNames.has(key)) return;
-      if (!groups[key]) groups[key] = [];
-      groups[key].push(c);
-    });
-    Object.values(groups).forEach(group => {
-      const withHistory = group.filter(c => c.subscription_end || c.balance > 0);
-      if (withHistory.length === 1) primaryById.add(withHistory[0].id);
-      // если несколько с историей или ни одного — никого не помечаем главным
-    });
-  }
+  const { _dupNames: dupNames, _primaryIds: primaryById } = _findDuplicates(clients);
 
   return clients.map(c => {
     const expired   = c.subscription_end && c.subscription_end < today;
     const noBalance = c.balance <= 0;
     const warn      = expired || noBalance;
     const key       = c.fio.trim().toLowerCase();
-    const isDup     = dupNames.has(key);
-    const isPrimary = primaryById.has(c.id);
-    const dupBadge  = isDup
-      ? isPrimary
-        ? `<span title="Основной (есть история)" style="font-size:13px">✅</span>`
-        : `<span title="Возможный дубль" style="font-size:13px">⚠️</span>`
+    const isDup      = dupNames.has(key);
+    const hasHistory = (c.workouts?.[0]?.count || 0) > 0;
+    const dupBadge   = isDup
+      ? hasHistory
+        ? `<span title="Дубль — есть история тренировок" style="font-size:13px">✅⚠️</span>`
+        : `<span title="Дубль — нет истории, можно удалить" style="font-size:13px">⚠️</span>`
       : '';
 
     return `
