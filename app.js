@@ -5391,7 +5391,10 @@ async function renderGroupMonthReport(groupId, monthStr) {
         const isArtSwim = groupTypeInfo?.name?.toLowerCase().includes('art');
         const pricePerChild = groupTypeInfo?.price_per_month || 0;
         const activeCount  = clients.filter(c=>c.is_active!==false).length;
-        const totalRevenue = activeCount * pricePerChild;
+        // Для детских групп ЗП считается от реальных оплат, а не от количества активных детей
+        const totalRevenue = isArtSwim
+          ? activeCount * pricePerChild
+          : totalPaid;
         const pool         = Math.round(totalRevenue / 2); // пул = вал / 2
 
         const tgWithLeader = trainers.find(t=>t.leader_name);
@@ -5635,12 +5638,14 @@ async function doExportGroupPayroll(groupId, monthStr) {
   await ensureXlsx();
   try {
     const report = await DB.getGroupMonthReport(groupId, monthStr);
-    const {clients, attendance, payouts, trainers, instanceSessions, groupTypeInfo} = report;
+    const {clients, payments: paymentsExport, attendance, payouts, trainers, instanceSessions, groupTypeInfo} = report;
     const activeCount   = clients.filter(c=>c.is_active!==false).length;
     const pricePerChild = groupTypeInfo?.price_per_month || 0;
-    const totalRevenue  = activeCount * pricePerChild;
+    const isArtSwimExport = groupTypeInfo?.name?.toLowerCase().includes('art');
+    const totalPaidExport = (paymentsExport||[]).filter(p=>p.paid).reduce((s,p)=>s+Number(p.amount||0),0);
+    const totalRevenue  = isArtSwimExport ? activeCount * pricePerChild : totalPaidExport;
     const totalSessions = [...new Set(attendance.map(a=>a.session_date))].length;
-    const isArtSwim     = groupTypeInfo?.name?.toLowerCase().includes('art');
+    const isArtSwim     = isArtSwimExport;
     const tgWithLeader  = trainers.find(t=>t.leader_name);
     const leaderName    = tgWithLeader?.leader_name || '';
     const leaderPct     = tgWithLeader?.leader_fee_percent || 0;
