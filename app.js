@@ -3433,8 +3433,9 @@ async function renderGroupDetail(groupId) {
                     ${paid?`Оплачен · ${fmt(pay?.amount||0)} сум`:'Не оплачен'}</span>
                   ${pay?.sub_start?`<span style="font-size:10px;color:var(--hint)">${fmtDate(pay.sub_start)}${pay.sub_end?' – '+fmtDate(pay.sub_end):''}</span>`:''}
                 </div>
-                <button class="btn btn-sm" onclick="toggleGroupPayment('${groupId}','${c.id}',${paid?'false':'true'},${c.monthly_price},'${month}')">
-                  ${paid?'↩':'✓'}</button>
+                <button class="btn btn-sm" style="${paid?'background:rgba(239,68,68,.12);color:#ef4444;border:1px solid rgba(239,68,68,.3)':'background:rgba(16,185,129,.12);color:#10b981;border:1px solid rgba(16,185,129,.3)'}"
+                  onclick="toggleGroupPayment('${groupId}','${c.id}',${paid?'false':'true'},${c.monthly_price},'${month}')">
+                  ${paid?'✕ Отменить':'✓ Оплатил'}</button>
               </div>
             </div>
             <div style="display:flex;gap:6px;flex-wrap:wrap">
@@ -6439,8 +6440,9 @@ async function renderTechBills(body, branch) {
               background:${b.paid?'rgba(16,185,129,.15)':'rgba(239,68,68,.15)'};
               color:${b.paid?'#10b981':'#ef4444'}">
               ${b.paid?'Оплачен':'Не оплачен'}</span>
-            <button class="btn btn-sm" onclick="toggleBillPaid('${b.id}',${b.paid})">
-              ${b.paid?'↩':'✓'}</button>
+            <button class="btn btn-sm" style="${b.paid?'background:rgba(239,68,68,.12);color:#ef4444;border:1px solid rgba(239,68,68,.3)':'background:rgba(16,185,129,.12);color:#10b981;border:1px solid rgba(16,185,129,.3)'}"
+              onclick="toggleBillPaid('${b.id}',${b.paid})">
+              ${b.paid?'✕ Отменить':'✓ Оплачен'}</button>
             <button class="btn btn-sm btn-danger" onclick="deleteTechItem('bills','${b.id}')">🗑</button>
           </div>
         </div>
