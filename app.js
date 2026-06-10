@@ -142,9 +142,14 @@ function openSchedule() {
 // ── ИНИЦИАЛИЗАЦИЯ ─────────────────────────────
 async function init() {
   if (window.Telegram?.WebApp) { Telegram.WebApp.ready(); Telegram.WebApp.expand(); }
-  STATE.tgId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id
-    || new URLSearchParams(location.search).get('tgid')
-    || null;
+  const tgIdFromTelegram = window.Telegram?.WebApp?.initDataUnsafe?.user?.id;
+  const tgIdFromUrl = new URLSearchParams(location.search).get('tgid');
+  // Сохраняем tgId в localStorage чтобы браузерный режим работал без переввода
+  if (tgIdFromTelegram) {
+    try { localStorage.setItem('aq_tgid', String(tgIdFromTelegram)); } catch(e){}
+  }
+  const tgIdFromStorage = (() => { try { return localStorage.getItem('aq_tgid'); } catch(e){ return null; } })();
+  STATE.tgId = tgIdFromTelegram || tgIdFromUrl || tgIdFromStorage || null;
   if (!STATE.tgId) {
     setScreen(`<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:16px;padding:32px;text-align:center">
       <div style="font-size:48px">🏊</div>
