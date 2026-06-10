@@ -305,6 +305,7 @@ async function renderTrainerApp() {
 }
 
 function renderTrainerShell(tab) {
+  setupBack(null);
   STATE.currentTab=tab;
   setScreen(`
     <div class="app-header">
@@ -552,9 +553,9 @@ function _findDuplicates(clients) {
       const top = sorted[0], second = sorted[1];
       // Главный только если явно лучше второго по тренировкам или дате/балансу
       if (wCount(top) !== wCount(second)) { _primaryIds.add(top.id); return; }
-      const topScore  = (top.subscription_end||'') + String(top.balance||0).padStart(6,'0');
-      const nextScore = (second.subscription_end||'') + String(second.balance||0).padStart(6,'0');
-      if (topScore !== nextScore) _primaryIds.add(top.id);
+      const isTie = (top.subscription_end||'') === (second.subscription_end||'')
+                 && (top.balance||0) === (second.balance||0);
+      if (!isTie) _primaryIds.add(top.id);
       // иначе — оба ⚠️
     });
   }
@@ -589,8 +590,8 @@ async function renderClientsTab() {
       };
       return score(a)-score(b);
     });
-    // Определяем дубли среди клиентов тренера
-    const {_dupNames, _primaryIds} = _findDuplicates(arr);
+    // Определяем дубли только среди активных клиентов (архивные не должны создавать ложные ⚠️)
+    const {_dupNames, _primaryIds} = _findDuplicates(arr.filter(c => !c.is_archived));
 
     body.innerHTML = arr.map(c=>{
       const days = daysUntil(c.subscription_end);
