@@ -150,6 +150,15 @@ function branchSelect(id, branches) {
 // SECTION: CORE:UI — setScreen, toast, setupBack, navPush, goBack
 // ============================================================
 function setScreen(html) { $('#app').innerHTML=html; }
+function openInBrowser(url) {
+  try {
+    if (window.Telegram?.WebApp?.openLink) {
+      Telegram.WebApp.openLink(url, {try_instant_view:false});
+    } else {
+      window.open(url, '_blank');
+    }
+  } catch(e) { window.open(url, '_blank'); }
+}
 function loading(txt='Загрузка...') {
   setScreen(`<div class="center-screen"><div class="spinner"></div><p>${txt}</p></div>`);
 }
@@ -3048,7 +3057,7 @@ async function doExportTrainer(trainerId,fioEnc,year,month) {
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <p style="margin-bottom:16px;line-height:1.6">Для скачивания откройте приложение в браузере (Safari/Chrome), войдите с тем же PIN и нажмите «Скачать Excel».</p>
     <button class="btn btn-primary btn-full"
-      onclick="window.Telegram.WebApp.openLink(APP_URL+'?tgid='+STATE.tgId,{try_instant_view:false});this.closest('.modal-overlay').remove()">
+      onclick="openInBrowser(APP_URL+'?tgid='+STATE.tgId);this.closest('.modal-overlay').remove()">
       Открыть в браузере</button>
   </div>`;
   document.body.appendChild(m);
@@ -3077,7 +3086,7 @@ async function doExportBranchChildGroups(monthStr, branches) {
     m.innerHTML=`<div class="modal"><div class="modal-header"><h3>Скачать Excel</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
       <p style="line-height:1.6">Откройте приложение в браузере для скачивания файла.</p>
-      <button class="btn btn-primary btn-full" onclick="window.Telegram.WebApp.openLink(APP_URL+'?tgid='+STATE.tgId,{try_instant_view:false});this.closest('.modal-overlay').remove()">Открыть в браузере</button>
+      <button class="btn btn-primary btn-full" onclick="openInBrowser(APP_URL+'?tgid='+STATE.tgId);this.closest('.modal-overlay').remove()">Открыть в браузере</button>
     </div>`;
     document.body.appendChild(m); return;
   }
@@ -3119,7 +3128,7 @@ async function doExportChildGroupExcel(groupId, monthStr) {
     m.innerHTML=`<div class="modal"><div class="modal-header"><h3>Скачать Excel</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
       <p style="line-height:1.6">Откройте приложение в браузере для скачивания файла.</p>
-      <button class="btn btn-primary btn-full" onclick="window.Telegram.WebApp.openLink(APP_URL+'?tgid='+STATE.tgId,{try_instant_view:false});this.closest('.modal-overlay').remove()">Открыть в браузере</button>
+      <button class="btn btn-primary btn-full" onclick="openInBrowser(APP_URL+'?tgid='+STATE.tgId);this.closest('.modal-overlay').remove()">Открыть в браузере</button>
     </div>`;
     document.body.appendChild(m); return;
   }
@@ -3145,7 +3154,7 @@ async function doExportSummary(year,month,branch) {
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <p style="margin-bottom:16px;line-height:1.6">Откройте в браузере для скачивания.</p>
     <button class="btn btn-primary btn-full"
-      onclick="window.Telegram.WebApp.openLink(APP_URL+'?tgid='+STATE.tgId,{try_instant_view:false});this.closest('.modal-overlay').remove()">
+      onclick="openInBrowser(APP_URL+'?tgid='+STATE.tgId);this.closest('.modal-overlay').remove()">
       Открыть в браузере</button>
   </div>`;
   document.body.appendChild(m);
@@ -5818,7 +5827,7 @@ async function doExportGroupPayroll(groupId, monthStr) {
     m.innerHTML=`<div class="modal"><div class="modal-header"><h3>Скачать ЗП</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
       <p style="line-height:1.6">Откройте приложение в браузере для скачивания файла.</p>
-      <button class="btn btn-primary btn-full" onclick="window.Telegram.WebApp.openLink(APP_URL+'?tgid='+STATE.tgId,{try_instant_view:false});this.closest('.modal-overlay').remove()">Открыть в браузере</button>
+      <button class="btn btn-primary btn-full" onclick="openInBrowser(APP_URL+'?tgid='+STATE.tgId);this.closest('.modal-overlay').remove()">Открыть в браузере</button>
     </div>`;
     document.body.appendChild(m); return;
   }
