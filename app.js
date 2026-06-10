@@ -142,7 +142,9 @@ function openSchedule() {
 // ── ИНИЦИАЛИЗАЦИЯ ─────────────────────────────
 async function init() {
   if (window.Telegram?.WebApp) { Telegram.WebApp.ready(); Telegram.WebApp.expand(); }
-  STATE.tgId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id || null;
+  STATE.tgId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id
+    || new URLSearchParams(location.search).get('tgid')
+    || null;
   if (!STATE.tgId) {
     setScreen(`<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:16px;padding:32px;text-align:center">
       <div style="font-size:48px">🏊</div>
@@ -2955,7 +2957,7 @@ async function doExportTrainer(trainerId,fioEnc,year,month) {
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <p style="margin-bottom:16px;line-height:1.6">Для скачивания откройте приложение в браузере (Safari/Chrome), войдите с тем же PIN и нажмите «Скачать Excel».</p>
     <button class="btn btn-primary btn-full"
-      onclick="window.Telegram.WebApp.openLink(''+APP_URL+'',{try_instant_view:false});this.closest('.modal-overlay').remove()">
+      onclick="window.Telegram.WebApp.openLink(APP_URL+'?tgid='+STATE.tgId,{try_instant_view:false});this.closest('.modal-overlay').remove()">
       Открыть в браузере</button>
   </div>`;
   document.body.appendChild(m);
@@ -2984,7 +2986,7 @@ async function doExportBranchChildGroups(monthStr, branches) {
     m.innerHTML=`<div class="modal"><div class="modal-header"><h3>Скачать Excel</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
       <p style="line-height:1.6">Откройте приложение в браузере для скачивания файла.</p>
-      <button class="btn btn-primary btn-full" onclick="window.Telegram.WebApp.openLink(''+APP_URL+'',{try_instant_view:false});this.closest('.modal-overlay').remove()">Открыть в браузере</button>
+      <button class="btn btn-primary btn-full" onclick="window.Telegram.WebApp.openLink(APP_URL+'?tgid='+STATE.tgId,{try_instant_view:false});this.closest('.modal-overlay').remove()">Открыть в браузере</button>
     </div>`;
     document.body.appendChild(m); return;
   }
@@ -3026,7 +3028,7 @@ async function doExportChildGroupExcel(groupId, monthStr) {
     m.innerHTML=`<div class="modal"><div class="modal-header"><h3>Скачать Excel</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
       <p style="line-height:1.6">Откройте приложение в браузере для скачивания файла.</p>
-      <button class="btn btn-primary btn-full" onclick="window.Telegram.WebApp.openLink(''+APP_URL+'',{try_instant_view:false});this.closest('.modal-overlay').remove()">Открыть в браузере</button>
+      <button class="btn btn-primary btn-full" onclick="window.Telegram.WebApp.openLink(APP_URL+'?tgid='+STATE.tgId,{try_instant_view:false});this.closest('.modal-overlay').remove()">Открыть в браузере</button>
     </div>`;
     document.body.appendChild(m); return;
   }
@@ -3052,7 +3054,7 @@ async function doExportSummary(year,month,branch) {
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <p style="margin-bottom:16px;line-height:1.6">Откройте в браузере для скачивания.</p>
     <button class="btn btn-primary btn-full"
-      onclick="window.Telegram.WebApp.openLink(''+APP_URL+'',{try_instant_view:false});this.closest('.modal-overlay').remove()">
+      onclick="window.Telegram.WebApp.openLink(APP_URL+'?tgid='+STATE.tgId,{try_instant_view:false});this.closest('.modal-overlay').remove()">
       Открыть в браузере</button>
   </div>`;
   document.body.appendChild(m);
@@ -5692,7 +5694,7 @@ async function doExportGroupPayroll(groupId, monthStr) {
     m.innerHTML=`<div class="modal"><div class="modal-header"><h3>Скачать ЗП</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
       <p style="line-height:1.6">Откройте приложение в браузере для скачивания файла.</p>
-      <button class="btn btn-primary btn-full" onclick="window.Telegram.WebApp.openLink(''+APP_URL+'',{try_instant_view:false});this.closest('.modal-overlay').remove()">Открыть в браузере</button>
+      <button class="btn btn-primary btn-full" onclick="window.Telegram.WebApp.openLink(APP_URL+'?tgid='+STATE.tgId,{try_instant_view:false});this.closest('.modal-overlay').remove()">Открыть в браузере</button>
     </div>`;
     document.body.appendChild(m); return;
   }
