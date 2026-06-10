@@ -5282,6 +5282,7 @@ async function renderGroupMonthReport(groupId, monthStr) {
       : STATE.profile.role==='trainer' ? `renderTrainerApp()`
       : `renderSeniorApp();seniorTab('groups')`;
 
+    setupBack(new Function(backFn));
     setScreen(`<div class="app-header">
       <button class="btn-icon" onclick="${backFn}">←</button>
       <div class="app-title">Отчёт группы</div>
