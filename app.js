@@ -3920,14 +3920,16 @@ async function renderAdminClients() {
   </div>`;
 
   window._allAdminClients = allClients;
+  // Вычисляем дубли по ВСЕМУ списку один раз — чтобы при фильтрации они не терялись
+  window._adminDupNames = _findDuplicates(allClients)._dupNames;
 }
 
-function renderClientList(clients) {
+function renderClientList(clients, dupNamesOverride) {
   if (!clients.length) return '<p class="hint" style="text-align:center;padding:20px">Не найдено</p>';
   const today = todayStr();
 
-  // Определяем дубли по fio
-  const { _dupNames: dupNames, _primaryIds: primaryById } = _findDuplicates(clients);
+  // Используем глобальные дубли (по всем клиентам), если переданы
+  const dupNames = dupNamesOverride || _findDuplicates(clients)._dupNames;
 
   return clients.map(c => {
     const expired   = c.subscription_end && c.subscription_end < today;
@@ -3966,7 +3968,7 @@ function filterAdminClients() {
   if (trainer) filtered = filtered.filter(c => String(c.trainer_id) === trainer);
   if (search)  filtered = filtered.filter(c => c.fio.toLowerCase().includes(search));
   const list = document.getElementById('cl-list');
-  if (list) list.innerHTML = renderClientList(filtered);
+  if (list) list.innerHTML = renderClientList(filtered, window._adminDupNames);
 }
 
 // ─ ADMIN: СВОДКА
