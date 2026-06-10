@@ -557,6 +557,17 @@ async function renderClientsTab() {
       };
       return score(a)-score(b);
     });
+    // Определяем дубли среди клиентов тренера
+    const _nameCount = {};
+    arr.forEach(c => { const k=c.fio.trim().toLowerCase(); _nameCount[k]=(_nameCount[k]||0)+1; });
+    const _dupNames = new Set(Object.keys(_nameCount).filter(k=>_nameCount[k]>1));
+    const _primaryIds = new Set();
+    if (_dupNames.size) {
+      const _groups = {};
+      arr.forEach(c => { const k=c.fio.trim().toLowerCase(); if(_dupNames.has(k)){if(!_groups[k])_groups[k]=[];_groups[k].push(c);} });
+      Object.values(_groups).forEach(g => { const wh=g.filter(c=>c.subscription_end||c.balance>0); if(wh.length===1)_primaryIds.add(wh[0].id); });
+    }
+
     body.innerHTML = arr.map(c=>{
       const days = daysUntil(c.subscription_end);
       const warn = days!==null&&days<=SUBSCRIPTION_WARN_DAYS&&days>=0;
@@ -565,6 +576,8 @@ async function renderClientsTab() {
       const today0 = todayStr();
       const isFrozen = c.freeze_start && c.freeze_end && today0 >= c.freeze_start && today0 <= c.freeze_end;
       const dot  = c.color?`<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${c.color};margin-right:4px;vertical-align:middle"></span>`:'';
+      const isDup = _dupNames.has(c.fio.trim().toLowerCase());
+      const dupBadge = isDup ? (_primaryIds.has(c.id) ? '✅ ' : '⚠️ ') : '';
       let rowBg = '';
       if (c.is_archived)     rowBg = 'background:rgba(100,116,139,.07);border-left:3px solid rgba(100,116,139,.3);opacity:.75';
       else if (isFrozen)     rowBg = 'background:rgba(96,165,250,.08);border-left:3px solid rgba(96,165,250,.4)';
@@ -572,7 +585,7 @@ async function renderClientsTab() {
       else if (warn||noBalance) rowBg = 'background:rgba(245,158,11,.08);border-left:3px solid rgba(245,158,11,.5)';
       return `<div class="client-row" style="${rowBg}" onclick="renderClientProfile('${c.id}','clients')">
         <div style="flex:1;min-width:0">
-          <div class="cr-name" style="font-size:16px;font-weight:600">${dot}${c.is_archived?'<span style="font-size:11px;color:var(--hint);font-weight:400;margin-right:4px">[Архив]</span>':''}${c.fio}</div>
+          <div class="cr-name" style="font-size:16px;font-weight:600">${dot}${c.is_archived?'<span style="font-size:11px;color:var(--hint);font-weight:400;margin-right:4px">[Архив]</span>':''}${dupBadge}${c.fio}</div>
           <div class="cr-meta" style="margin-top:2px;display:flex;flex-wrap:wrap;gap:4px;align-items:center">
             <span class="hi-cat cat-${c.category}" style="font-size:11px;padding:1px 7px;border-radius:8px;font-weight:600">Кат.${c.category}</span>
             <span style="font-size:12px;color:var(--hint)">${c.balance} ПТ</span>
@@ -3820,15 +3833,50 @@ async function renderAdminClients() {
 function renderClientList(clients) {
   if (!clients.length) return '<p class="hint" style="text-align:center;padding:20px">Не найдено</p>';
   const today = todayStr();
+
+  // Определяем дубли по fio
+  const nameCount = {};
+  clients.forEach(c => {
+    const key = c.fio.trim().toLowerCase();
+    nameCount[key] = (nameCount[key] || 0) + 1;
+  });
+
+  // Среди дублей находим "главного" (с историей: есть sub_end или balance > 0)
+  const primaryById = new Set();
+  const dupNames = new Set(Object.keys(nameCount).filter(k => nameCount[k] > 1));
+  if (dupNames.size) {
+    const groups = {};
+    clients.forEach(c => {
+      const key = c.fio.trim().toLowerCase();
+      if (!dupNames.has(key)) return;
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(c);
+    });
+    Object.values(groups).forEach(group => {
+      const withHistory = group.filter(c => c.subscription_end || c.balance > 0);
+      if (withHistory.length === 1) primaryById.add(withHistory[0].id);
+      // если несколько с историей или ни одного — никого не помечаем главным
+    });
+  }
+
   return clients.map(c => {
-    const expired  = c.subscription_end && c.subscription_end < today;
-    const noBalance= c.balance <= 0;
-    const warn     = expired || noBalance;
+    const expired   = c.subscription_end && c.subscription_end < today;
+    const noBalance = c.balance <= 0;
+    const warn      = expired || noBalance;
+    const key       = c.fio.trim().toLowerCase();
+    const isDup     = dupNames.has(key);
+    const isPrimary = primaryById.has(c.id);
+    const dupBadge  = isDup
+      ? isPrimary
+        ? `<span title="Основной (есть история)" style="font-size:13px">✅</span>`
+        : `<span title="Возможный дубль" style="font-size:13px">⚠️</span>`
+      : '';
+
     return `
     <div class="client-row" onclick="renderClientProfile('${c.id}','admin-clients')">
       <div style="flex:1;min-width:0">
         <div class="cr-name" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-          ${c.fio}${c.age?` <span class="hint" style="font-weight:400">${c.age}л</span>`:''}
+          ${dupBadge}${c.fio}${c.age?` <span class="hint" style="font-weight:400">${c.age}л</span>`:''}
           ${expired?'<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:rgba(239,68,68,.15);color:#ef4444">истёк</span>':''}
           ${!expired&&noBalance?'<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:rgba(245,158,11,.15);color:#f59e0b">баланс 0</span>':''}
         </div>
