@@ -2116,6 +2116,65 @@ async function loadTrainerReport(year,month) {
           <div class="s-lbl">К выплате (сум)</div>
         </div>
       </div>
+
+      <!-- Детализация расчёта ЗП -->
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:16px">
+        <div style="font-weight:700;font-size:14px;margin-bottom:10px">Детализация ЗП</div>
+
+        ${(sal.cat[1]||sal.cat[2]||sal.cat[3]||sal.cat.dropIn1||sal.cat.dropIn2||sal.cat.dropIn3||trialSessions.length||sal.ptSubSum)?`
+        <div style="font-size:12px;color:var(--hint);font-weight:600;margin-bottom:4px">ПЕРСОНАЛЬНЫЕ ТРЕНИРОВКИ</div>
+        ${sal.cat[1]?`<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);font-size:13px"><span>К1 × ${sal.cat[1]} шт</span><span style="font-weight:600">${fmt(sal.cat[1]*RATES.pt[1])} сум</span></div>`:''}
+        ${sal.cat[2]?`<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);font-size:13px"><span>К2 × ${sal.cat[2]} шт</span><span style="font-weight:600">${fmt(sal.cat[2]*RATES.pt[2])} сум</span></div>`:''}
+        ${sal.cat[3]?`<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);font-size:13px"><span>К3 × ${sal.cat[3]} шт</span><span style="font-weight:600">${fmt(sal.cat[3]*RATES.pt[3])} сум</span></div>`:''}
+        ${sal.cat.dropIn1||sal.cat.dropIn2||sal.cat.dropIn3?`<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);font-size:13px"><span>Разовые (${(sal.cat.dropIn1||0)+(sal.cat.dropIn2||0)+(sal.cat.dropIn3||0)} шт)</span><span style="font-weight:600">${fmt(sal.dropInSum)} сум</span></div>`:''}
+        ${trialSessions.length?`<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);font-size:13px"><span>Пробные (${trialSessions.length} шт)</span><span style="font-weight:600">${fmt(sal.trialSum)} сум</span></div>`:''}
+        ${sal.ptSubSum?`<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);font-size:13px"><span>Замены ПТ</span><span style="font-weight:600">${fmt(sal.ptSubSum)} сум</span></div>`:''}
+        `:''}
+
+        ${sal.hours>0?`
+        <div style="font-size:12px;color:var(--hint);font-weight:600;margin-top:8px;margin-bottom:4px">ДЕЖУРСТВА</div>
+        <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);font-size:13px">
+          <span>${sal.hours.toFixed(2)} ч × ${fmt(RATES.duty_per_hour)} сум/ч</span>
+          <span style="font-weight:600">${fmt(sal.dutySum)} сум</span>
+        </div>
+        `:''}
+
+        ${(()=>{
+          const myGroupIds = new Set(trainerGroups.map(tg=>tg.id));
+          const myPayouts = groupPayouts.filter(p=>myGroupIds.has(p.group_id)&&p.trainer_id===STATE.profile.id);
+          const adultRows = groupSessions.filter(gs=>gs.group_types?.billing_model==='headcount');
+          const subRows = groupSubstitutions.filter(s=>s.status==='approved');
+          if (!myPayouts.length&&!adultRows.length&&!subRows.length) return '';
+          const groupNameMap = Object.fromEntries(trainerGroups.map(tg=>[tg.id, tg.group_types?.name||'Группа']));
+          return `
+          <div style="font-size:12px;color:var(--hint);font-weight:600;margin-top:8px;margin-bottom:4px">ГРУППЫ</div>
+          ${myPayouts.map(p=>`<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);font-size:13px">
+            <span>${groupNameMap[p.group_id]||'Группа'} <span style="font-size:11px;color:#10b981">✓</span></span>
+            <span style="font-weight:600">${fmt(Number(p.payout_value))} сум</span>
+          </div>`).join('')}
+          ${adultRows.map(gs=>`<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);font-size:13px">
+            <span>${gs.group_types?.name||'Взрослая'} · ${fmtDate(gs.session_date)} (${gs.headcount} чел)</span>
+            <span style="font-weight:600">${fmt(getAdultGroupRate(gs.headcount))} сум</span>
+          </div>`).join('')}
+          ${subRows.map(s=>`<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);font-size:13px">
+            <span>Замена ${s.trainer_groups?.group_types?.name||'группа'} · ${fmtDate(s.session_date)}</span>
+            <span style="font-weight:600">${fmt(Number(s.rate||0))} сум</span>
+          </div>`).join('')}
+          `;
+        })()}
+
+        ${sal.bonus||sal.penalty?`
+        <div style="font-size:12px;color:var(--hint);font-weight:600;margin-top:8px;margin-bottom:4px">КОРРЕКТИРОВКИ</div>
+        ${sal.bonus?`<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);font-size:13px"><span>Премия</span><span style="font-weight:600;color:#10b981">+${fmt(sal.bonus)} сум</span></div>`:''}
+        ${sal.penalty?`<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);font-size:13px"><span>Штраф</span><span style="font-weight:600;color:#ef4444">−${fmt(sal.penalty)} сум</span></div>`:''}
+        `:''}
+
+        <div style="display:flex;justify-content:space-between;padding:8px 0 0;margin-top:4px;font-size:14px;font-weight:700;border-top:1px solid var(--border)">
+          <span>Итого к выплате</span>
+          <span style="color:#a78bfa">${fmt(sal.total)} сум</span>
+        </div>
+      </div>
+
       <h4>Тренировки за месяц</h4>
       ${!workouts.length?'<p class="hint">Нет записей за этот период</p>':workouts.map(w=>`
         <div class="history-item">
@@ -5279,8 +5338,8 @@ async function renderGroupMonthReport(groupId, monthStr) {
 
     const monthLabel = new Date(monthStr).toLocaleDateString('ru-RU',{month:'long',year:'numeric'});
     const backFn = isAdmin ? `renderAdminApp();adminTab('groups')`
-      : STATE.profile.role==='trainer' ? `renderTrainerApp()`
-      : `renderSeniorApp();seniorTab('groups')`;
+      : STATE.profile.role==='trainer' ? `renderTrainerShell('groups')`
+      : `renderSeniorApp().then(()=>seniorTab('groups'))`;
 
     setupBack(new Function(backFn));
     setScreen(`<div class="app-header">
