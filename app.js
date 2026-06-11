@@ -456,16 +456,7 @@ async function renderHomeTab() {
     String(now.getDate()).padStart(2,'0')].join('-')+'T07:00';
   const defEnd   = now.toISOString().slice(0,16);
 
-  const _pnp = window._pendingNotePrompt;
-  if (_pnp) window._pendingNotePrompt = null;
-
   $('#tab-content').innerHTML=`<div class="tab-pad">
-
-    ${_pnp?`<div style="margin-bottom:12px;padding:12px 14px;background:rgba(124,58,237,.1);border:1px solid rgba(124,58,237,.3);border-radius:10px;display:flex;justify-content:space-between;align-items:center;gap:8px">
-      <span style="font-size:13px">📝 Написать конспект?</span>
-      <button class="btn btn-sm" style="background:rgba(124,58,237,.2);color:#a78bfa;border:1px solid rgba(124,58,237,.4);flex-shrink:0"
-        onclick="renderPendingNoteModal('${_pnp.clientId}',${JSON.stringify(_pnp.workoutIds)});this.closest('div[style]').remove()">Написать</button>
-    </div>`:''}
 
     ${expiring.length?`<div class="warn-banner">
       ⚠️ Абонемент истекает: ${expiring.map(c=>`<b>${c.fio.split(' ')[0]}</b> (${daysUntil(c.subscription_end)} дн.)`).join(', ')}
@@ -807,9 +798,13 @@ async function saveInlineOverdueNote(clientId, btn) {
       DB.getOverdueNotes(clientId, STATE.profile.id),
       DB.getActiveSubscription(clientId),
     ]);
-    for (const w of overdueWorkouts) {
-      await DB.upsertNote(w.id, clientId, STATE.profile.id, sub?.id||null, acc, next||null, null);
+    // Добавляем свежие тренировки (ещё не старше 48ч, не видны в БД-запросе)
+    const freshIds = window._freshNoteWorkouts?.[clientId] || [];
+    const allIds = [...new Set([...overdueWorkouts.map(w=>w.id), ...freshIds])];
+    for (const wId of allIds) {
+      await DB.upsertNote(wId, clientId, STATE.profile.id, sub?.id||null, acc, next||null, null);
     }
+    if (freshIds.length && window._freshNoteWorkouts) delete window._freshNoteWorkouts[clientId];
     // Убираем строку клиента из модала
     document.getElementById(`odn-${clientId}`)?.remove();
     // Если больше нет — закрываем модал
@@ -1177,9 +1172,22 @@ async function doConfirmLogWorkout() {
     document.querySelector('.modal-overlay')?.remove();
     _pendingLogData = null;
     toast(`✅ ПТ`,'success');
-    // Если конспект не написан — запоминаем, баннер покажет renderHomeTab
+    // Если конспект не написан — сразу обновляем значок 📝 в шапке
     if (!newAcc && result?.[0]) {
-      window._pendingNotePrompt = { clientId, workoutIds: result.map(r=>r.id) };
+      const freshIds = result.map(r=>r.id);
+      // Сохраняем свежие workout IDs чтобы saveInlineOverdueNote мог их найти
+      if (!window._freshNoteWorkouts) window._freshNoteWorkouts = {};
+      window._freshNoteWorkouts[clientId] = (window._freshNoteWorkouts[clientId]||[]).concat(freshIds);
+      // Добавляем в overdueMap и обновляем значок
+      if (!window._overdueMap) window._overdueMap = {};
+      window._overdueMap[clientId] = (window._overdueMap[clientId]||0) + freshIds.length;
+      const total = Object.values(window._overdueMap).reduce((s,n)=>s+n,0);
+      const badge = document.getElementById('note-badge');
+      if (badge) {
+        badge.innerHTML = `📝<span style="position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;border-radius:50%;font-size:9px;width:16px;height:16px;line-height:16px;text-align:center;display:inline-block">${total}</span>`;
+        badge.style.cssText = 'display:inline-flex;position:relative';
+        badge.onclick = () => renderOverdueNotesModal(window._overdueMap, window._clientsList);
+      }
     }
     renderWorkoutsTab();
     // Реестр: одна запись на весь батч (вне try — fire-and-forget)
