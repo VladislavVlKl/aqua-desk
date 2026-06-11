@@ -753,23 +753,72 @@ function renderOverdueNotesModal(overdueMap, clients) {
   m.innerHTML=`<div class="modal">
     <div class="modal-header"><h3>📝 Незакрытые конспекты</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
-    <p class="hint" style="margin-bottom:12px">Нажмите на клиента чтобы перейти и написать конспект:</p>
-    <div style="display:flex;flex-direction:column;gap:8px">
+    <p class="hint" style="margin-bottom:12px">Нажмите на клиента чтобы написать конспект:</p>
+    <div id="overdue-notes-list" style="display:flex;flex-direction:column;gap:8px">
       ${entries.map(([clientId, count])=>{
         const c = clientMap[clientId];
         if (!c) return '';
-        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:12px;background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.2);border-radius:10px;cursor:pointer"
-          onclick="this.closest('.modal-overlay').remove();renderClientProfile('${clientId}','clients')">
-          <div>
-            <div style="font-weight:600">${c.fio}</div>
-            <div style="font-size:12px;color:var(--hint)">Кат.${c.category} · ${c.balance} ПТ</div>
+        return `<div id="odn-${clientId}" style="border:1px solid rgba(239,68,68,.2);border-radius:10px;overflow:hidden">
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:12px;background:rgba(239,68,68,.07);cursor:pointer"
+            onclick="toggleOverdueNoteForm('${clientId}')">
+            <div>
+              <div style="font-weight:600">${c.fio}</div>
+              <div style="font-size:12px;color:var(--hint)">Кат.${c.category} · ${c.balance} ПТ</div>
+            </div>
+            <span style="background:rgba(239,68,68,.15);color:#ef4444;padding:3px 10px;border-radius:12px;font-weight:700;font-size:13px">${count} конспект${count>1?'а':''}</span>
           </div>
-          <span style="background:rgba(239,68,68,.15);color:#ef4444;padding:3px 10px;border-radius:12px;font-weight:700;font-size:13px">${count} конспект${count>1?'а':''}</span>
+          <div id="odn-form-${clientId}" style="display:none;padding:12px;border-top:1px solid rgba(239,68,68,.15);background:var(--card)">
+            <div class="form-group" style="margin-bottom:8px"><label style="font-size:12px">Что сделали</label>
+              <textarea id="odn-acc-${clientId}" rows="2" placeholder="Освоили дыхание во время кроля..."></textarea></div>
+            <div class="form-group" style="margin-bottom:8px"><label style="font-size:12px">Задача на следующее занятие</label>
+              <textarea id="odn-next-${clientId}" rows="2" placeholder="Откорректировать работу рук..."></textarea></div>
+            <button class="btn btn-primary btn-full" style="font-size:13px"
+              onclick="saveInlineOverdueNote('${clientId}',this)">Сохранить конспект</button>
+          </div>
         </div>`;
       }).join('')}
     </div>
   </div>`;
   document.body.appendChild(m);
+}
+function toggleOverdueNoteForm(clientId) {
+  const form = document.getElementById(`odn-form-${clientId}`);
+  if (!form) return;
+  const open = form.style.display === 'none';
+  form.style.display = open ? 'block' : 'none';
+  if (open) form.querySelector('textarea')?.focus();
+}
+async function saveInlineOverdueNote(clientId, btn) {
+  const acc  = document.getElementById(`odn-acc-${clientId}`)?.value.trim();
+  const next = document.getElementById(`odn-next-${clientId}`)?.value.trim();
+  if (!acc) return toast('Напишите что сделали','error');
+  btn.disabled = true; btn.textContent = 'Сохраняем...';
+  try {
+    const [overdueWorkouts, sub] = await Promise.all([
+      DB.getOverdueNotes(clientId, STATE.profile.id),
+      DB.getActiveSubscription(clientId),
+    ]);
+    for (const w of overdueWorkouts) {
+      await DB.upsertNote(w.id, clientId, STATE.profile.id, sub?.id||null, acc, next||null, null);
+    }
+    // Убираем строку клиента из модала
+    document.getElementById(`odn-${clientId}`)?.remove();
+    // Если больше нет — закрываем модал
+    const list = document.getElementById('overdue-notes-list');
+    if (list && !list.children.length) document.querySelector('.modal-overlay')?.remove();
+    toast('✅ Конспект сохранён','success');
+    // Обновляем счётчик на главной
+    const badge = document.getElementById('note-badge');
+    if (badge) {
+      const map = window._overdueMap||{};
+      delete map[clientId];
+      window._overdueMap = map;
+      const total = Object.values(map).reduce((s,n)=>s+n,0);
+      badge.innerHTML = total > 0
+        ? `📝<span style="position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;border-radius:50%;font-size:9px;width:16px;height:16px;line-height:16px;text-align:center;display:inline-block">${total}</span>`
+        : '📝';
+    }
+  } catch(e) { toast('Ошибка','error'); console.error(e); btn.disabled=false; btn.textContent='Сохранить конспект'; }
 }
 
 // ── ТАБ: СПИСАНИЕ ─────────────────────────────
@@ -4492,7 +4541,7 @@ async function doAddGroupClient(groupId) {
 }
 function toggleGroupPayment(groupId, clientId, paid, amount, month) {
   const isPaid = paid==='true'||paid===true;
-  if (!isPaid) {
+  if (isPaid) {
     // Открываем модал для ввода суммы и дат абонемента
     const m=el('div','modal-overlay');
     m.innerHTML=`<div class="modal">
