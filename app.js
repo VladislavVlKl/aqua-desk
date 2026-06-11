@@ -456,7 +456,16 @@ async function renderHomeTab() {
     String(now.getDate()).padStart(2,'0')].join('-')+'T07:00';
   const defEnd   = now.toISOString().slice(0,16);
 
+  const _pnp = window._pendingNotePrompt;
+  if (_pnp) window._pendingNotePrompt = null;
+
   $('#tab-content').innerHTML=`<div class="tab-pad">
+
+    ${_pnp?`<div style="margin-bottom:12px;padding:12px 14px;background:rgba(124,58,237,.1);border:1px solid rgba(124,58,237,.3);border-radius:10px;display:flex;justify-content:space-between;align-items:center;gap:8px">
+      <span style="font-size:13px">📝 Написать конспект?</span>
+      <button class="btn btn-sm" style="background:rgba(124,58,237,.2);color:#a78bfa;border:1px solid rgba(124,58,237,.4);flex-shrink:0"
+        onclick="renderPendingNoteModal('${_pnp.clientId}',${JSON.stringify(_pnp.workoutIds)});this.closest('div[style]').remove()">Написать</button>
+    </div>`:''}
 
     ${expiring.length?`<div class="warn-banner">
       ⚠️ Абонемент истекает: ${expiring.map(c=>`<b>${c.fio.split(' ')[0]}</b> (${daysUntil(c.subscription_end)} дн.)`).join(', ')}
@@ -1168,22 +1177,11 @@ async function doConfirmLogWorkout() {
     document.querySelector('.modal-overlay')?.remove();
     _pendingLogData = null;
     toast(`✅ ПТ`,'success');
-    renderWorkoutsTab();
-    // Если конспект не написан — показываем кнопку сразу после рендера
+    // Если конспект не написан — запоминаем, баннер покажет renderHomeTab
     if (!newAcc && result?.[0]) {
-      const workoutIds = result.map(r=>r.id);
-      setTimeout(()=>{
-        const wrap = document.getElementById('tab-content');
-        if (!wrap) return;
-        const banner = document.createElement('div');
-        banner.id = 'pending-note-banner';
-        banner.style.cssText = 'margin:12px 16px 0;padding:12px 14px;background:rgba(124,58,237,.1);border:1px solid rgba(124,58,237,.3);border-radius:10px;display:flex;justify-content:space-between;align-items:center;gap:8px';
-        banner.innerHTML = `<span style="font-size:13px;color:var(--text)">📝 Написать конспект?</span>
-          <button class="btn btn-sm" style="background:rgba(124,58,237,.2);color:#a78bfa;border:1px solid rgba(124,58,237,.4);flex-shrink:0"
-            onclick="renderPendingNoteModal('${clientId}',${JSON.stringify(workoutIds)});this.closest('#pending-note-banner').remove()">Написать</button>`;
-        wrap.insertBefore(banner, wrap.firstChild);
-      }, 300);
+      window._pendingNotePrompt = { clientId, workoutIds: result.map(r=>r.id) };
     }
+    renderWorkoutsTab();
     // Реестр: одна запись на весь батч (вне try — fire-and-forget)
     const firstRow = rows[0];
     DB.auditLog('workout_add', STATE.profile.id, STATE.profile.fio, clientId, 'workout', {
