@@ -1173,21 +1173,26 @@ async function doConfirmLogWorkout() {
     _pendingLogData = null;
     toast(`✅ ПТ`,'success');
     // Если конспект не написан — сразу обновляем значок 📝 в шапке
-    if (!newAcc && result?.[0]) {
+    if (!newAcc && result?.[0] && !rows[0]?.is_drop_in) {
       const freshIds = result.map(r=>r.id);
-      // Сохраняем свежие workout IDs чтобы saveInlineOverdueNote мог их найти
       if (!window._freshNoteWorkouts) window._freshNoteWorkouts = {};
       window._freshNoteWorkouts[clientId] = (window._freshNoteWorkouts[clientId]||[]).concat(freshIds);
-      // Добавляем в overdueMap и обновляем значок
       if (!window._overdueMap) window._overdueMap = {};
       window._overdueMap[clientId] = (window._overdueMap[clientId]||0) + freshIds.length;
-      const total = Object.values(window._overdueMap).reduce((s,n)=>s+n,0);
-      const badge = document.getElementById('note-badge');
-      if (badge) {
-        badge.innerHTML = `📝<span style="position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;border-radius:50%;font-size:9px;width:16px;height:16px;line-height:16px;text-align:center;display:inline-block">${total}</span>`;
-        badge.style.cssText = 'display:inline-flex;position:relative';
-        badge.onclick = () => renderOverdueNotesModal(window._overdueMap, window._clientsList);
+      // Подгружаем список клиентов если ещё не загружен (для модала)
+      if (!window._clientsList?.length) {
+        DB.getClients(STATE.profile.id).then(cl => { window._clientsList = cl; });
       }
+      // Обновляем значок после рендера главной
+      setTimeout(() => {
+        const total = Object.values(window._overdueMap||{}).reduce((s,n)=>s+n,0);
+        const badge = document.getElementById('note-badge');
+        if (badge && total > 0) {
+          badge.innerHTML = `📝<span style="position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;border-radius:50%;font-size:9px;width:16px;height:16px;line-height:16px;text-align:center;display:inline-block">${total}</span>`;
+          badge.style.cssText = 'display:inline-flex;position:relative';
+          badge.onclick = () => renderOverdueNotesModal(window._overdueMap, window._clientsList);
+        }
+      }, 600);
     }
     renderWorkoutsTab();
     // Реестр: одна запись на весь батч (вне try — fire-and-forget)
