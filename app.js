@@ -2480,7 +2480,10 @@ async function doRequestWorkoutDelete(workoutId, workoutDate, clientNameEnc, bra
     DB.auditLog('workout_delete_request', STATE.profile.id, STATE.profile.fio, workoutId, 'workout',
       { client: clientName, date: workoutDate?.slice(0,10) }, branch);
     toast('Запрос отправлен координатору','success');
-  } catch(e) { console.error(e); toast('Ошибка','error'); }
+  } catch(e) {
+    if (e.message==='already_pending') toast('Запрос уже отправлен ранее','info');
+    else { console.error(e); toast('Ошибка','error'); }
+  }
   finally { _pending.delete('wdr_'+workoutId); }
 }
 

@@ -1776,6 +1776,9 @@ Object.assign(DB, {
 
   // ─── ЗАПРОСЫ НА УДАЛЕНИЕ ТРЕНИРОВОК ─────────
   async requestWorkoutDelete(workoutId, trainerId, clientName, workoutDate, branch) {
+    const {data:existing} = await sb().from('workout_delete_requests')
+      .select('id').eq('workout_id',workoutId).eq('status','pending').limit(1);
+    if (existing?.length) throw new Error('already_pending');
     const {error} = await sb().from('workout_delete_requests')
       .insert({workout_id:workoutId, trainer_id:trainerId, client_name:clientName,
                workout_date:workoutDate, branch, status:'pending'});
@@ -1796,7 +1799,8 @@ Object.assign(DB, {
     if (error) throw error; return data||[];
   },
   async approveWorkoutDeleteRequest(reqId, workoutId) {
-    await sb().from('workout_delete_requests').update({status:'approved'}).eq('id',reqId);
+    // Закрываем все pending-запросы на эту тренировку ДО удаления (иначе CASCADE сотрёт их)
+    await sb().from('workout_delete_requests').update({status:'approved'}).eq('workout_id',workoutId).eq('status','pending');
     await this.deleteWorkout(workoutId);
   },
   async rejectWorkoutDeleteRequest(reqId) {
