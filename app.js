@@ -4587,7 +4587,7 @@ function toggleGroupPayment(groupId, clientId, paid, amount, month) {
       <div class="form-group"><label>Начало абонемента</label>
         <input id="gp-sub-start" type="date" value="${month.slice(0,10)}" onchange="syncGroupSubEnd()"></div>
       <div class="form-group"><label>Конец абонемента <span style="font-size:11px;color:var(--hint)">(авто: 30 дней)</span></label>
-        <input id="gp-sub-end" type="date" value="${calcSubEnd(month.slice(0,10))}"></div>
+        <input id="gp-sub-end" type="date" value="${calcGroupSubEnd(month.slice(0,10))}"></div>
       <button class="btn btn-primary btn-full"
         onclick="doSetGroupPayment('${groupId}','${clientId}','${month}',true)">✓ Оплачен</button>
     </div>`;
@@ -5693,12 +5693,10 @@ async function renderGroupMonthReport(groupId, monthStr) {
         if (!canSee) return '';
 
         const isArtSwim = groupTypeInfo?.name?.toLowerCase().includes('art');
-        const pricePerChild = groupTypeInfo?.price_per_month || 0;
         const activeCount  = clients.filter(c=>c.is_active!==false).length;
-        // Для детских групп ЗП считается от реальных оплат, а не от количества активных детей
-        const totalRevenue = isArtSwim
-          ? activeCount * pricePerChild
-          : totalPaid;
+        const paidCount    = payments.filter(p=>p.paid).length;
+        // Вал — всегда от реальных оплат месяца (абонементы переходящие, активных детей больше, чем купивших)
+        const totalRevenue = totalPaid;
         const pool         = Math.round(totalRevenue / 2); // пул = вал / 2
 
         const tgWithLeader = trainers.find(t=>t.leader_name);
@@ -5712,6 +5710,11 @@ async function renderGroupMonthReport(groupId, monthStr) {
         const percentTrainers = trainers.filter(t => t.rate_type === 'percent');
         const flatTrainers    = trainers.filter(t => t.rate_type === 'flat');
         const allFlat         = percentTrainers.length === 0 && flatTrainers.length > 0;
+
+        // % руководителя снимается с пула ДО раздачи процентов тренерам
+        // (кроме случая "все flat" — там руководитель получает остаток пула)
+        const leaderCut   = (isArtSwim && !allFlat && leaderPct > 0) ? Math.round(pool * leaderPct / 100) : 0;
+        const trainerPool = pool - leaderCut;
 
         // Расчёт ЗП каждого тренера
         const trainerRows = trainers.map(t => {
@@ -5729,20 +5732,21 @@ async function renderGroupMonthReport(groupId, monthStr) {
 
           if (isArtSwim) {
             if (t.rate_type === 'percent') {
-              // Случай 1 и 2: процентный тренер
-              const base = Math.round(pool * (t.rate_value || 0) / 100);
-              if (!allFlat) {
+              // Случай 1 и 2: процентный тренер — % от пула после вычета руководителя
+              const base = Math.round(trainerPool * (t.rate_value || 0) / 100);
+              const poolNote = leaderCut ? `(${fmt(pool)} − рук. ${fmt(leaderCut)})` : fmt(trainerPool);
+              if (flatTrainers.length) {
                 // Если есть flat тренеры — вычитаем их ставки и замены этого тренера
                 const flatCost = flatTrainers.reduce((acc, ft) => {
                   const ftSessions = (instanceSessions||[]).filter(s => s.trainer_id === ft.trainer_id).length;
                   return acc + ftSessions * Number(ft.rate_value || 75000);
                 }, 0);
                 autoAmt  = Math.max(0, base - flatCost - mySubCost);
-                calcNote = `${t.rate_value||0}% × ${fmt(pool)} − ставки (${fmt(flatCost)}) − замены (${fmt(mySubCost)})`;
+                calcNote = `${t.rate_value||0}% × ${poolNote} − ставки (${fmt(flatCost)}) − замены (${fmt(mySubCost)})`;
               } else {
                 // Все процентные — считаем независимо, вычитаем только замены
                 autoAmt  = Math.max(0, base - mySubCost);
-                calcNote = `${t.rate_value||0}% × ${fmt(pool)}${mySubCost?` − замены (${fmt(mySubCost)})` : ''}`;
+                calcNote = `${t.rate_value||0}% × ${poolNote}${mySubCost?` − замены (${fmt(mySubCost)})` : ''}`;
               }
             } else {
               // Flat тренер
@@ -5775,7 +5779,7 @@ async function renderGroupMonthReport(groupId, monthStr) {
           const totalFlatPay = trainerRows.reduce((s, r) => s + r.autoAmt, 0);
           leaderFee = Math.max(0, pool - totalFlatPay);
         } else if (isArtSwim) {
-          leaderFee = leaderPct > 0 ? Math.round(pool * leaderPct / 100) : 0;
+          leaderFee = leaderCut;
         } else {
           // Детские группы — % от полного вала
           leaderFee = leaderPct > 0 ? Math.round(totalRevenue * leaderPct / 100) : 0;
@@ -5791,7 +5795,7 @@ async function renderGroupMonthReport(groupId, monthStr) {
 
           ${isArtSwim ? `<div style="background:rgba(124,58,237,.08);border:1px solid rgba(124,58,237,.3);border-radius:10px;padding:12px;margin-bottom:12px">
             <div style="display:flex;justify-content:space-between;margin-bottom:4px">
-              <span style="font-size:13px;color:var(--hint)">Вал (${activeCount} дет × ${fmt(pricePerChild)})</span>
+              <span style="font-size:13px;color:var(--hint)">Вал (оплаты за месяц: ${paidCount} из ${activeCount} дет)</span>
               <span style="font-weight:700;font-size:15px">${fmt(totalRevenue)} сум</span>
             </div>
             <div style="display:flex;justify-content:space-between;margin-bottom:4px">
@@ -5946,20 +5950,32 @@ async function doExportGroupPayroll(groupId, monthStr) {
     const activeCount   = clients.filter(c=>c.is_active!==false).length;
     const pricePerChild = groupTypeInfo?.price_per_month || 0;
     const isArtSwimExport = groupTypeInfo?.name?.toLowerCase().includes('art');
+    // Вал — всегда от реальных оплат месяца (как в отчёте группы)
     const totalPaidExport = (paymentsExport||[]).filter(p=>p.paid).reduce((s,p)=>s+Number(p.amount||0),0);
-    const totalRevenue  = isArtSwimExport ? activeCount * pricePerChild : totalPaidExport;
+    const totalRevenue  = totalPaidExport;
     const totalSessions = [...new Set(attendance.map(a=>a.session_date))].length;
     const isArtSwim     = isArtSwimExport;
     const tgWithLeader  = trainers.find(t=>t.leader_name);
     const leaderName    = tgWithLeader?.leader_name || '';
     const leaderPct     = tgWithLeader?.leader_fee_percent || 0;
-    const leaderFee     = leaderPct>0 ? Math.round(totalRevenue * leaderPct / 100) : 0;
+    const pool          = Math.round(totalRevenue / 2);
+    const leaderFee     = leaderPct>0 ? Math.round((isArtSwim ? pool : totalRevenue) * leaderPct / 100) : 0;
+    const trainerPool   = pool - (isArtSwim ? leaderFee : 0);
+
+    // Суммарные выплаты ставочников — вычитаются у процентного тренера (как в отчёте)
+    const flatCostExport = trainers.filter(t=>t.rate_type==='flat').reduce((acc,ft)=>{
+      const sc = (instanceSessions||[]).filter(s=>s.trainer_id===ft.trainer_id).length;
+      return acc + sc * Number(ft.rate_value||75000);
+    }, 0);
 
     const rows = trainers.map(t=>{
       let amt=0, note='';
       if (isArtSwim) {
         const sc = (instanceSessions||[]).filter(s=>s.trainer_id===t.trainer_id).length;
-        if (t.rate_type==='percent') { amt=Math.round(totalRevenue*(t.rate_value||0)/100); note=`${t.rate_value||0}% от выручки`; }
+        if (t.rate_type==='percent') {
+          amt=Math.max(0, Math.round(trainerPool*(t.rate_value||0)/100) - flatCostExport);
+          note=`${t.rate_value||0}% от пула после руководителя${flatCostExport?` − ставки (${fmt(flatCostExport)})`:''}`;
+        }
         else { amt=sc*(t.rate_value||75000); note=`${sc} занятий × ${fmt(t.rate_value||75000)} сум`; }
       } else {
         if (t.rate_type==='flat') { amt=totalSessions*(t.rate_value||0); note=`${totalSessions} занятий × ${fmt(t.rate_value||0)} сум`; }
@@ -5973,8 +5989,9 @@ async function doExportGroupPayroll(groupId, monthStr) {
   } catch(e) { toast('Ошибка: '+(e?.message||String(e)),'error'); console.error(e); }
 }
 
-// Конец абонемента = ровно 30 дней с начала включительно (купил 2.06 → закрывается 1.07).
-function calcSubEnd(startStr) {
+// Конец ГРУППОВОГО абонемента = ровно 30 дней с начала включительно (купил 2.06 → закрывается 1.07).
+// Не путать с calcSubEnd(start, qty) из config.js — та для пакетов ПТ.
+function calcGroupSubEnd(startStr) {
   const [y,m,d] = startStr.split('-').map(Number);
   const end = new Date(y, m-1, d + 29);
   return `${end.getFullYear()}-${String(end.getMonth()+1).padStart(2,'0')}-${String(end.getDate()).padStart(2,'0')}`;
@@ -5982,7 +5999,7 @@ function calcSubEnd(startStr) {
 function syncGroupSubEnd() {
   const start = document.getElementById('gp-sub-start')?.value;
   const endInp = document.getElementById('gp-sub-end');
-  if (start && endInp) endInp.value = calcSubEnd(start);
+  if (start && endInp) endInp.value = calcGroupSubEnd(start);
 }
 function prevMonthStr(monthStr) {
   const d = new Date(monthStr); d.setMonth(d.getMonth()-1);

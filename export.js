@@ -455,7 +455,7 @@ function exportChildGroupExcel(groupId, monthStr, report, groupInfo) {
 
   // Шапка таблицы
   rows.push(sr(
-    ['N','Имя ребёнка','Возраст','Посещаемость','% явки','Сумма','Оплачено','Дата оплаты','Долг','Прогресс / заметка'],
+    ['N','Имя ребёнка','Возраст','Посещаемость','% явки','Сумма','Оплачено','Дата оплаты','Начало абонемента','Конец абонемента','Долг','Прогресс / заметка'],
     hStyle()
   ));
 
@@ -483,6 +483,8 @@ function exportChildGroupExcel(groupId, monthStr, report, groupInfo) {
       mc(amount, rs),
       tc(isPaid?'✅ Оплачено':'❌ Не оплачено', paidStyle),
       tc(pay?.paid_at ? new Date(pay.paid_at).toLocaleDateString('ru-RU') : '—', rs),
+      tc(pay?.sub_start ? new Date(pay.sub_start).toLocaleDateString('ru-RU') : '—', rs),
+      tc(pay?.sub_end ? new Date(pay.sub_end).toLocaleDateString('ru-RU') : '—', rs),
       mc(debt, {...rs, font:{...rs.font, color:{rgb:debt>0?'DC2626':XL.TEXT_DARK}}}),
       tc(note?.note||'—', rs),
     ]);
@@ -491,16 +493,16 @@ function exportChildGroupExcel(groupId, monthStr, report, groupInfo) {
   rows.push([]);
 
   // Итоговые строки
-  rows.push(sr(['','ИТОГО:','',`${activeClients.length} детей`,'','','','','',''], tStyle()));
-  rows.push(sr(['','Оплачено:','','','','','','','',`${payments.filter(p=>p.paid).length} чел.`], {
+  rows.push(sr(['','ИТОГО:','',`${activeClients.length} детей`,'','','','','','','',''], tStyle()));
+  rows.push(sr(['','Оплачено:','','','','','','','','','',`${payments.filter(p=>p.paid).length} чел.`], {
     ...rStyle(false), font:{...rStyle(false).font, color:{rgb:XL.GREEN_DARK}, bold:true}
   }));
-  rows.push(sr(['','Не оплатили:','','','','','','','',`${activeClients.length-payments.filter(p=>p.paid).length} чел.`], {
+  rows.push(sr(['','Не оплатили:','','','','','','','','','',`${activeClients.length-payments.filter(p=>p.paid).length} чел.`], {
     ...rStyle(true), font:{...rStyle(true).font, color:{rgb:'DC2626'}, bold:true}
   }));
-  rows.push(sr(['','Сумма оплат:','','','', mc(totalPaid),'','','',''], gStyle()));
+  rows.push(sr(['','Сумма оплат:','','','', mc(totalPaid),'','','','','',''], gStyle()));
   if (totalUnpaid > 0)
-    rows.push(sr(['','Задолженность:','','','', mc(totalUnpaid),'','','',''], {
+    rows.push(sr(['','Задолженность:','','','', mc(totalUnpaid),'','','','','',''], {
       ...rStyle(false), fill:{fgColor:{rgb:'FEE2E2'}}, font:{color:{rgb:'DC2626'},bold:true,sz:10,name:'Arial'}
     }));
 
@@ -516,7 +518,7 @@ function exportChildGroupExcel(groupId, monthStr, report, groupInfo) {
   }
 
   const ws = buildSheet(rows);
-  ws['!cols'] = [{wch:4},{wch:22},{wch:8},{wch:12},{wch:8},{wch:14},{wch:14},{wch:14},{wch:12},{wch:30}];
+  ws['!cols'] = [{wch:4},{wch:22},{wch:8},{wch:12},{wch:8},{wch:14},{wch:14},{wch:14},{wch:14},{wch:14},{wch:12},{wch:30}];
 
   XLSX.utils.book_append_sheet(wb, ws, 'Ведомость');
 
@@ -695,7 +697,7 @@ function exportGroupPayrollExcel(groupName, monthStr, totalRevenue, activeCount,
   rows.push([tc(`Выплаты тренерам — ${groupName} — ${monthLabel}`, titleStyle())]);
   rows.push([]);
   rows.push([tc('База расчёта', hStyle().font ? hStyle() : {}),
-             tc(`${activeCount} детей × ${fmt(pricePerChild)} сум = ${fmt(totalRevenue)} сум`,
+             tc(`Оплаты за месяц: ${fmt(totalRevenue)} сум (в группе ${activeCount} детей)`,
                 {font:{sz:12,name:'Arial',bold:false,color:{rgb:XL.TEXT_DARK}}})]);
   rows.push([]);
   rows.push(sr(['Тренер','Роль','Формула','К выплате','Утверждено','Статус'], hStyle()));
@@ -723,7 +725,7 @@ function exportGroupPayrollExcel(groupName, monthStr, totalRevenue, activeCount,
     rows.push([
       tc(leaderName, ls),
       tc('Руководитель', ls),
-      tc(`${leaderPct}% от выручки`, ls),
+      tc(`${leaderPct}% от пула`, ls),
       mc(leaderFee, ls),
       tc('—', ls),
       tc('ℹ️ Отдельно', ls),
