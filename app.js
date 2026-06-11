@@ -33,7 +33,7 @@
 //   ADMIN:GROUPS        — renderAdminGroups, renderGroupsStructure, renderGroupMonthReport
 //   ADMIN:TECH          — renderAdminTech, оборудование, счета, закупки, хлор, планы
 //   CEO                 — renderCeoApp, renderCeoDashboard, renderCeoSalary
-//   SHARED:DELETE       — doDeleteClientCheck, renderDeleteRequests
+//   SHARED:DELETE       — doDeleteClientCheck, doApproveDelete, doApproveWorkoutDelete
 //   SHARED:PROFILE      — renderTrainerEditProfile
 //   SHARED:NOTIFICATIONS — checkInAppNotifications, renderAdminNotifications
 //   SHARED:GROUP_MODALS — расписание группы, замены, взрослые группы
@@ -514,8 +514,6 @@ async function renderHomeTab() {
         <label>Примечание <span class="required">*</span></label>
         <textarea id="wk-notes" rows="2" placeholder="Причина пакетного списания"></textarea>
       </div>
-      <div id="overdue-warning"></div>
-
       <!-- Замена: запись на другого тренера -->
       <div class="debt-toggle" style="margin-bottom:0">
         <label class="toggle-row">
@@ -1065,34 +1063,6 @@ async function _doLogWorkoutInner() {
   const overdueNotes = await DB.getOverdueNotes(clientId, STATE.profile.id);
   _pendingLogData = { rows, clientId, count, overdueNotes };
   showLogWithNotesModal(overdueNotes, clientId, dates);
-}
-
-async function renderPendingNoteModal(clientId, workoutIds) {
-  const m = el('div','modal-overlay');
-  m.innerHTML=`<div class="modal">
-    <div class="modal-header"><h3>📝 Конспект занятия</h3>
-      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
-    <div class="form-group"><label>Что сделали на занятии</label>
-      <textarea id="pnm-acc" rows="3" placeholder="Освоили дыхание во время кроля..."></textarea></div>
-    <div class="form-group"><label>Задача на следующее занятие</label>
-      <textarea id="pnm-next" rows="2" placeholder="Откорректировать работу рук..."></textarea></div>
-    <button class="btn btn-primary btn-full" onclick="doSavePendingNote('${clientId}',${JSON.stringify(workoutIds)},this)">Сохранить</button>
-  </div>`;
-  document.body.appendChild(m);
-}
-async function doSavePendingNote(clientId, workoutIds, btn) {
-  const acc  = document.getElementById('pnm-acc')?.value.trim();
-  const next = document.getElementById('pnm-next')?.value.trim()||null;
-  if (!acc) return toast('Напишите что сделали','error');
-  btn.disabled = true; btn.textContent = 'Сохраняем...';
-  try {
-    const sub = await DB.getActiveSubscription(clientId);
-    for (const wId of workoutIds) {
-      await DB.upsertNote(wId, clientId, STATE.profile.id, sub?.id||null, acc, next, null);
-    }
-    document.querySelector('.modal-overlay')?.remove();
-    toast('✅ Конспект сохранён','success');
-  } catch(e) { toast('Ошибка','error'); console.error(e); btn.disabled=false; btn.textContent='Сохранить'; }
 }
 
 function showLogWithNotesModal(overdueNotes, clientId, dates) {
@@ -7275,7 +7245,7 @@ async function renderCeoPlans() {
 // renderTrainerEditProfile moved to module
 
 // ============================================================
-// SECTION: SHARED:DELETE — doDeleteClientCheck, renderDeleteRequests
+// SECTION: SHARED:DELETE — doDeleteClientCheck, doApproveDelete, doApproveWorkoutDelete
 // ============================================================
 async function doDeleteClientCheck(clientId, fioEnc, createdAt) {
   const fio = decodeURIComponent(fioEnc);
@@ -7299,7 +7269,6 @@ async function doDeleteClientCheck(clientId, fioEnc, createdAt) {
   }
 }
 
-// Для координатора — список запросов на удаление в Контроле (мёртвый код — логика встроена в renderAdminControl)
 async function doApproveWorkoutDelete(reqId, workoutId) {
   if (_pending.has('wda_'+reqId)) return;
   if (!confirm('Удалить тренировку окончательно?')) return;
@@ -7322,26 +7291,6 @@ async function doRejectWorkoutDelete(reqId) {
   finally { _pending.delete('wdr2_'+reqId); }
 }
 
-async function renderDeleteRequests() {
-  try {
-    const reqs = await DB.getAllDeleteRequests();
-    if (!reqs.length) return '';
-    return `<div class="control-section">
-      <div class="control-title danger">🗑 Запросы на удаление (${reqs.length})</div>
-      ${reqs.map(r=>`<div class="control-item">
-        <div class="ci-main">${r.client_name} <span class="hint">← ${r.profiles?.fio||'?'}</span></div>
-        <div class="ci-sub" style="font-size:11px;color:var(--text-secondary)">
-          Запрос: ${fmtDate(r.created_at)}${r.clients?.balance!=null?' · Баланс: '+r.clients.balance:''}${r.clients?.subscription_end?' · Абон до: '+fmtDate(r.clients.subscription_end):''}
-        </div>
-        <div style="display:flex;gap:6px;margin-top:6px">
-          <button class="btn btn-sm btn-danger" onclick="doApproveDelete('${r.id}','${r.client_id}','${encodeURIComponent(r.client_name)}')">Удалить</button>
-          <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
-            onclick="doRejectDelete('${r.id}')">Отклонить</button>
-        </div>
-      </div>`).join('')}
-    </div>`;
-  } catch(e) { return ''; }
-}
 async function doApproveDelete(reqId, clientId, nameEnc) {
   if (_pending.has('approve_'+reqId)) return;
   const fio = decodeURIComponent(nameEnc);

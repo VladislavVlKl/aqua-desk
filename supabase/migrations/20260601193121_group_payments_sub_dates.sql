@@ -1,0 +1,6 @@
+
+ALTER TABLE group_payments
+  ADD COLUMN IF NOT EXISTS sub_start date DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS sub_end   date DEFAULT NULL;
+
+
