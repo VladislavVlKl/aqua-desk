@@ -6382,6 +6382,9 @@ async function renderAdminControl() {
       <div class="control-title danger">🗑 Запросы на удаление (${deleteReqs.length})</div>
       ${deleteReqs.map(r=>`<div class="control-item">
         <div class="ci-main">${r.client_name} <span class="hint">← ${r.profiles?.fio||'?'}</span></div>
+        <div class="ci-sub" style="font-size:11px;color:var(--text-secondary)">
+          Запрос: ${fmtDate(r.created_at)}${r.clients?.balance!=null?' · Баланс: '+r.clients.balance:''}${r.clients?.subscription_end?' · Абон до: '+fmtDate(r.clients.subscription_end):''}
+        </div>
         <div style="display:flex;gap:6px;margin-top:6px">
           <button class="btn btn-sm btn-danger" onclick="doApproveDelete('${r.id}','${r.client_id}','${encodeURIComponent(r.client_name||'')}')">Удалить</button>
           <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
@@ -7286,7 +7289,10 @@ async function doDeleteClientCheck(clientId, fioEnc, createdAt) {
     try {
       await DB.createDeleteRequest(clientId, fio, STATE.profile.id, STATE.profile.branches?.[0]||'');
       toast('Запрос отправлен ✅','success');
-    } catch(e) { toast('Ошибка','error'); console.error(e); }
+    } catch(e) {
+      if (e.message==='already_pending') toast('Запрос уже отправлен ранее','info');
+      else { toast('Ошибка','error'); console.error(e); }
+    }
   }
 }
 
@@ -7321,6 +7327,9 @@ async function renderDeleteRequests() {
       <div class="control-title danger">🗑 Запросы на удаление (${reqs.length})</div>
       ${reqs.map(r=>`<div class="control-item">
         <div class="ci-main">${r.client_name} <span class="hint">← ${r.profiles?.fio||'?'}</span></div>
+        <div class="ci-sub" style="font-size:11px;color:var(--text-secondary)">
+          Запрос: ${fmtDate(r.created_at)}${r.clients?.balance!=null?' · Баланс: '+r.clients.balance:''}${r.clients?.subscription_end?' · Абон до: '+fmtDate(r.clients.subscription_end):''}
+        </div>
         <div style="display:flex;gap:6px;margin-top:6px">
           <button class="btn btn-sm btn-danger" onclick="doApproveDelete('${r.id}','${r.client_id}','${encodeURIComponent(r.client_name)}')">Удалить</button>
           <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"

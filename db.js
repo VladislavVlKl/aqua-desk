@@ -1719,6 +1719,9 @@ Object.assign(DB, {
 
   // ─── ЗАПРОСЫ НА УДАЛЕНИЕ КЛИЕНТА ─────────────
   async createDeleteRequest(clientId, clientName, requestedBy, branch) {
+    const {data:existing} = await sb().from('delete_requests')
+      .select('id').eq('client_id',clientId).eq('status','pending').limit(1);
+    if (existing?.length) throw new Error('already_pending');
     const {data,error} = await sb().from('delete_requests')
       .insert({client_id:clientId, client_name:clientName,
                requested_by:requestedBy, branch, status:'pending'})
@@ -1735,7 +1738,7 @@ Object.assign(DB, {
   },
   async getAllDeleteRequests() {
     const {data,error} = await sb().from('delete_requests')
-      .select('*, profiles!requested_by(fio)')
+      .select('*, profiles!requested_by(fio), clients!client_id(balance, subscription_end)')
       .eq('status','pending')
       .order('created_at',{ascending:false});
     if (error) throw error; return data||[];
