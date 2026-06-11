@@ -3395,7 +3395,10 @@ async function renderSeniorGroups() {
 
 async function loadExtraBranchGroups() {
   try {
-    const extraBranches = await DB.getBranchAccess(STATE.profile.id);
+    const [extraBranches, typeAccess] = await Promise.all([
+      DB.getBranchAccess(STATE.profile.id),
+      DB.getGroupTypeAccess(STATE.profile.id),
+    ]);
     if (!extraBranches.length) return;
     const body = document.getElementById('tab-content');
     const existingExtra = document.getElementById('extra-branch-groups');
@@ -3408,12 +3411,9 @@ async function loadExtraBranchGroups() {
       const {data:tgsAll} = await sb().from('trainer_groups')
         .select('*, group_types(name,type), profiles(fio)')
         .eq('branch',branch).is('subscription_end',null);
-      // Показываем только взрослые группы и те детские типы, которые ведёт этот старший тренер
-      const myChildTypeIdsExtra = new Set((await DB.getTrainerGroups(STATE.profile.id))
-        .filter(g=>g.group_types?.type==='children').map(g=>g.group_type_id));
-      const tgs = (tgsAll||[]).filter(g=>
-        g.group_types?.type==='adult' || myChildTypeIdsExtra.has(g.group_type_id)
-      );
+      const tgs = typeAccess?.length
+        ? (tgsAll||[]).filter(g=>typeAccess.includes(g.group_type_id))
+        : (tgsAll||[]);
       const monthStr = new Date().toISOString().slice(0,7)+'-01';
       div.innerHTML += `<div style="margin-bottom:12px">
         <div style="font-weight:600;font-size:13px;color:var(--hint);margin-bottom:6px">${branch}</div>
@@ -3439,19 +3439,17 @@ async function renderSeniorAssignForm() {
   const form = document.getElementById('senior-assign-form'); if (!form) return;
   try {
     const branches = STATE.profile.branches||[];
-    const [allTrainers, allSeniors, gts, myGroups] = await Promise.all([
+    const [allTrainers, allSeniors, gts, typeAccess] = await Promise.all([
       DB.getProfilesByRole('trainer'),
       DB.getProfilesByRole('senior_trainer'),
       DB.getGroupTypes(),
-      DB.getTrainerGroups(STATE.profile.id),
+      DB.getGroupTypeAccess(STATE.profile.id),
     ]);
     const myTrainers = [...allTrainers, ...allSeniors].filter(t=>
       (t.branches||[]).some(b=>branches.includes(b))
     );
     const trainerOpts = `<option value="">— выберите —</option>${myTrainers.map(t=>`<option value="${t.id}">${t.fio}</option>`).join('')}`;
-    // Показываем только те типы детских групп, в которых у старшего уже есть назначения
-    const myChildTypeIds = new Set(myGroups.filter(g=>g.group_types?.type==='children').map(g=>g.group_type_id));
-    const visibleGts = gts.filter(g=>g.type==='adult' || myChildTypeIds.has(g.id));
+    const visibleGts = typeAccess?.length ? gts.filter(g=>typeAccess.includes(g.id)) : gts;
     const gtOpts = visibleGts.map(g=>`<option value="${g.id}" data-type="${g.type}" data-name="${g.name}">${g.name}</option>`).join('');
     const branchOpts = branches.map(b=>`<option>${b}</option>`).join('');
 
@@ -3546,7 +3544,13 @@ async function doSeniorAssignSecond() {
 async function loadSeniorGroupsList() {
   const body=document.getElementById('groups-list'); if (!body) return;
   try {
-    const groups = await DB.getTrainerGroups(STATE.profile.id);
+    const [allGroups, typeAccess] = await Promise.all([
+      DB.getTrainerGroups(STATE.profile.id),
+      DB.getGroupTypeAccess(STATE.profile.id),
+    ]);
+    const groups = typeAccess?.length
+      ? allGroups.filter(g=>typeAccess.includes(g.group_type_id))
+      : allGroups;
     if (!groups.length) { body.innerHTML='<p class="hint">Нет назначенных групп</p>'; return; }
     const canEdit = ['admin','senior_trainer'].includes(STATE.profile.role);
     body.innerHTML = groups.map(g=>{
@@ -4468,7 +4472,9 @@ async function loadStaffList() {
         <div style="display:flex;gap:6px;flex-wrap:wrap">
           <button class="btn btn-sm" onclick="renderEditTrainerModal(${t.id},'${encodeURIComponent(t.fio)}','${(t.branches||[]).join(',')}','${t.role}')">✏️</button>
           ${t.role==='senior_trainer'?`<button class="btn btn-sm" style="background:rgba(124,58,237,.15);color:#a78bfa"
-            onclick="renderBranchAccessModal(${t.id},'${encodeURIComponent(t.fio)}')">🔑</button>`:''}
+            onclick="renderBranchAccessModal(${t.id},'${encodeURIComponent(t.fio)}')">🔑</button>
+            <button class="btn btn-sm" style="background:rgba(16,185,129,.15);color:#059669"
+            onclick="renderGroupTypeAccessModal(${t.id},'${encodeURIComponent(t.fio)}')">🏊 Группы</button>`:''}
           <button class="btn btn-sm" style="background:rgba(245,158,11,.15);color:#f59e0b"
             onclick="doArchiveTrainer(${t.id},'${encodeURIComponent(t.fio)}')">📦</button>
           <button class="btn btn-sm btn-danger"
@@ -4871,6 +4877,36 @@ async function doSaveBranchAccess(trainerId) {
     await DB.setBranchAccess(trainerId, selected);
     document.querySelector('.modal-overlay')?.remove();
     toast(selected.length?`✅ Доступ к ${selected.length} филиал(ам) выдан`:'Доп. доступ убран','success');
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+
+async function renderGroupTypeAccessModal(trainerId, fioEnc) {
+  const fio = decodeURIComponent(fioEnc);
+  const [allTypes, current] = await Promise.all([
+    DB.getGroupTypes(),
+    DB.getGroupTypeAccess(trainerId),
+  ]);
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>🏊 Типы групп — ${fio}</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <p class="hint" style="margin-bottom:12px">Выберите типы групп которые видит этот тренер. Если ничего не выбрано — видит все.</p>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px">
+      ${allTypes.map(g=>`<label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer">
+        <input type="checkbox" class="gta-cb" value="${g.id}" ${current&&current.includes(g.id)?'checked':''} style="width:18px;height:18px">
+        ${g.name} <span class="hint">(${g.type==='children'?'дети':'взрослые'})</span>
+      </label>`).join('')}
+    </div>
+    <button class="btn btn-primary btn-full" onclick="doSaveGroupTypeAccess(${trainerId})">Сохранить</button>
+  </div>`;
+  document.body.appendChild(m);
+}
+async function doSaveGroupTypeAccess(trainerId) {
+  const selected = [...document.querySelectorAll('.gta-cb:checked')].map(cb=>+cb.value);
+  try {
+    await DB.setGroupTypeAccess(trainerId, selected);
+    document.querySelector('.modal-overlay')?.remove();
+    toast(selected.length?`✅ Доступ к ${selected.length} тип(ам) групп выдан`:'Ограничения сняты — видит все группы','success');
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 

@@ -140,6 +140,16 @@ const DB = {
       );
     }
   },
+  async getGroupTypeAccess(trainerId) {
+    const {data,error} = await sb().from('profiles')
+      .select('group_type_access').eq('id',trainerId).single();
+    if (error) throw error; return data?.group_type_access||null;
+  },
+  async setGroupTypeAccess(trainerId, typeIds) {
+    const {error} = await sb().from('profiles')
+      .update({group_type_access: typeIds.length ? typeIds : null}).eq('id',trainerId);
+    if (error) throw error;
+  },
   async renameBranch(oldName, newName) {
     const {error:e1} = await sb().from('branches')
       .update({name:newName.trim()}).eq('name',oldName);
