@@ -3523,9 +3523,13 @@ async function loadSeniorGroupsList() {
 async function renderGroupDetail(groupId) {
   // Запоминаем откуда пришли для кнопки назад
   const role = STATE.profile?.role;
-  if (role==='admin'||role==='ceo') navPush(()=>{ renderAdminApp(); adminTab('groups'); });
-  else if (role==='senior_trainer') navPush(()=>{ renderSeniorApp(); seniorTab('groups'); });
-  else navPush(()=>{ renderTrainerApp(); switchTab('groups'); });
+  const _backToGroups = role==='admin'||role==='ceo'
+    ? ()=>{ renderAdminApp(); adminTab('groups'); }
+    : role==='senior_trainer'
+    ? ()=>{ renderSeniorApp(); seniorTab('groups'); }
+    : ()=>{ renderTrainerShell('groups'); };
+  navPush(_backToGroups);
+  setupBack(_backToGroups);
   const month = new Date().toISOString().slice(0,7)+'-01';
   loading('Загрузка группы...');
   try {
@@ -5524,9 +5528,7 @@ async function renderGroupMonthReport(groupId, monthStr) {
     const canSeePayroll  = (isAdmin || STATE.profile.role==='senior_trainer') && isArtSwimGroup;
 
     const monthLabel = new Date(monthStr).toLocaleDateString('ru-RU',{month:'long',year:'numeric'});
-    const backFn = isAdmin ? `renderAdminApp();adminTab('groups')`
-      : STATE.profile.role==='trainer' ? `renderTrainerShell('groups')`
-      : `renderSeniorApp().then(()=>seniorTab('groups'))`;
+    const backFn = `renderGroupDetail('${groupId}')`;
 
     setupBack(new Function(backFn));
     setScreen(`<div class="app-header">
@@ -7691,9 +7693,13 @@ async function doApproveSubstitution(id) {
 async function renderAdultGroupDetail(groupId, monthStr) {
   const role = STATE.profile?.role;
   if (!STATE._backFn) { // не перезаписываем если уже есть (навигация по месяцам)
-    if (role==='admin'||role==='ceo') navPush(()=>{ renderAdminApp(); adminTab('groups'); });
-    else if (role==='senior_trainer') navPush(()=>{ renderSeniorApp(); seniorTab('groups'); });
-    else navPush(()=>{ renderTrainerApp(); switchTab('groups'); });
+    const _backToGroups = role==='admin'||role==='ceo'
+      ? ()=>{ renderAdminApp(); adminTab('groups'); }
+      : role==='senior_trainer'
+      ? ()=>{ renderSeniorApp(); seniorTab('groups'); }
+      : ()=>{ renderTrainerShell('groups'); };
+    navPush(_backToGroups);
+    setupBack(_backToGroups);
   }
   loading('Загрузка...');
   try {
