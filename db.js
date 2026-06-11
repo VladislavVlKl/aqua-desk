@@ -1340,7 +1340,7 @@ async unassignTrainerGroup(id) {
     if (branch) tgq = tgq.eq('branch',branch);
 
     let gsq = sb().from('group_sessions')
-      .select('trainer_id,group_type_id,headcount,session_date,group_types(billing_model)')
+      .select('trainer_id,group_type_id,branch,headcount,session_date,group_types(billing_model)')
       .gte('session_date',fromDay).lt('session_date',toDay);
     if (branch) gsq = gsq.eq('branch',branch);
 
@@ -1350,7 +1350,8 @@ async unassignTrainerGroup(id) {
 
     let aq  = sb().from('month_adjustments').select('*').eq('year',year).eq('month',month);
     let gpq = sb().from('group_trainer_payouts').select('*').eq('month',fromDay);
-    let gsub= sb().from('group_substitutions').select('*')
+    // trainer_groups(group_type_id,branch) нужен calcSalary: фильтр двойной оплаты замен во взрослых группах
+    let gsub= sb().from('group_substitutions').select('*, trainer_groups(group_type_id,branch)')
       .gte('session_date',fromDay).lt('session_date',toDay).eq('status','approved');
     // ПТ-замены с выставленной ставкой
     let ptsub = sb().from('workouts')
@@ -1614,9 +1615,23 @@ function calcSalary({workouts=[], duties=[], trainerGroups=[], groupSessions=[],
     .filter(gs=>gs.group_types?.billing_model==='headcount')
     .reduce((s,gs)=>s+getAdultGroupRate(gs.headcount),0);
 
-  // Групповые замены: утверждённые старшим/админом
+  // Групповые замены: утверждённые старшим/админом.
+  // Взрослые группы (headcount): если заменяющий сам отметил занятие в ту же дату
+  // в той же группе (group_type_id + branch) — ставка уже учтена в adultSum, замену пропускаем.
   const groupSubSum = (groupSubstitutions||[])
-    .filter(s=>s.status==='approved' && s.substitute_trainer_id===trainerId)
+    .filter(s=>{
+      if (s.status!=='approved' || s.substitute_trainer_id!==trainerId) return false;
+      const subTg = s.trainer_groups;
+      if (subTg) {
+        const alreadyPaid = groupSessions.some(gs =>
+          gs.group_types?.billing_model==='headcount' &&
+          gs.group_type_id===subTg.group_type_id &&
+          (!subTg.branch || !gs.branch || gs.branch===subTg.branch) &&
+          String(gs.session_date).slice(0,10)===String(s.session_date).slice(0,10));
+        if (alreadyPaid) return false;
+      }
+      return true;
+    })
     .reduce((s,sub)=>s+Number(sub.rate||0),0);
 
   const bonus   = adjustment?.bonus  ||0;

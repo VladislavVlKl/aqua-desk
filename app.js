@@ -5697,7 +5697,7 @@ async function renderGroupMonthReport(groupId, monthStr) {
         const paidCount    = payments.filter(p=>p.paid).length;
         // Вал — всегда от реальных оплат месяца (абонементы переходящие, активных детей больше, чем купивших)
         const totalRevenue = totalPaid;
-        const pool         = Math.round(totalRevenue / 2); // пул = вал / 2
+        const pool         = Math.round(totalRevenue / 2); // пул = вал / 2 — это ЛИМИТ суммарных выплат, не база процентов
 
         const tgWithLeader = trainers.find(t=>t.leader_name);
         const leaderName   = tgWithLeader?.leader_name || '';
@@ -5711,10 +5711,11 @@ async function renderGroupMonthReport(groupId, monthStr) {
         const flatTrainers    = trainers.filter(t => t.rate_type === 'flat');
         const allFlat         = percentTrainers.length === 0 && flatTrainers.length > 0;
 
-        // % руководителя снимается с пула ДО раздачи процентов тренерам
-        // (кроме случая "все flat" — там руководитель получает остаток пула)
-        const leaderCut   = (isArtSwim && !allFlat && leaderPct > 0) ? Math.round(pool * leaderPct / 100) : 0;
-        const trainerPool = pool - leaderCut;
+        // Суммарные выплаты ставочников (вычитаются у процентных тренеров)
+        const flatCost = flatTrainers.reduce((acc, ft) => {
+          const ftSessions = (instanceSessions||[]).filter(s => s.trainer_id === ft.trainer_id).length;
+          return acc + ftSessions * Number(ft.rate_value || 75000);
+        }, 0);
 
         // Расчёт ЗП каждого тренера
         const trainerRows = trainers.map(t => {
@@ -5732,22 +5733,10 @@ async function renderGroupMonthReport(groupId, monthStr) {
 
           if (isArtSwim) {
             if (t.rate_type === 'percent') {
-              // Случай 1 и 2: процентный тренер — % от пула после вычета руководителя
-              const base = Math.round(trainerPool * (t.rate_value || 0) / 100);
-              const poolNote = leaderCut ? `(${fmt(pool)} − рук. ${fmt(leaderCut)})` : fmt(trainerPool);
-              if (flatTrainers.length) {
-                // Если есть flat тренеры — вычитаем их ставки и замены этого тренера
-                const flatCost = flatTrainers.reduce((acc, ft) => {
-                  const ftSessions = (instanceSessions||[]).filter(s => s.trainer_id === ft.trainer_id).length;
-                  return acc + ftSessions * Number(ft.rate_value || 75000);
-                }, 0);
-                autoAmt  = Math.max(0, base - flatCost - mySubCost);
-                calcNote = `${t.rate_value||0}% × ${poolNote} − ставки (${fmt(flatCost)}) − замены (${fmt(mySubCost)})`;
-              } else {
-                // Все процентные — считаем независимо, вычитаем только замены
-                autoAmt  = Math.max(0, base - mySubCost);
-                calcNote = `${t.rate_value||0}% × ${poolNote}${mySubCost?` − замены (${fmt(mySubCost)})` : ''}`;
-              }
+              // Процентный тренер: % от ПОЛНОГО вала − ставки ставочников − его замены
+              const base = Math.round(totalRevenue * (t.rate_value || 0) / 100);
+              autoAmt  = Math.max(0, base - flatCost - mySubCost);
+              calcNote = `${t.rate_value||0}% × вал ${fmt(totalRevenue)}${flatCost?` − ставки (${fmt(flatCost)})`:''}${mySubCost?` − замены (${fmt(mySubCost)})`:''}`;
             } else {
               // Flat тренер
               const sessionCount = mySessions.length;
@@ -5761,8 +5750,8 @@ async function renderGroupMonthReport(groupId, monthStr) {
               autoAmt  = totalSessions * (t.rate_value || 0);
               calcNote = `${totalSessions} занятий × ${fmt(t.rate_value || 0)}`;
             } else {
-              autoAmt  = Math.round(totalRevenue * (t.rate_value || 40) / 100);
-              calcNote = `${t.rate_value||40}% × ${fmt(totalRevenue)}`;
+              autoAmt  = Math.max(0, Math.round(totalRevenue * (t.rate_value || 40) / 100) - mySubCost);
+              calcNote = `${t.rate_value||40}% × ${fmt(totalRevenue)}${mySubCost?` − замены (${fmt(mySubCost)})`:''}`;
             }
           }
 
@@ -5773,19 +5762,38 @@ async function renderGroupMonthReport(groupId, monthStr) {
         const attachedTrainerIds = new Set(trainers.map(t => t.trainer_id));
         const externalSubs = subs.filter(s => !attachedTrainerIds.has(s.substitute_trainer_id));
 
-        // Случай 3: все flat → руководитель = остаток пула
+        // Руководитель: % от ПОЛНОГО вала; кейс «все flat» — остаток пула (лимита)
         let leaderFee = 0;
         if (allFlat && isArtSwim) {
           const totalFlatPay = trainerRows.reduce((s, r) => s + r.autoAmt, 0);
           leaderFee = Math.max(0, pool - totalFlatPay);
-        } else if (isArtSwim) {
-          leaderFee = leaderCut;
         } else {
-          // Детские группы — % от полного вала
+          // Арт-свим и обычные детские — % от полного вала
           leaderFee = leaderPct > 0 ? Math.round(totalRevenue * leaderPct / 100) : 0;
         }
 
-        // Остаток пула для отображения
+        // ЛИМИТ ПУЛА (только Арт-свим): суммарные выплаты не могут превышать пул (вал/2).
+        // Ставки ставочников — фиксированные обязательства, ужимаем только процентные суммы
+        // (руководителя и процентных тренеров) пропорционально.
+        let poolCapped = false;
+        if (isArtSwim && !allFlat) {
+          const flatTotal = trainerRows.filter(r => r.t.rate_type !== 'percent').reduce((s, r) => s + r.autoAmt, 0);
+          const pctTotal  = leaderFee + trainerRows.filter(r => r.t.rate_type === 'percent').reduce((s, r) => s + r.autoAmt, 0);
+          if (flatTotal + pctTotal > pool && pctTotal > 0) {
+            poolCapped = true;
+            const avail = Math.max(0, pool - flatTotal);
+            const k = avail / pctTotal;
+            leaderFee = Math.round(leaderFee * k);
+            trainerRows.forEach(r => {
+              if (r.t.rate_type === 'percent') {
+                r.autoAmt  = Math.round(r.autoAmt * k);
+                r.calcNote += ' · ужато до лимита пула';
+              }
+            });
+          }
+        }
+
+        // Остаток лимита для отображения
         const totalTrainerPay = trainerRows.reduce((s, r) => s + r.autoAmt, 0);
         const remainder = pool - totalTrainerPay - leaderFee;
 
@@ -5799,23 +5807,25 @@ async function renderGroupMonthReport(groupId, monthStr) {
               <span style="font-weight:700;font-size:15px">${fmt(totalRevenue)} сум</span>
             </div>
             <div style="display:flex;justify-content:space-between;margin-bottom:4px">
-              <span style="font-size:13px;color:var(--hint)">Пул тренеров (50%)</span>
+              <span style="font-size:13px;color:var(--hint)">Лимит выплат — пул (50% вала)</span>
               <span style="font-weight:600;font-size:14px">${fmt(pool)} сум</span>
             </div>
             ${leaderName ? `<div style="display:flex;justify-content:space-between;margin-bottom:4px">
-              <span style="font-size:12px;color:var(--hint)">Руководитель${allFlat ? ' (остаток)' : ` (${leaderPct}%)`}: ${leaderName}</span>
+              <span style="font-size:12px;color:var(--hint)">Руководитель${allFlat ? ' (остаток пула)' : ` (${leaderPct}% от вала)`}: ${leaderName}</span>
               <span style="font-size:13px;color:#f59e0b;font-weight:600">−${fmt(leaderFee)} сум</span>
             </div>` : ''}
             <div style="display:flex;justify-content:space-between;padding-top:8px;border-top:1px solid rgba(124,58,237,.2)">
-              <span style="font-size:12px;color:var(--hint)">Остаток</span>
+              <span style="font-size:12px;color:var(--hint)">Остаток лимита</span>
               <span style="font-size:13px;font-weight:600;color:${remainder>=0?'#10b981':'#ef4444'}">${fmt(remainder)} сум</span>
             </div>
+            ${poolCapped ? `<div style="margin-top:8px;font-size:12px;color:#f59e0b;font-weight:600">⚠️ выплаты ограничены пулом — процентные суммы ужаты пропорционально</div>` : ''}
           </div>` : ''}
 
           ${trainerRows.map(({t, autoAmt, calcNote, existing, mySubs, subsICovered, subsICoveredCost}) => {
             const bonus   = Number(existing?.bonus || 0);
             const penalty = Number(existing?.penalty || 0);
-            const finalAmt = autoAmt + bonus - penalty + subsICoveredCost;
+            // Замены НЕ входят в утверждаемую сумму — выплачиваются отдельной строкой в сводке ЗП
+            const finalAmt = autoAmt + bonus - penalty;
             return `
           <div class="staff-card" style="flex-direction:column;gap:8px;margin-bottom:10px">
             <div style="display:flex;justify-content:space-between;align-items:center">
@@ -5832,7 +5842,7 @@ async function renderGroupMonthReport(groupId, monthStr) {
                 <span style="font-weight:600">${fmt(autoAmt)} сум</span>
               </div>
               ${subsICovered.length ? `<div style="display:flex;justify-content:space-between;margin-top:4px">
-                <span style="color:#10b981;font-size:12px">+ замены (${subsICovered.length} зан)</span>
+                <span style="color:#10b981;font-size:12px">+ замены (${subsICovered.length} зан) — выплачиваются после утверждения старшим, отдельной строкой в сводке</span>
                 <span style="color:#10b981;font-weight:600">+${fmt(subsICoveredCost)} сум</span>
               </div>` : ''}
               ${mySubs.length ? `<div style="margin-top:6px;font-size:12px;color:#ef4444">
@@ -5842,23 +5852,23 @@ async function renderGroupMonthReport(groupId, monthStr) {
                 <div style="flex:1">
                   <label style="font-size:11px;color:var(--hint)">Премия</label>
                   <input id="bonus-${t.trainer_id}" type="number" value="${bonus}" min="0" placeholder="0"
-                    oninput="updateGroupPayoutTotal('${t.trainer_id}',${autoAmt},${subsICoveredCost})"
+                    oninput="updateGroupPayoutTotal('${t.trainer_id}',${autoAmt})"
                     style="width:100%;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:6px 8px;color:var(--text);font-size:13px">
                 </div>
                 <div style="flex:1">
                   <label style="font-size:11px;color:var(--hint)">Штраф</label>
                   <input id="penalty-${t.trainer_id}" type="number" value="${penalty}" min="0" placeholder="0"
-                    oninput="updateGroupPayoutTotal('${t.trainer_id}',${autoAmt},${subsICoveredCost})"
+                    oninput="updateGroupPayoutTotal('${t.trainer_id}',${autoAmt})"
                     style="width:100%;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:6px 8px;color:var(--text);font-size:13px">
                 </div>
               </div>
               <div style="display:flex;justify-content:space-between;margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
-                <span style="font-weight:600">К выплате:</span>
+                <span style="font-weight:600">К выплате (без замен):</span>
                 <span id="gtotal-${t.trainer_id}" style="font-weight:700;color:var(--accent)">${fmt(finalAmt)} сум</span>
               </div>
             </div>
             <button class="btn btn-sm btn-primary btn-full"
-              onclick="doApproveGroupPayoutNew('${t.id}','${t.trainer_id}','${monthStr}',${autoAmt},${subsICoveredCost},'${groupId}')">
+              onclick="doApproveGroupPayoutNew('${t.id}','${t.trainer_id}','${monthStr}',${autoAmt},'${groupId}')">
               Утвердить</button>
           </div>`;
           }).join('')}
@@ -5881,7 +5891,7 @@ async function renderGroupMonthReport(groupId, monthStr) {
             <div style="display:flex;justify-content:space-between;align-items:center">
               <div>
                 <div style="font-weight:600;font-size:14px">Руководитель: ${leaderName}</div>
-                <div style="font-size:12px;color:var(--hint)">${allFlat ? 'Остаток пула' : leaderPct+'% от '+fmt(pool)+' сум'}</div>
+                <div style="font-size:12px;color:var(--hint)">${allFlat ? 'Остаток пула' : leaderPct+'% от вала '+fmt(totalRevenue)+' сум'+(poolCapped?' (ужато лимитом пула)':'')}</div>
               </div>
               <div style="display:flex;align-items:center;gap:8px">
                 <span style="font-size:18px;font-weight:700;color:var(--accent)">${fmt(leaderFee)} сум</span>
@@ -5946,7 +5956,7 @@ async function doExportGroupPayroll(groupId, monthStr) {
   await ensureXlsx();
   try {
     const report = await DB.getGroupMonthReport(groupId, monthStr);
-    const {clients, payments: paymentsExport, attendance, payouts, trainers, instanceSessions, groupTypeInfo} = report;
+    const {clients, payments: paymentsExport, attendance, payouts, trainers, instanceSessions, substitutions, groupTypeInfo} = report;
     const activeCount   = clients.filter(c=>c.is_active!==false).length;
     const pricePerChild = groupTypeInfo?.price_per_month || 0;
     const isArtSwimExport = groupTypeInfo?.name?.toLowerCase().includes('art');
@@ -5955,12 +5965,12 @@ async function doExportGroupPayroll(groupId, monthStr) {
     const totalRevenue  = totalPaidExport;
     const totalSessions = [...new Set(attendance.map(a=>a.session_date))].length;
     const isArtSwim     = isArtSwimExport;
+    const subsExport    = substitutions || [];
     const tgWithLeader  = trainers.find(t=>t.leader_name);
     const leaderName    = tgWithLeader?.leader_name || '';
     const leaderPct     = tgWithLeader?.leader_fee_percent || 0;
-    const pool          = Math.round(totalRevenue / 2);
-    const leaderFee     = leaderPct>0 ? Math.round((isArtSwim ? pool : totalRevenue) * leaderPct / 100) : 0;
-    const trainerPool   = pool - (isArtSwim ? leaderFee : 0);
+    const pool          = Math.round(totalRevenue / 2); // лимит выплат
+    const allFlatExport = isArtSwim && trainers.length>0 && trainers.every(t=>t.rate_type!=='percent');
 
     // Суммарные выплаты ставочников — вычитаются у процентного тренера (как в отчёте)
     const flatCostExport = trainers.filter(t=>t.rate_type==='flat').reduce((acc,ft)=>{
@@ -5970,20 +5980,44 @@ async function doExportGroupPayroll(groupId, monthStr) {
 
     const rows = trainers.map(t=>{
       let amt=0, note='';
+      const mySubCost = subsExport.filter(s=>s.original_trainer_id===t.trainer_id)
+        .reduce((acc,s)=>acc+Number(s.rate||75000),0);
       if (isArtSwim) {
         const sc = (instanceSessions||[]).filter(s=>s.trainer_id===t.trainer_id).length;
         if (t.rate_type==='percent') {
-          amt=Math.max(0, Math.round(trainerPool*(t.rate_value||0)/100) - flatCostExport);
-          note=`${t.rate_value||0}% от пула после руководителя${flatCostExport?` − ставки (${fmt(flatCostExport)})`:''}`;
+          amt=Math.max(0, Math.round(totalRevenue*(t.rate_value||0)/100) - flatCostExport - mySubCost);
+          note=`${t.rate_value||0}% от вала${flatCostExport?` − ставки (${fmt(flatCostExport)})`:''}${mySubCost?` − замены (${fmt(mySubCost)})`:''}`;
         }
         else { amt=sc*(t.rate_value||75000); note=`${sc} занятий × ${fmt(t.rate_value||75000)} сум`; }
       } else {
         if (t.rate_type==='flat') { amt=totalSessions*(t.rate_value||0); note=`${totalSessions} занятий × ${fmt(t.rate_value||0)} сум`; }
-        else { amt=Math.round(totalRevenue*(t.rate_value||40)/100); note=`${t.rate_value||40}% от выручки`; }
+        else {
+          amt=Math.max(0, Math.round(totalRevenue*(t.rate_value||40)/100) - mySubCost);
+          note=`${t.rate_value||40}% от выручки${mySubCost?` − замены (${fmt(mySubCost)})`:''}`;
+        }
       }
       const existing = payouts.find(p=>p.trainer_id===t.trainer_id);
-      return {fio:t.profiles?.fio||'—', role:t.role||'основной', autoAmt:amt, note, approved:existing?Number(existing.payout_value):null};
+      return {fio:t.profiles?.fio||'—', role:t.role||'основной', rateType:t.rate_type, autoAmt:amt, note, approved:existing?Number(existing.payout_value):null};
     });
+
+    // Руководитель: % от полного вала; «все flat» — остаток пула
+    let leaderFee;
+    if (allFlatExport) {
+      leaderFee = Math.max(0, pool - rows.reduce((s,r)=>s+r.autoAmt,0));
+    } else {
+      leaderFee = leaderPct>0 ? Math.round(totalRevenue * leaderPct / 100) : 0;
+    }
+
+    // ЛИМИТ ПУЛА (Арт-свим): пропорционально ужимаем процентные суммы, ставки не трогаем
+    if (isArtSwim && !allFlatExport) {
+      const flatTotal = rows.filter(r=>r.rateType!=='percent').reduce((s,r)=>s+r.autoAmt,0);
+      const pctTotal  = leaderFee + rows.filter(r=>r.rateType==='percent').reduce((s,r)=>s+r.autoAmt,0);
+      if (flatTotal + pctTotal > pool && pctTotal > 0) {
+        const k = Math.max(0, pool - flatTotal) / pctTotal;
+        leaderFee = Math.round(leaderFee * k);
+        rows.forEach(r=>{ if (r.rateType==='percent') { r.autoAmt = Math.round(r.autoAmt*k); r.note += ' · ужато до лимита пула (50% вала)'; } });
+      }
+    }
 
     exportGroupPayrollExcel(groupTypeInfo?.name||'Группа', monthStr, totalRevenue, activeCount, pricePerChild, rows, leaderName, leaderPct, leaderFee);
   } catch(e) { toast('Ошибка: '+(e?.message||String(e)),'error'); console.error(e); }
@@ -6019,17 +6053,18 @@ function updatePayoutTotal(trainerId, autoAmt) {
   const el  = document.getElementById(`total-${trainerId}`);
   if (el) el.textContent = fmt(autoAmt + adj) + ' сум';
 }
-function updateGroupPayoutTotal(trainerId, autoAmt, subsAmt) {
+function updateGroupPayoutTotal(trainerId, autoAmt) {
   const bonus   = parseInt(document.getElementById(`bonus-${trainerId}`)?.value)||0;
   const penalty = parseInt(document.getElementById(`penalty-${trainerId}`)?.value)||0;
   const el = document.getElementById(`gtotal-${trainerId}`);
-  if (el) el.textContent = fmt(autoAmt + bonus - penalty + subsAmt) + ' сум';
+  if (el) el.textContent = fmt(autoAmt + bonus - penalty) + ' сум';
 }
-async function doApproveGroupPayoutNew(tgId, trainerId, monthStr, autoAmt, subsAmt, groupId) {
+// Замены НЕ входят в payout_value — они выплачиваются отдельной строкой (groupSubSum в calcSalary)
+async function doApproveGroupPayoutNew(tgId, trainerId, monthStr, autoAmt, groupId) {
   const bonus   = parseInt(document.getElementById(`bonus-${trainerId}`)?.value)||0;
   const penalty = parseInt(document.getElementById(`penalty-${trainerId}`)?.value)||0;
-  const final   = autoAmt + bonus - penalty + subsAmt;
-  const note    = `авто ${fmt(autoAmt)}${subsAmt?` + замены ${fmt(subsAmt)}`:''}${bonus?` + премия ${fmt(bonus)}`:''}${penalty?` − штраф ${fmt(penalty)}`:''}`;
+  const final   = autoAmt + bonus - penalty;
+  const note    = `авто ${fmt(autoAmt)}${bonus?` + премия ${fmt(bonus)}`:''}${penalty?` − штраф ${fmt(penalty)}`:''} (замены отдельной строкой)`;
   if (_pending.has(`payout_${tgId}_${trainerId}`)) return;
   _pending.add(`payout_${tgId}_${trainerId}`);
   try {
