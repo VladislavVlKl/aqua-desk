@@ -1636,7 +1636,7 @@ async function renderAddSlotModal() {
       <select id="slot-date">${weekDates}</select></div>
 
     <div class="form-group" style="display:flex;gap:10px">
-      <div style="flex:1"><label>Начало</label><input type="time" id="slot-start" value="09:00"></div>
+      <div style="flex:1"><label>Начало</label><input type="time" id="slot-start" value="09:00" oninput="(()=>{const[h,m]=this.value.split(':').map(Number);const e=new Date(0,0,0,h+1,m);document.getElementById('slot-end').value=String(e.getHours()).padStart(2,'0')+':'+String(e.getMinutes()).padStart(2,'0')})()"></div>
       <div style="flex:1"><label>Конец</label><input type="time" id="slot-end" value="10:00"></div>
     </div>
     <div class="form-group"><label>Тип</label>
