@@ -3544,13 +3544,7 @@ async function doSeniorAssignSecond() {
 async function loadSeniorGroupsList() {
   const body=document.getElementById('groups-list'); if (!body) return;
   try {
-    const [allGroups, typeAccess] = await Promise.all([
-      DB.getTrainerGroups(STATE.profile.id),
-      DB.getGroupTypeAccess(STATE.profile.id),
-    ]);
-    const groups = typeAccess?.length
-      ? allGroups.filter(g=>typeAccess.includes(g.group_type_id))
-      : allGroups;
+    const groups = await DB.getTrainerGroups(STATE.profile.id);
     if (!groups.length) { body.innerHTML='<p class="hint">Нет назначенных групп</p>'; return; }
     const canEdit = ['admin','senior_trainer'].includes(STATE.profile.role);
     body.innerHTML = groups.map(g=>{
