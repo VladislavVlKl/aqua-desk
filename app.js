@@ -2747,15 +2747,16 @@ async function renderClientProfile(clientId, backTab='home') {
       <div class="client-header">
         <div class="client-avatar">${client.fio.charAt(0)}</div>
         <div style="flex:1">
-          <div class="client-name">${client.fio}</div>
+          <div class="client-name">${client.is_archived?'<span style="font-size:12px;color:var(--hint);font-weight:400;margin-right:6px">[Архив]</span>':''}${client.fio}</div>
           <div class="client-meta">${client.age?client.age+' лет · ':''}Кат.${client.category} · Баланс: <span${client.balance<=0?' style="color:var(--danger);font-weight:600"':''}>${client.balance}</span></div>
+          ${client.is_archived&&client.archive_reason?`<div class="client-meta" style="color:var(--hint)">Причина архивации: ${client.archive_reason}</div>`:''}
           <div class="client-meta">Тренер: ${client.profiles?.fio||'—'}</div>
           ${!canEdit&&!isAdmin?'<div class="hint" style="margin-top:4px;font-size:11px">👁 Только просмотр</div>':''}
           <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
             ${canEditInfo?`<button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
               onclick="renderEditClientModal('${clientId}','${encodeURIComponent(client.fio)}',${client.category},'${client.age||''}','${activeSub?.start_date||''}','${client.subscription_end||''}',${client.balance||0})">
               ✏️ Редактировать</button>`:''}
-            ${canEdit&&(balanceZero||subExpired)?`<button class="btn btn-sm btn-primary"
+            ${canEdit&&!client.is_archived&&(balanceZero||subExpired)?`<button class="btn btn-sm btn-primary"
               onclick="renderBuyPackageModal('${clientId}',${isChildClient},${client.balance||0})">
               🛒 Новый пакет</button>`:''}
             <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
@@ -2767,10 +2768,13 @@ async function renderClientProfile(clientId, backTab='home') {
             ${isAdmin?`<button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
               onclick="renderAdminTransferModal('${clientId}','${client.fio}')">
               🔄 Передать (адм.)</button>`:''}
-            ${canEdit&&activeSub&&!activeSub.freeze_start?`<button class="btn btn-sm" style="background:rgba(96,165,250,.15);color:#3b82f6;border:1px solid rgba(96,165,250,.3)" onclick="renderFreezeModal(${activeSub.id},'${clientId}','${client.subscription_end||''}')">🧊 Заморозка</button>`:''}
-            ${canEdit?`<button class="btn btn-sm" style="background:rgba(239,68,68,.15);color:#ef4444;border:1px solid rgba(239,68,68,.3)"
+            ${canEdit&&!client.is_archived&&activeSub&&!activeSub.freeze_start?`<button class="btn btn-sm" style="background:rgba(96,165,250,.15);color:#3b82f6;border:1px solid rgba(96,165,250,.3)" onclick="renderFreezeModal(${activeSub.id},'${clientId}','${client.subscription_end||''}')">🧊 Заморозка</button>`:''}
+            ${canEdit&&!client.is_archived?`<button class="btn btn-sm" style="background:rgba(239,68,68,.15);color:#ef4444;border:1px solid rgba(239,68,68,.3)"
               onclick="renderArchiveClientModal('${clientId}','${encodeURIComponent(client.fio)}')">
               📦 Архив</button>`:''}
+            ${canEditInfo&&client.is_archived?`<button class="btn btn-sm" style="background:rgba(34,197,94,.15);color:#22c55e;border:1px solid rgba(34,197,94,.3)"
+              onclick="renderRestoreClientModal('${clientId}','${encodeURIComponent(client.fio)}','${backTab}')">
+              ♻️ Восстановить</button>`:''}
             ${canEdit?`<button class="btn btn-sm btn-danger"
               onclick="doDeleteClientCheck('${clientId}','${encodeURIComponent(client.fio)}','${client.created_at||''}')">
               🗑 Удалить</button>`:''}
@@ -4806,6 +4810,30 @@ async function doArchiveClientConfirmed(clientId) {
 async function doArchiveClient(id, fioEnc) {
   // Устаревший алиас — на случай если где-то осталась ссылка
   renderArchiveClientModal(id, fioEnc);
+}
+function renderRestoreClientModal(clientId, fioEnc, backTab='home') {
+  const fio = decodeURIComponent(fioEnc);
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>♻️ Восстановить клиента</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <p style="margin-bottom:16px;font-weight:500">${fio}</p>
+    <p class="hint" style="margin-bottom:16px">Клиент вернётся в активные. Баланс и история тренировок сохранены. Списания снова будут доступны.</p>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-primary" style="flex:1" onclick="doRestoreClientConfirmed('${clientId}','${backTab}')">Да, восстановить</button>
+      <button class="btn" style="flex:1;background:var(--card);border:1px solid var(--border)" onclick="this.closest('.modal-overlay').remove()">Нет</button>
+    </div>
+  </div>`;
+  document.body.appendChild(m);
+}
+async function doRestoreClientConfirmed(clientId, backTab='home') {
+  try {
+    await DB.restoreClient(clientId);
+    document.querySelector('.modal-overlay')?.remove();
+    toast('Клиент восстановлен','success');
+    invalidateCache('clients');
+    renderClientProfile(clientId, backTab);
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 async function renderBranchAccessModal(trainerId, fioEnc) {
   const fio = decodeURIComponent(fioEnc);

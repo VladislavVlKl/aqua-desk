@@ -339,6 +339,11 @@ async deleteClient(id) {
       .update({is_archived:true, archive_reason:reason||null}).eq('id',id);
     if (error) throw error;
   },
+  async restoreClient(id) {
+    const {error} = await sb().from('clients')
+      .update({is_archived:false, archive_reason:null}).eq('id',id);
+    if (error) throw error;
+  },
   // ─── DUTIES ──────────────────────────────────
   async getActiveDuty(trainerId) {
     const {data,error} = await sb().from('duties').select('*')
