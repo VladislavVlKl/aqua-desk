@@ -648,6 +648,9 @@ async function renderClientsTab() {
   window._overdueMap = overdueMap;
   window._clientsList = clients;
 
+  // Дубли считаем один раз по всему списку активных — чтобы не терялись при фильтрации
+  const {_dupNames: _trainerDupNames} = _findDuplicates(clients.filter(c => !c.is_archived));
+
   const renderList = (filter='') => {
     const body = document.getElementById('cl-list');
     if (!body) return;
@@ -665,8 +668,7 @@ async function renderClientsTab() {
       };
       return score(a)-score(b);
     });
-    // Определяем дубли только среди активных клиентов (архивные не должны создавать ложные ⚠️)
-    const {_dupNames, _primaryIds} = _findDuplicates(arr.filter(c => !c.is_archived));
+    const _dupNames = _trainerDupNames;
 
     body.innerHTML = arr.map(c=>{
       const days = daysUntil(c.subscription_end);
