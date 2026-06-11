@@ -1063,6 +1063,34 @@ async function _doLogWorkoutInner() {
   showLogWithNotesModal(overdueNotes, clientId, dates);
 }
 
+async function renderPendingNoteModal(clientId, workoutIds) {
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>📝 Конспект занятия</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="form-group"><label>Что сделали на занятии</label>
+      <textarea id="pnm-acc" rows="3" placeholder="Освоили дыхание во время кроля..."></textarea></div>
+    <div class="form-group"><label>Задача на следующее занятие</label>
+      <textarea id="pnm-next" rows="2" placeholder="Откорректировать работу рук..."></textarea></div>
+    <button class="btn btn-primary btn-full" onclick="doSavePendingNote('${clientId}',${JSON.stringify(workoutIds)},this)">Сохранить</button>
+  </div>`;
+  document.body.appendChild(m);
+}
+async function doSavePendingNote(clientId, workoutIds, btn) {
+  const acc  = document.getElementById('pnm-acc')?.value.trim();
+  const next = document.getElementById('pnm-next')?.value.trim()||null;
+  if (!acc) return toast('Напишите что сделали','error');
+  btn.disabled = true; btn.textContent = 'Сохраняем...';
+  try {
+    const sub = await DB.getActiveSubscription(clientId);
+    for (const wId of workoutIds) {
+      await DB.upsertNote(wId, clientId, STATE.profile.id, sub?.id||null, acc, next, null);
+    }
+    document.querySelector('.modal-overlay')?.remove();
+    toast('✅ Конспект сохранён','success');
+  } catch(e) { toast('Ошибка','error'); console.error(e); btn.disabled=false; btn.textContent='Сохранить'; }
+}
+
 function showLogWithNotesModal(overdueNotes, clientId, dates) {
   const overdueHtml = overdueNotes.map(w=>`
     <div style="border:1px solid var(--danger);border-radius:10px;padding:12px;margin-bottom:12px">
@@ -1141,6 +1169,21 @@ async function doConfirmLogWorkout() {
     _pendingLogData = null;
     toast(`✅ ПТ`,'success');
     renderWorkoutsTab();
+    // Если конспект не написан — показываем кнопку сразу после рендера
+    if (!newAcc && result?.[0]) {
+      const workoutIds = result.map(r=>r.id);
+      setTimeout(()=>{
+        const wrap = document.getElementById('tab-content');
+        if (!wrap) return;
+        const banner = document.createElement('div');
+        banner.id = 'pending-note-banner';
+        banner.style.cssText = 'margin:12px 16px 0;padding:12px 14px;background:rgba(124,58,237,.1);border:1px solid rgba(124,58,237,.3);border-radius:10px;display:flex;justify-content:space-between;align-items:center;gap:8px';
+        banner.innerHTML = `<span style="font-size:13px;color:var(--text)">📝 Написать конспект?</span>
+          <button class="btn btn-sm" style="background:rgba(124,58,237,.2);color:#a78bfa;border:1px solid rgba(124,58,237,.4);flex-shrink:0"
+            onclick="renderPendingNoteModal('${clientId}',${JSON.stringify(workoutIds)});this.closest('#pending-note-banner').remove()">Написать</button>`;
+        wrap.insertBefore(banner, wrap.firstChild);
+      }, 300);
+    }
     // Реестр: одна запись на весь батч (вне try — fire-and-forget)
     const firstRow = rows[0];
     DB.auditLog('workout_add', STATE.profile.id, STATE.profile.fio, clientId, 'workout', {
