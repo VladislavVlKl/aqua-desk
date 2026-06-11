@@ -4585,9 +4585,9 @@ function toggleGroupPayment(groupId, clientId, paid, amount, month) {
       <div class="form-group"><label>Сумма (сум)</label>
         <input id="gp-amount" type="number" value="${amount||0}"></div>
       <div class="form-group"><label>Начало абонемента</label>
-        <input id="gp-sub-start" type="date" value="${month.slice(0,10)}"></div>
-      <div class="form-group"><label>Конец абонемента</label>
-        <input id="gp-sub-end" type="date"></div>
+        <input id="gp-sub-start" type="date" value="${month.slice(0,10)}" onchange="syncGroupSubEnd()"></div>
+      <div class="form-group"><label>Конец абонемента <span style="font-size:11px;color:var(--hint)">(авто: 30 дней)</span></label>
+        <input id="gp-sub-end" type="date" value="${calcSubEnd(month.slice(0,10))}"></div>
       <button class="btn btn-primary btn-full"
         onclick="doSetGroupPayment('${groupId}','${clientId}','${month}',true)">✓ Оплачен</button>
     </div>`;
@@ -5973,6 +5973,17 @@ async function doExportGroupPayroll(groupId, monthStr) {
   } catch(e) { toast('Ошибка: '+(e?.message||String(e)),'error'); console.error(e); }
 }
 
+// Конец абонемента = ровно 30 дней с начала включительно (купил 2.06 → закрывается 1.07).
+function calcSubEnd(startStr) {
+  const [y,m,d] = startStr.split('-').map(Number);
+  const end = new Date(y, m-1, d + 29);
+  return `${end.getFullYear()}-${String(end.getMonth()+1).padStart(2,'0')}-${String(end.getDate()).padStart(2,'0')}`;
+}
+function syncGroupSubEnd() {
+  const start = document.getElementById('gp-sub-start')?.value;
+  const endInp = document.getElementById('gp-sub-end');
+  if (start && endInp) endInp.value = calcSubEnd(start);
+}
 function prevMonthStr(monthStr) {
   const d = new Date(monthStr); d.setMonth(d.getMonth()-1);
   return d.toISOString().slice(0,7)+'-01';
