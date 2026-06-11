@@ -3405,9 +3405,15 @@ async function loadExtraBranchGroups() {
     div.style.cssText = 'padding:0 16px 16px';
     div.innerHTML = `<h4 style="margin-bottom:8px">Дополнительные филиалы</h4>`;
     for (const branch of extraBranches) {
-      const {data:tgs} = await sb().from('trainer_groups')
+      const {data:tgsAll} = await sb().from('trainer_groups')
         .select('*, group_types(name,type), profiles(fio)')
         .eq('branch',branch).is('subscription_end',null);
+      // Показываем только взрослые группы и те детские типы, которые ведёт этот старший тренер
+      const myChildTypeIdsExtra = new Set((await DB.getTrainerGroups(STATE.profile.id))
+        .filter(g=>g.group_types?.type==='children').map(g=>g.group_type_id));
+      const tgs = (tgsAll||[]).filter(g=>
+        g.group_types?.type==='adult' || myChildTypeIdsExtra.has(g.group_type_id)
+      );
       const monthStr = new Date().toISOString().slice(0,7)+'-01';
       div.innerHTML += `<div style="margin-bottom:12px">
         <div style="font-weight:600;font-size:13px;color:var(--hint);margin-bottom:6px">${branch}</div>
@@ -3433,16 +3439,20 @@ async function renderSeniorAssignForm() {
   const form = document.getElementById('senior-assign-form'); if (!form) return;
   try {
     const branches = STATE.profile.branches||[];
-    const [allTrainers, allSeniors, gts] = await Promise.all([
+    const [allTrainers, allSeniors, gts, myGroups] = await Promise.all([
       DB.getProfilesByRole('trainer'),
       DB.getProfilesByRole('senior_trainer'),
       DB.getGroupTypes(),
+      DB.getTrainerGroups(STATE.profile.id),
     ]);
     const myTrainers = [...allTrainers, ...allSeniors].filter(t=>
       (t.branches||[]).some(b=>branches.includes(b))
     );
     const trainerOpts = `<option value="">— выберите —</option>${myTrainers.map(t=>`<option value="${t.id}">${t.fio}</option>`).join('')}`;
-    const gtOpts = gts.map(g=>`<option value="${g.id}" data-type="${g.type}" data-name="${g.name}">${g.name}</option>`).join('');
+    // Показываем только те типы детских групп, в которых у старшего уже есть назначения
+    const myChildTypeIds = new Set(myGroups.filter(g=>g.group_types?.type==='children').map(g=>g.group_type_id));
+    const visibleGts = gts.filter(g=>g.type==='adult' || myChildTypeIds.has(g.id));
+    const gtOpts = visibleGts.map(g=>`<option value="${g.id}" data-type="${g.type}" data-name="${g.name}">${g.name}</option>`).join('');
     const branchOpts = branches.map(b=>`<option>${b}</option>`).join('');
 
     form.innerHTML=`
@@ -3469,7 +3479,7 @@ async function renderSeniorAssignForm() {
         <div class="form-group"><label>Группа (в вашем филиале)</label>
           <select id="sa2-group">
             <option value="">— выберите —</option>
-            ${gts.map(g=>`<option value="${g.id}" data-type="${g.type}">${g.name}</option>`).join('')}
+            ${visibleGts.map(g=>`<option value="${g.id}" data-type="${g.type}">${g.name}</option>`).join('')}
           </select></div>
         <div class="form-group"><label>Второй тренер</label>
           <select id="sa2-trainer">${trainerOpts}</select></div>
