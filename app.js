@@ -7299,23 +7299,17 @@ async function renderCeoApp() {
       <button class="nav-btn" onclick="ceoTab('dashboard')"><span>📊</span>Дашборд</button>
       <button class="nav-btn" onclick="ceoTab('analytics')"><span>📈</span>Аналитика</button>
       <button class="nav-btn" onclick="ceoTab('salary')"><span>💰</span>ЗП</button>
-      <button class="nav-btn" onclick="ceoTab('groups')"><span>🏊</span>Группы</button>
-      <button class="nav-btn" onclick="ceoTab('ops')"><span>⚙️</span>Операционка</button>
-      <button class="nav-btn" onclick="ceoTab('plans')"><span>📋</span>Планы</button>
     </nav>`);
   ceoTab('dashboard');
   setTimeout(checkInAppNotifications, 2000);
 }
 
 function ceoTab(tab) {
-  const tabs = ['dashboard','analytics','salary','groups','ops','plans'];
+  const tabs = ['dashboard','analytics','salary'];
   $$('.nav-btn').forEach((b,i)=>b.classList.toggle('active',tabs[i]===tab));
   if (tab==='dashboard') renderCeoDashboard();
   if (tab==='analytics') renderCeoAnalytics();
   if (tab==='salary')    renderCeoSalary();
-  if (tab==='groups')    renderCeoGroups();
-  if (tab==='ops')       renderCeoOps();
-  if (tab==='plans')     renderCeoPlans();
 }
 
 // ЗП всех тренеров за месяц из данных getSummary → [{p, sal}]
@@ -7346,13 +7340,11 @@ async function renderCeoDashboard() {
     <div id="ceo-dash-body"><div class="center-screen"><div class="spinner"></div></div></div>
   </div>`;
   try {
-    const [summaryData, allClients, issues, bills, chlorine, plans] = await Promise.all([
+    const [summaryData, allClients, issues, bills] = await Promise.all([
       DB.getSummary(year, month, null),
       DB.getAllClients(),
       DB.getTechIssues(''),
       DB.getTechBills(''),
-      sb().from('chlorine_orders').select('quantity_kg,price_total').then(r=>r.data||[]),
-      sb().from('ops_plans').select('*').neq('status','cancelled').then(r=>r.data||[]),
     ]);
 
     // Финансы
@@ -7364,10 +7356,9 @@ async function renderCeoDashboard() {
     const totalPT = (summaryData.workouts||[]).filter(w=>!w.is_drop_in&&(!w.is_debt||w.debt_confirmed_at)).length;
 
     // Операционка
-    const urgentIssues  = (issues||[]).filter(i=>i.priority==='urgent'||i.priority==='high');
-    const unpaidBills   = (bills||[]).filter(b=>!b.paid);
-    const unpaidSum     = unpaidBills.reduce((s,b)=>s+Number(b.amount),0);
-    const activePlans   = (plans||[]).filter(p=>p.status==='active');
+    const urgentIssues = (issues||[]).filter(i=>i.priority==='urgent'||i.priority==='high');
+    const unpaidBills  = (bills||[]).filter(b=>!b.paid);
+    const unpaidSum    = unpaidBills.reduce((s,b)=>s+Number(b.amount),0);
 
     // По филиалам
     const branches = (await cached('branches',()=>DB.getBranches())).map(b=>b.name);
@@ -7407,19 +7398,6 @@ async function renderCeoDashboard() {
           </div>
         </div>`;
       }).join('')}
-
-      <!-- Активные планы -->
-      ${activePlans.length?`
-        <h4 style="margin-top:16px;margin-bottom:8px">📋 Активные планы (${activePlans.length})</h4>
-        ${activePlans.slice(0,5).map(p=>{
-          const pt = PLAN_TYPES[p.plan_type]||{icon:'📌',label:p.plan_type,textColor:'var(--hint)'};
-          return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">
-            <span style="font-size:13px">${pt.icon} ${p.title}</span>
-            <span style="font-size:11px;color:var(--hint)">${p.due_date?fmtDate(p.due_date):''}</span>
-          </div>`;
-        }).join('')}
-        ${activePlans.length>5?`<button class="btn btn-sm" style="margin-top:8px;width:100%;background:var(--card);border:1px solid var(--border)"
-          onclick="ceoTab('plans')">Все планы →</button>`:''}`:''}
     `;
   } catch(e) { document.getElementById('ceo-dash-body').innerHTML='<p class="hint">Ошибка загрузки</p>'; console.error(e); }
 }
@@ -7666,17 +7644,17 @@ async function renderCeoSalary() {
           <div class="summary-card accent"><div class="s-val">${fmt(Math.round(totalFot))}</div><div class="s-lbl">ФОТ (сум)</div></div>
         </div>
         ${rows.map(({p,sal})=>`
-          <div class="staff-card" style="flex-direction:column;gap:4px;margin-bottom:8px">
-            <div style="display:flex;justify-content:space-between;align-items:center">
-              <div class="staff-fio">${p.fio}</div>
-              <div style="font-weight:700;font-size:16px">${fmt(sal.total)}</div>
+          <div class="staff-card" style="flex-direction:column;gap:6px;margin-bottom:8px">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+              <div class="staff-fio" style="flex:1;min-width:0;word-break:break-word">${p.fio}</div>
+              <div style="font-weight:700;font-size:16px;white-space:nowrap;flex-shrink:0">${fmt(sal.total)} сум</div>
             </div>
-            <div style="font-size:12px;color:var(--hint);display:flex;gap:12px;flex-wrap:wrap">
-              ${sal.cat[1]+sal.cat[2]+sal.cat[3]>0?`<span>ПТ: ${sal.cat[1]+sal.cat[2]+sal.cat[3]}</span>`:''}
-              ${sal.hours>0?`<span>Деж: ${sal.hours.toFixed(1)}ч</span>`:''}
-              ${sal.adultSum+sal.childSum>0?`<span>Группы: ${fmt(sal.adultSum+sal.childSum)}</span>`:''}
-              ${sal.bonus>0?`<span style="color:var(--success)">+${fmt(sal.bonus)}</span>`:''}
-              ${sal.penalty>0?`<span style="color:var(--danger)">−${fmt(sal.penalty)}</span>`:''}
+            <div style="font-size:12px;color:var(--hint);display:flex;gap:10px;flex-wrap:wrap">
+              ${sal.cat[1]+sal.cat[2]+sal.cat[3]>0?`<span>🏊 ${sal.cat[1]+sal.cat[2]+sal.cat[3]} ПТ</span>`:''}
+              ${sal.hours>0?`<span>⏱ ${sal.hours.toFixed(1)}ч деж.</span>`:''}
+              ${sal.adultSum+sal.childSum>0?`<span>👥 ${fmt(sal.adultSum+sal.childSum)} группы</span>`:''}
+              ${sal.bonus>0?`<span style="color:var(--success)">+${fmt(sal.bonus)} бонус</span>`:''}
+              ${sal.penalty>0?`<span style="color:var(--danger)">−${fmt(sal.penalty)} штраф</span>`:''}
             </div>
           </div>`).join('')}
       `;
