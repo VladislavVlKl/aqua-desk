@@ -32,7 +32,7 @@
 //   ADMIN:BRANCHES      — renderAdminBranches
 //   ADMIN:GROUPS        — renderAdminGroups, renderGroupsStructure, renderGroupMonthReport
 //   ADMIN:TECH          — renderAdminTech, оборудование, счета, закупки, хлор, планы
-//   CEO                 — renderCeoApp, renderCeoDashboard, renderCeoSalary
+//   CEO                 — renderCeoApp, renderCeoDashboard, renderCeoAnalytics, renderCeoSalary
 //   SHARED:DELETE       — doDeleteClientCheck, doApproveDelete, doApproveWorkoutDelete
 //   SHARED:PROFILE      — renderTrainerEditProfile
 //   SHARED:NOTIFICATIONS — checkInAppNotifications, renderAdminNotifications
@@ -7282,7 +7282,7 @@ async function deleteTechItem(type, id) {
 // ══════════════════════════════════════════════════════════════
 
 // ============================================================
-// SECTION: CEO — renderCeoApp, renderCeoDashboard, renderCeoSalary, renderCeoOps
+// SECTION: CEO — renderCeoApp, renderCeoDashboard, renderCeoAnalytics, renderCeoSalary, renderCeoOps
 // ============================================================
 async function renderCeoApp() {
   setupBack(null);
@@ -7422,6 +7422,217 @@ async function renderCeoDashboard() {
           onclick="ceoTab('plans')">Все планы →</button>`:''}`:''}
     `;
   } catch(e) { document.getElementById('ceo-dash-body').innerHTML='<p class="hint">Ошибка загрузки</p>'; console.error(e); }
+}
+
+// ── АНАЛИТИКА — деньги, клиенты, тренеры, загруженность ────────
+async function renderCeoAnalytics() {
+  let year=new Date().getFullYear(), month=new Date().getMonth()+1;
+  $('#tab-content').innerHTML=`<div class="tab-pad">
+    <div class="section-header"><h3>Аналитика</h3>
+      <div class="month-nav">
+        <button id="ceoan-prev">‹</button>
+        <span id="ceoan-month">${fmtMY(year,month)}</span>
+        <button id="ceoan-next">›</button>
+      </div>
+    </div>
+    <div id="ceoan-body"><div class="center-screen"><div class="spinner"></div></div></div>
+  </div>`;
+
+  const load = async () => {
+    const body=document.getElementById('ceoan-body'); if (!body) return;
+    body.innerHTML=`<div class="center-screen"><div class="spinner"></div></div>`;
+    try {
+      const py = month===1?year-1:year, pm = month===1?12:month-1;
+      const [curr, prev, extra] = await Promise.all([
+        DB.getSummary(year, month, null),
+        DB.getSummary(py, pm, null),
+        DB.getCeoAnalytics(year, month),
+      ]);
+      body.innerHTML = buildCeoAnalytics(curr, prev, extra, year, month);
+    } catch(e) { body.innerHTML='<p class="hint">Ошибка загрузки</p>'; console.error(e); }
+  };
+  document.getElementById('ceoan-prev')?.addEventListener('click',()=>{
+    if(month===1){year--;month=12;}else month--;
+    document.getElementById('ceoan-month').textContent=fmtMY(year,month); load();
+  });
+  document.getElementById('ceoan-next')?.addEventListener('click',()=>{
+    if(month===12){year++;month=1;}else month++;
+    document.getElementById('ceoan-month').textContent=fmtMY(year,month); load();
+  });
+  await load();
+}
+
+function buildCeoAnalytics(curr, prev, extra, year, month) {
+  const {year:py, month:pm} = extra.prevMonth;
+  const mShort = v => v>=1000000 ? (v/1000000).toFixed(1).replace('.0','')+' млн' : fmt(Math.round(v));
+
+  // ─ Выручка: ПТ/разовые — расчётно по PT_PRICES, группы — фактические оплаты ─
+  const isPaidPT = w => !w.is_drop_in && (!w.is_debt || w.debt_confirmed_at);
+  const wRev = w => w.is_drop_in ? (PT_PRICES[w.drop_in_category||1]||0)
+                                 : (PT_PRICES[w.category_at_moment]||0);
+  const ptRev = ws => (ws||[]).filter(isPaidPT).reduce((s,w)=>s+wRev(w),0);
+  const diRev = ws => (ws||[]).filter(w=>w.is_drop_in).reduce((s,w)=>s+wRev(w),0);
+  const grRev = gps => (gps||[]).filter(g=>g.paid).reduce((s,g)=>s+Number(g.amount||0),0);
+
+  const currPtRev=ptRev(curr.workouts), currDiRev=diRev(curr.workouts), currGrRev=grRev(extra.groupPayments);
+  const prevPtRev=ptRev(prev.workouts), prevDiRev=diRev(prev.workouts), prevGrRev=grRev(extra.prevGroupPayments);
+  const revenue=currPtRev+currDiRev+currGrRev, prevRevenue=prevPtRev+prevDiRev+prevGrRev;
+
+  // ─ ФОТ ─
+  const fotRows = ceoFotRows(curr).filter(r=>r.sal.total>0).sort((a,b)=>b.sal.total-a.sal.total);
+  const fot     = fotRows.reduce((s,r)=>s+r.sal.total,0);
+  const prevFot = ceoFotRows(prev).reduce((s,r)=>s+r.sal.total,0);
+  const ratio     = revenue>0     ? Math.round(fot/revenue*100)         : 0;
+  const prevRatio = prevRevenue>0 ? Math.round(prevFot/prevRevenue*100) : 0;
+
+  // ─ Клиенты ─
+  const clients    = extra.clients||[];
+  const activeBase = clients.filter(c=>c.balance>0);
+  const avgBalance = activeBase.length ? activeBase.reduce((s,c)=>s+c.balance,0)/activeBase.length : 0;
+  const avgCheck   = activeBase.length ? revenue/activeBase.length : 0;
+
+  // Новые = первый абонемент клиента в этом месяце
+  const firstSub={};
+  (extra.subscriptions||[]).forEach(s=>{
+    if (!firstSub[s.client_id] || s.start_date<firstSub[s.client_id]) firstSub[s.client_id]=s.start_date;
+  });
+  const mStart=`${year}-${String(month).padStart(2,'0')}-01`;
+  const mEnd  =new Date(year,month,1).toISOString().slice(0,10);
+  const pStart=`${py}-${String(pm).padStart(2,'0')}-01`;
+  const newCurr=Object.values(firstSub).filter(d=>d>=mStart&&d<mEnd).length;
+  const newPrev=Object.values(firstSub).filter(d=>d>=pStart&&d<mStart).length;
+
+  // Отток: баланс 0, абонемент закончился >14 дней назад и не продлён
+  const cutoff  = new Date(Date.now()-14*86400000).toISOString().slice(0,10);
+  const churned = clients.filter(c=>c.balance<=0 && c.subscription_end && c.subscription_end<cutoff);
+  const atRisk  = clients.filter(c=>c.balance<=0 && c.subscription_end && c.subscription_end>=cutoff && c.subscription_end<todayStr());
+
+  // ─ По тренерам: выручка, ПТ, ФОТ ─
+  const fioMap={}; (curr.profiles||[]).forEach(p=>fioMap[p.id]=p.fio);
+  const revByTrainer={};
+  (curr.workouts||[]).forEach(w=>{
+    if (w.is_drop_in || isPaidPT(w)) revByTrainer[w.trainer_id]=(revByTrainer[w.trainer_id]||0)+wRev(w);
+  });
+  (extra.groupPayments||[]).filter(g=>g.paid&&g.trainer_groups?.trainer_id).forEach(g=>{
+    const t=g.trainer_groups.trainer_id;
+    revByTrainer[t]=(revByTrainer[t]||0)+Number(g.amount||0);
+  });
+  const trainerIds=[...new Set([...fotRows.map(r=>r.p.id),...Object.keys(revByTrainer).map(Number)])];
+  const tRows=trainerIds.map(id=>{
+    const fr=fotRows.find(r=>r.p.id===id);
+    return {id, fio:fioMap[id]||fr?.p.fio||'—',
+            rev:revByTrainer[id]||0, fot:fr?.sal.total||0,
+            pt:(curr.workouts||[]).filter(w=>w.trainer_id===id&&isPaidPT(w)).length};
+  }).sort((a,b)=>b.rev-a.rev);
+  const maxPt = Math.max(1,...tRows.map(t=>t.pt));
+
+  // ─ Загруженность: активные слоты ПТ+группы по дням/часам ─
+  const HOURS=Array.from({length:16},(_,i)=>i+7); // 07:00–22:00
+  const heat=Array.from({length:7},()=>({}));
+  let maxHeat=0;
+  (extra.slots||[]).filter(s=>s.slot_type!=='duty').forEach(s=>{
+    const sh=parseInt(s.start_time), eh=Math.max(sh+1, parseInt(s.end_time)||sh+1);
+    for (let h=sh; h<eh; h++) {
+      if (h<7||h>22||!heat[s.day_of_week]) continue;
+      heat[s.day_of_week][h]=(heat[s.day_of_week][h]||0)+1;
+      maxHeat=Math.max(maxHeat,heat[s.day_of_week][h]);
+    }
+  });
+
+  const card=(icon,label,val,currN,prevN,higherIsBetter=true)=>`
+    <div class="an-card">
+      <div class="an-icon">${icon}</div>
+      <div class="an-val">${val}</div>
+      <div class="an-label">${label}</div>
+      ${prevN?`<div class="an-delta ${pctClass(currN,prevN,higherIsBetter)}">${pct(currN,prevN)} vs ${fmtMY(py,pm)}</div>`:''}
+    </div>`;
+
+  const revRow=(label,val,prevVal)=>{
+    const share=revenue>0?Math.round(val/revenue*100):0;
+    return `<div style="margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;font-size:13px">
+        <span>${label}</span>
+        <span><b>${fmt(Math.round(val))}</b> сум · <span class="hint">${share}%</span>
+          <span class="an-delta ${pctClass(val,prevVal)}" style="margin-left:4px">${pct(val,prevVal)}</span></span>
+      </div>
+      <div style="height:6px;background:var(--card);border-radius:3px;margin-top:4px;overflow:hidden">
+        <div style="height:100%;width:${share}%;background:var(--accent,#7c3aed);border-radius:3px"></div>
+      </div>
+    </div>`;
+  };
+
+  return `
+    <!-- ДЕНЬГИ -->
+    <h4>💰 Деньги</h4>
+    <div class="an-grid">
+      ${card('📈','Выручка',mShort(revenue),revenue,prevRevenue,true)}
+      ${card('💸','ФОТ',mShort(fot),fot,prevFot,false)}
+      ${card('⚖️','ФОТ / Выручка',ratio+'%',ratio,prevRatio,false)}
+      ${card('🧾','Средний чек',mShort(avgCheck),Math.round(avgCheck),0,true)}
+    </div>
+    <p class="hint" style="font-size:11px;margin:8px 0 16px">
+      ПТ и разовые — расчётно: проведённые × тариф категории. Группы — фактические оплаты за месяц.
+      Средний чек = выручка / активная база (${activeBase.length}).
+    </p>
+
+    <div style="margin-bottom:20px">
+      ${revRow('🏊 ПТ по абонементам',currPtRev,prevPtRev)}
+      ${revRow('🎟 Разовые',currDiRev,prevDiRev)}
+      ${revRow('👥 Группы (оплаты)',currGrRev,prevGrRev)}
+    </div>
+
+    <!-- КЛИЕНТЫ -->
+    <h4>👤 Клиенты</h4>
+    <div class="an-grid">
+      ${card('👥','Активная база',activeBase.length,activeBase.length,0,true)}
+      ${card('➕','Новых за месяц',newCurr,newCurr,newPrev,true)}
+      ${card('🚪','Отток (>14 дн)',churned.length,churned.length,0,false)}
+      ${card('🔋','Ср. остаток ПТ',avgBalance.toFixed(1),Math.round(avgBalance*10),0,true)}
+    </div>
+    ${atRisk.length?`<div class="warn-banner" style="margin-top:8px;font-size:12px">
+      ⏳ <b>Риск оттока:</b> ${atRisk.length} клиентов закончили ПТ за последние 14 дней и пока не продлили
+    </div>`:''}
+    ${churned.length?`<details style="margin-top:8px">
+      <summary style="font-size:12px;color:var(--hint);cursor:pointer">Список оттока (${churned.length})</summary>
+      <div style="margin-top:6px">
+        ${churned.slice(0,15).map(c=>`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px">
+          <span>${c.fio}</span><span class="hint">${fioMap[c.trainer_id]||''} · до ${fmtDate(c.subscription_end)}</span>
+        </div>`).join('')}
+        ${churned.length>15?`<p class="hint" style="margin-top:4px">Ещё ${churned.length-15}...</p>`:''}
+      </div>
+    </details>`:''}
+
+    <!-- ТРЕНЕРЫ -->
+    <h4 style="margin-top:20px">🏋️ Тренеры: выручка / ФОТ / ПТ</h4>
+    ${tRows.map(t=>{
+      const tr=t.rev>0?Math.round(t.fot/t.rev*100):null;
+      return `<div class="staff-card" style="flex-direction:column;gap:4px;margin-bottom:6px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div class="staff-fio">${t.fio}</div>
+          <div style="font-size:13px"><b>${fmt(Math.round(t.rev))}</b> <span class="hint">сум</span></div>
+        </div>
+        <div style="display:flex;gap:12px;font-size:12px;color:var(--hint);flex-wrap:wrap">
+          <span>ФОТ: ${fmt(t.fot)}</span>
+          ${tr!==null?`<span style="color:${tr>60?'var(--danger)':tr>45?'#f59e0b':'var(--success)'}">ФОТ/выручка: ${tr}%</span>`:''}
+          <span>ПТ: ${t.pt}</span>
+        </div>
+        <div style="height:4px;background:var(--card);border-radius:2px;overflow:hidden">
+          <div style="height:100%;width:${Math.round(t.pt/maxPt*100)}%;background:var(--accent,#7c3aed)"></div>
+        </div>
+      </div>`;
+    }).join('')||'<p class="hint">Нет данных</p>'}
+
+    <!-- ЗАГРУЖЕННОСТЬ -->
+    <h4 style="margin-top:20px">🕐 Загруженность по времени</h4>
+    <p class="hint" style="font-size:11px;margin-bottom:8px">Активные слоты расписания (ПТ + группы), число занятых слотов на час</p>
+    <div style="display:grid;grid-template-columns:38px repeat(7,1fr);gap:2px;font-size:10px;margin-bottom:8px">
+      <div></div>${DAYS_SHORT.map(d=>`<div style="text-align:center;color:var(--hint)">${d}</div>`).join('')}
+      ${HOURS.map(h=>`<div style="color:var(--hint);line-height:18px">${String(h).padStart(2,'0')}:00</div>`+
+        DAYS_SHORT.map((_,d)=>{
+          const v=heat[d][h]||0, a=maxHeat?v/maxHeat:0;
+          return `<div style="height:18px;border-radius:3px;text-align:center;line-height:18px;background:${v?`rgba(124,58,237,${(0.15+0.85*a).toFixed(2)})`:'var(--card)'};color:${a>0.5?'#fff':'var(--hint)'}">${v||''}</div>`;
+        }).join('')).join('')}
+    </div>`;
 }
 
 // ── ЗП ────────────────────────────────────────
