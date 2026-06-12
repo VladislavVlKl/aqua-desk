@@ -5984,8 +5984,11 @@ async function renderGroupMonthReport(groupId, monthStr) {
         const leaderName   = tgWithLeader?.leader_name || '';
         const leaderPct    = tgWithLeader?.leader_fee_percent || 0;
 
-        // Замены за месяц
-        const subs = substitutions || [];
+        // Замены за месяц: в деньгах участвуют только утверждённые старшим (со ставкой);
+        // pending показываются с бейджем «⏳» без сумм — иначе отчёт расходится со сводкой ЗП
+        const allSubs     = substitutions || [];
+        const subs        = allSubs.filter(s => s.status === 'approved');
+        const pendingSubs = allSubs.filter(s => s.status !== 'approved');
 
         // Разделяем тренеров на процентных и ставочных
         const percentTrainers = trainers.filter(t => t.rate_type === 'percent');
@@ -6082,6 +6085,15 @@ async function renderGroupMonthReport(groupId, monthStr) {
         <div style="margin-top:20px">
           <h4 style="margin-bottom:12px">ЗП тренерам за месяц</h4>
 
+          ${pendingSubs.length ? `<div class="warn-banner" style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.4);border-radius:10px;padding:12px;margin-bottom:12px">
+            <div style="font-weight:600;margin-bottom:6px">⏳ Неутверждённые замены (${pendingSubs.length}) — в расчёте не участвуют</div>
+            ${pendingSubs.map(s=>`<div style="font-size:12px;padding:4px 0;border-top:1px solid rgba(245,158,11,.2)">
+              ${s.substitute?.fio||'?'} вместо ${s.original?.fio||'?'} · ${fmtDate(s.session_date)}
+              <span style="font-size:11px;color:#f59e0b;font-weight:600;margin-left:4px">⏳ не утверждена</span>
+            </div>`).join('')}
+            <div style="font-size:11px;color:var(--hint);margin-top:6px">Утвердите замены до расчёта ЗП — после утверждения они вычтутся у заменённого и уйдут заменяющему отдельной строкой.</div>
+          </div>` : ''}
+
           ${isArtSwim ? `<div style="background:rgba(124,58,237,.08);border:1px solid rgba(124,58,237,.3);border-radius:10px;padding:12px;margin-bottom:12px">
             <div style="display:flex;justify-content:space-between;margin-bottom:4px">
               <span style="font-size:13px;color:var(--hint)">Вал (оплаты за месяц: ${paidCount} из ${activeCount} дет)</span>
@@ -6123,7 +6135,7 @@ async function renderGroupMonthReport(groupId, monthStr) {
                 <span style="font-weight:600">${fmt(autoAmt)} сум</span>
               </div>
               ${subsICovered.length ? `<div style="display:flex;justify-content:space-between;margin-top:4px">
-                <span style="color:#10b981;font-size:12px">+ замены (${subsICovered.length} зан) — выплачиваются после утверждения старшим, отдельной строкой в сводке</span>
+                <span style="color:#10b981;font-size:12px">+ замены (утверждённые, ${subsICovered.length} зан) — отдельной строкой в сводке ЗП</span>
                 <span style="color:#10b981;font-weight:600">+${fmt(subsICoveredCost)} сум</span>
               </div>` : ''}
               ${mySubs.length ? `<div style="margin-top:6px;font-size:12px;color:#ef4444">
@@ -6246,7 +6258,8 @@ async function doExportGroupPayroll(groupId, monthStr) {
     const totalRevenue  = totalPaidExport;
     const totalSessions = [...new Set(attendance.map(a=>a.session_date))].length;
     const isArtSwim     = isArtSwimExport;
-    const subsExport    = substitutions || [];
+    // Только утверждённые замены — как в отчёте на экране
+    const subsExport    = (substitutions || []).filter(s=>s.status==='approved');
     const tgWithLeader  = trainers.find(t=>t.leader_name);
     const leaderName    = tgWithLeader?.leader_name || '';
     const leaderPct     = tgWithLeader?.leader_fee_percent || 0;
