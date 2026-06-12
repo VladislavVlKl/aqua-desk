@@ -3047,6 +3047,7 @@ async function doFreezeSubscription(subId, clientId, currentSubEnd) {
   const start = document.getElementById('frz-start')?.value;
   const end   = document.getElementById('frz-end')?.value;
   if (!start || !end) return toast('Укажите даты заморозки','error');
+  if (!currentSubEnd) return toast('У клиента не указана дата окончания абонемента','error');
   const days = Math.round((new Date(end) - new Date(start)) / 86400000);
   if (days < 1) return toast('Конец заморозки должен быть позже начала','error');
   const newEnd = new Date(currentSubEnd);
