@@ -2796,8 +2796,10 @@ async function renderClientProfile(clientId, backTab='home') {
           <div class="sub-card-header">
             <span>📅 Абонемент с ${activeSub.start_date}</span>
           </div>
-          ${activeSub.freeze_start?`<div style="background:rgba(96,165,250,.12);border:1px solid rgba(96,165,250,.3);border-radius:8px;padding:8px 12px;margin-bottom:8px;font-size:13px;color:#3b82f6;font-weight:500">
-            🧊 Заморожен: ${activeSub.freeze_start} — ${activeSub.freeze_end}
+          ${activeSub.freeze_start?`<div style="background:rgba(96,165,250,.12);border:1px solid rgba(96,165,250,.3);border-radius:8px;padding:8px 12px;margin-bottom:8px;font-size:13px;color:#3b82f6">
+            <div style="font-weight:500;margin-bottom:6px">🧊 Заморожен: ${activeSub.freeze_start} — ${activeSub.freeze_end}</div>
+            ${canEdit?`<button class="btn btn-sm" style="font-size:11px;background:rgba(96,165,250,.2);color:#3b82f6;border:1px solid rgba(96,165,250,.4)"
+              onclick="renderUnfreezeEarlyModal(${activeSub.id},'${clientId}','${activeSub.freeze_end}','${client.subscription_end||''}')">Закончить досрочно</button>`:''}
           </div>`:''}
           <div class="goals-section">
           <div class="goals-section">
@@ -3057,6 +3059,40 @@ async function doFreezeSubscription(subId, clientId, currentSubEnd) {
     await DB.freezeSubscription(subId, clientId, start, end, newEndStr);
     document.querySelector('.modal-overlay')?.remove();
     toast('Абонемент заморожен 🧊','success');
+    renderClientProfile(clientId, STATE.currentTab||'clients');
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+function renderUnfreezeEarlyModal(subId, clientId, freezeEnd, subEnd) {
+  const today = todayStr();
+  const remaining = Math.max(0, Math.round((new Date(freezeEnd) - new Date(today)) / 86400000));
+  if (remaining < 1) return toast('Заморозка уже заканчивается сегодня','info');
+  if (!subEnd) return toast('У клиента не указана дата окончания абонемента','error');
+  const newEnd = new Date(subEnd);
+  newEnd.setDate(newEnd.getDate() - remaining);
+  const newEndStr = newEnd.toISOString().slice(0,10);
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>🧊 Завершить заморозку досрочно</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div style="background:rgba(96,165,250,.1);border:1px solid rgba(96,165,250,.3);border-radius:8px;padding:12px;margin-bottom:16px;font-size:13px">
+      <div>Заморозка до: <b>${freezeEnd}</b></div>
+      <div>Неиспользованных дней: <b>${remaining}</b></div>
+      <div style="margin-top:6px">Дата конца абонемента изменится:<br><b>${subEnd}</b> → <b>${newEndStr}</b></div>
+    </div>
+    <button class="btn btn-primary btn-full" onclick="doUnfreezeEarly(${subId},'${clientId}','${freezeEnd}','${subEnd}')">Завершить заморозку</button>
+  </div>`;
+  document.body.appendChild(m);
+}
+async function doUnfreezeEarly(subId, clientId, freezeEnd, subEnd) {
+  const today = todayStr();
+  const remaining = Math.max(0, Math.round((new Date(freezeEnd) - new Date(today)) / 86400000));
+  const newEnd = new Date(subEnd);
+  newEnd.setDate(newEnd.getDate() - remaining);
+  const newEndStr = newEnd.toISOString().slice(0,10);
+  try {
+    await DB.unfreezeEarly(subId, clientId, newEndStr);
+    document.querySelector('.modal-overlay')?.remove();
+    toast('Заморозка завершена досрочно ✅','success');
     renderClientProfile(clientId, STATE.currentTab||'clients');
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }

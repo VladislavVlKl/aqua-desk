@@ -973,6 +973,14 @@ async unassignTrainerGroup(id) {
       .update({subscription_end: newSubEnd, freeze_start: freezeStart, freeze_end: freezeEnd}).eq('id', clientId);
     if (e2) throw e2;
   },
+  async unfreezeEarly(subId, clientId, newSubEnd) {
+    const {error: e1} = await sb().from('subscriptions')
+      .update({freeze_start: null, freeze_end: null}).eq('id', subId);
+    if (e1) throw e1;
+    const {error: e2} = await sb().from('clients')
+      .update({subscription_end: newSubEnd, freeze_start: null, freeze_end: null}).eq('id', clientId);
+    if (e2) throw e2;
+  },
   async getActiveSubscription(clientId) {
     const {data,error} = await sb().from('subscriptions')
       .select('*, training_goals(*)')
