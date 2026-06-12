@@ -159,7 +159,8 @@ leader_name + leader_fee_percent · group_instance_id uuid · days_of_week text[
 
 **adult_group_clients** — взрослые: `group_id, name, is_active`
 
-**group_sessions** — занятия взрослых групп: `trainer_id, group_type_id, branch, session_date, headcount, client_ids uuid[], session_type`
+**group_sessions** — проведённые занятия групп: `trainer_id, group_type_id, branch, session_date, headcount, client_ids uuid[], session_type, conducted_role, group_instance_id`
+> Взрослые группы: запись создаёт `logGroupSession`, `conducted_role IS NULL`. Детские (арт-свим): запись = отметка «кто проводил» с ролью `'суша'|'вода'|'процент'` (CHECK) и `group_instance_id`. Unique index `uq_group_sessions_conducted (trainer_id, session_date, group_type_id, branch, conducted_role)` — upsert детских отметок по этим 5 колонкам (PostgREST onConflict); взрослые записи с `conducted_role IS NULL` не ограничиваются (NULLS DISTINCT), их дубли (две тренировки в день) легитимны.
 
 **group_attendance** — посещаемость детей: `group_id, group_client_id, group_instance_id, session_date, attended`
 

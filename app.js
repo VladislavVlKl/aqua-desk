@@ -3396,7 +3396,7 @@ async function loadExtraBranchGroups() {
             </div>
             <div style="display:flex;gap:6px">
               ${tg.group_types?.type==='children'?`<button class="btn btn-sm btn-primary"
-                onclick="renderGroupMonthReport('${tg.id}','${monthStr}')">📊 Отчёт</button>`:''}
+                onclick="openGroupReport('${tg.id}','${monthStr}','list')">📊 Отчёт</button>`:''}
             </div>
           </div>
         </div>`).join('')||'<p class="hint">Нет групп</p>'}
@@ -3410,14 +3410,22 @@ async function renderSeniorAssignForm() {
   const form = document.getElementById('senior-assign-form'); if (!form) return;
   try {
     const branches = STATE.profile.branches||[];
-    const [allTrainers, allSeniors, gts] = await Promise.all([
+    const [allTrainers, allSeniors, gts, activeGroupsArr] = await Promise.all([
       DB.getProfilesByRole('trainer'),
       DB.getProfilesByRole('senior_trainer'),
       DB.getGroupTypes(),
+      Promise.all(branches.map(b=>DB.getActiveGroupsByBranch(b))),
     ]);
     const myTrainers = [...allTrainers, ...allSeniors].filter(t=>
       (t.branches||[]).some(b=>branches.includes(b))
     );
+    // Конкретные активные группы филиалов старшего (строки trainer_groups)
+    const activeGroups = activeGroupsArr.flat();
+    window._saGroups = Object.fromEntries(activeGroups.map(g=>[String(g.id), g]));
+    const groupOpts = activeGroups.map(g=>{
+      const label = `${g.group_types?.name||'Группа'} · ${g.branch}${g.profiles?.fio?' — '+g.profiles.fio:''}${g.role?' ('+g.role+')':''}`;
+      return `<option value="${g.id}" data-type="${g.group_types?.type||''}">${label}</option>`;
+    }).join('');
     const trainerOpts = `<option value="">— выберите —</option>${myTrainers.map(t=>`<option value="${t.id}">${t.fio}</option>`).join('')}`;
     const gtOpts = gts.map(g=>`<option value="${g.id}" data-type="${g.type}" data-name="${g.name}">${g.name}</option>`).join('');
     const branchOpts = branches.map(b=>`<option>${b}</option>`).join('');
@@ -3444,17 +3452,18 @@ async function renderSeniorAssignForm() {
       <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px">
         <div style="font-weight:600;font-size:13px;margin-bottom:12px">Добавить второго тренера</div>
         <div class="form-group"><label>Группа (в вашем филиале)</label>
-          <select id="sa2-group">
+          <select id="sa2-group" onchange="onSa2GroupChange(this)">
             <option value="">— выберите —</option>
-            ${gts.map(g=>`<option value="${g.id}" data-type="${g.type}">${g.name}</option>`).join('')}
+            ${groupOpts}
           </select></div>
         <div class="form-group"><label>Второй тренер</label>
           <select id="sa2-trainer">${trainerOpts}</select></div>
-        <div class="form-group"><label>Филиал</label>
-          <select id="sa2-branch">${branchOpts}</select></div>
         <div id="sa2-rate-section">
-          <div class="form-group"><label>Процент (%)</label>
-            <input id="sa2-rate" type="number" value="20" min="0" max="100"></div>
+          <div class="form-group"><label id="sa2-rate-label">Ставка за занятие (сум)</label>
+            <input id="sa2-rate" type="number" value="75000" min="0"></div>
+        </div>
+        <div id="sa2-adult-note" style="display:none;background:rgba(16,185,129,.1);border-radius:8px;padding:10px;font-size:12px;color:var(--hint);margin-bottom:12px">
+          ✅ Взрослая группа: ставка по явке (1-3=110к · 4-6=120к · 7+=130к)
         </div>
         <button class="btn btn-primary btn-full" onclick="doSeniorAssignSecond()">Добавить второго тренера</button>
       </div>`;
@@ -3494,20 +3503,38 @@ async function doSeniorAssignGroup() {
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 
+function onSa2GroupChange(sel) {
+  const isAdult = sel.options[sel.selectedIndex]?.dataset.type === 'adult';
+  const rateSection = document.getElementById('sa2-rate-section');
+  const adultNote   = document.getElementById('sa2-adult-note');
+  if (rateSection) rateSection.style.display = isAdult ? 'none' : '';
+  if (adultNote)   adultNote.style.display   = isAdult ? '' : 'none';
+}
 async function doSeniorAssignSecond() {
-  const groupTypeId = parseInt(document.getElementById('sa2-group')?.value);
-  const trainerId   = parseInt(document.getElementById('sa2-trainer')?.value);
-  const branch      = document.getElementById('sa2-branch')?.value;
-  const opt         = document.querySelector('#sa2-group option:checked');
-  const isAdult     = opt?.dataset.type === 'adult';
-  const rateType    = isAdult ? 'headcount' : 'percent';
-  const rateValue   = isAdult ? 0 : (parseFloat(document.getElementById('sa2-rate')?.value)||20);
-  if (!trainerId||!groupTypeId||!branch) return toast('Заполните все поля','error');
+  const groupId   = document.getElementById('sa2-group')?.value;
+  const trainerId = parseInt(document.getElementById('sa2-trainer')?.value);
+  if (!groupId||!trainerId) return toast('Выберите группу и тренера','error');
+  // Берём параметры у выбранной КОНКРЕТНОЙ группы — как в админском doAddSecondTrainer
+  const g = window._saGroups?.[String(groupId)];
+  if (!g) return toast('Группа не найдена, обновите страницу','error');
+  const groupTypeId = g.group_type_id;
+  const branch      = g.branch;
+  const instanceId  = g.group_instance_id || null;
+  const isAdult     = g.group_types?.type === 'adult';
+  const rateType    = isAdult ? 'headcount' : 'flat';
+  const rateValue   = isAdult ? 0 : (parseFloat(document.getElementById('sa2-rate')?.value)||75000);
+  if (_pending.has(`sa2_${groupId}_${trainerId}`)) return;
+  _pending.add(`sa2_${groupId}_${trainerId}`);
   try {
-    await DB.addTrainerGroup(trainerId, groupTypeId, branch, todayStr(), rateType, rateValue, null);
+    // instanceId передаём в addTrainerGroup → второй тренер встаёт в ту же физическую группу
+    await DB.addTrainerGroup(trainerId, groupTypeId, branch, todayStr(), rateType, rateValue, null, instanceId);
+    DB.auditLog('group_assign_second', STATE.profile.id, STATE.profile.fio, trainerId, 'trainer_group',
+      { group_id: groupId, instance: instanceId }, branch);
     toast('✅ Второй тренер добавлен','success');
+    await loadSeniorGroupsList();
     await renderSeniorAssignForm();
   } catch(e) { toast('Ошибка','error'); console.error(e); }
+  finally { _pending.delete(`sa2_${groupId}_${trainerId}`); }
 }
 
 async function loadSeniorGroupsList() {
@@ -3539,7 +3566,7 @@ async function loadSeniorGroupsList() {
             <button class="btn btn-sm btn-primary"
               onclick="${g.group_types?.type==='children'?`renderGroupDetail('${g.id}')`:`renderAdultGroupDetail('${g.id}')`}">Открыть</button>
             ${g.group_types?.type==='children'?`<button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
-              onclick="renderGroupMonthReport('${g.id}','${new Date().toISOString().slice(0,7)+'-01'}')">📊 Отчёт</button>`:''}
+              onclick="openGroupReport('${g.id}','${new Date().toISOString().slice(0,7)+'-01'}','list')">📊 Отчёт</button>`:''}
             ${canEdit?`<button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
               onclick="renderGroupScheduleModal('${g.id}','${encodeURIComponent(JSON.stringify(g.days_of_week||[]))}','${g.session_time||''}')">🗓️</button>`:''}
             <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
@@ -3551,9 +3578,15 @@ async function loadSeniorGroupsList() {
   } catch(e) { body.innerHTML='<p class="hint">Ошибка</p>'; console.error(e); }
 }
 
+// Уровни детей в группе (справочник UI)
+const GROUP_LEVELS = ['Подготовительный','Обучающий','Совершенствование','Спортивный'];
+// Роли проведённого детского занятия (справочник UI; ставки — из config/ставок группы)
+const CONDUCTED_ROLES = ['суша','вода','процент'];
+
 async function renderGroupDetail(groupId) {
-  // Запоминаем откуда пришли для кнопки назад
+  // Точка возврата по роли (navPush + нативная кнопка)
   const role = STATE.profile?.role;
+  const canPayroll = ['admin','senior_trainer'].includes(role);
   const _backToGroups = role==='admin'||role==='ceo'
     ? ()=>{ renderAdminApp(); adminTab('groups'); }
     : role==='senior_trainer'
@@ -3562,104 +3595,151 @@ async function renderGroupDetail(groupId) {
   navPush(_backToGroups);
   setupBack(_backToGroups);
   const month = new Date().toISOString().slice(0,7)+'-01';
+  const today = todayStr();
   loading('Загрузка группы...');
   try {
-    // Check group type first - route adult groups to separate handler
+    // Тип группы — взрослые уводим в отдельный обработчик
     const {data:groupInfo} = await sb().from('trainer_groups')
       .select('*, group_types(name,type)').eq('id',groupId).single();
     if (groupInfo?.group_types?.type !== 'children') {
       renderAdultGroupDetail(groupId); return;
     }
-    // Используем instance_id для общего списка детей и платежей
     const instanceId = groupInfo.group_instance_id;
-    const [clients, payments, notes, sessionHistory] = await Promise.all([
+    const branch = groupInfo.branch;
+    const groupTypeId = groupInfo.group_type_id;
+    const [clients, payments, notes, members, conducted, todayAtt, sessionHistory] = await Promise.all([
       instanceId ? DB.getGroupClientsByInstance(instanceId) : DB.getGroupClients(groupId),
       instanceId ? DB.getGroupPaymentsByInstance(instanceId, month) : DB.getGroupPayments(groupId, month),
       DB.getGroupProgressNotes(groupId, month),
+      instanceId ? DB.getGroupInstanceMembers(instanceId) : Promise.resolve([groupInfo]),
+      instanceId ? DB.getGroupConductedByDate(instanceId, today) : Promise.resolve([]),
+      instanceId ? DB.getGroupAttendanceByInstance(instanceId, today) : DB.getGroupAttendance(groupId, today),
       DB.getGroupSessionHistory(groupId),
     ]);
     const paidMap = Object.fromEntries(payments.map(p=>[p.group_client_id, p]));
     const noteMap = Object.fromEntries(notes.map(n=>[n.group_client_id, n]));
-    const LEVELS = ['Подготовительный','Обучающий','Совершенствование','Спортивный'];
-    setScreen(`<div class="app-header">
-      ${backBtn()}
-      <div class="app-title">Группа</div>
-      <button class="btn btn-sm" style="font-size:12px" onclick="renderGroupSubstitutionModal('${groupId}')">🔄 Замена</button>
-    </div>
-    <div class="tab-content"><div class="tab-pad">
-      <div class="section-header"><h3>Состав группы</h3>
-        <button class="btn btn-sm" onclick="renderAddGroupClientModal('${groupId}')">+ Ребёнок</button>
-      </div>
-      <div style="display:flex;gap:8px;margin-bottom:8px">
-        <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);flex:1"
-          onclick="renderGroupAttendance('${groupId}')">✅ Отметить посещаемость</button>
-        <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
-          onclick="renderGroupAttendanceByDate('${groupId}')">📅 За другую дату</button>
-      </div>
-      <div style="display:flex;gap:8px;margin-bottom:16px">
-        ${(()=>{const debtors=clients.filter(c=>!paidMap[c.id]?.paid);return debtors.length?`<button class="btn btn-sm" style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#ef4444;font-size:12px" onclick="renderGroupDebtorsModal(${JSON.stringify(debtors.map(c=>c.name))})">⚠️ Должники: ${debtors.length}</button>`:''})()}
-        <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border);font-size:12px"
-          onclick="renderGroupArchiveModal('${groupId}','${instanceId||''}')">📦 Архив</button>
-      </div>
-      ${!clients.length?'<p class="hint">Детей пока нет</p>':
-        clients.map(c=>{
-          const pay = paidMap[c.id];
-          const note = noteMap[c.id];
-          const paid = pay?.paid;
-          return `<div class="staff-card" style="flex-direction:column;gap:8px">
-            <div style="display:flex;justify-content:space-between;align-items:center">
-              <div>
-                <div class="staff-fio">${c.name}</div>
-                <div class="staff-meta">${c.level} · ${fmt(c.monthly_price)} сум/мес</div>
-              </div>
-              <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-                <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
-                  <span style="font-size:11px;padding:3px 8px;border-radius:12px;
-                    background:${paid?'rgba(16,185,129,.15)':'rgba(239,68,68,.15)'};
-                    color:${paid?'#10b981':'#ef4444'}">
-                    ${paid?`Оплачен · ${fmt(pay?.amount||0)} сум`:'Не оплачен'}</span>
-                  ${pay?.sub_start?`<span style="font-size:10px;color:var(--hint)">${fmtDate(pay.sub_start)}${pay.sub_end?' – '+fmtDate(pay.sub_end):''}</span>`:''}
-                </div>
-                <button class="btn btn-sm" style="${paid?'background:rgba(239,68,68,.12);color:#ef4444;border:1px solid rgba(239,68,68,.3)':'background:rgba(16,185,129,.12);color:#10b981;border:1px solid rgba(16,185,129,.3)'}"
-                  onclick="toggleGroupPayment('${groupId}','${c.id}',${paid?'false':'true'},${c.monthly_price},'${month}')">
-                  ${paid?'✕ Отменить':'✓ Оплатил'}</button>
-              </div>
+    const todayHeadcount = todayAtt.filter(a=>a.attended).length;
+    // Карта проведённых: trainer_id → conducted_role (сегодня)
+    // Тренер может вести несколько ролей за день (суша И вода) — храним набор ролей
+    const conductedMap = {};
+    conducted.forEach(s=>{ (conductedMap[s.trainer_id] ||= []).push(s.conducted_role); });
+
+    // Кешируем контекст для onclick-обработчиков (без JSON в атрибутах)
+    window._gd = { groupId, instanceId, branch, groupTypeId, month, today, todayHeadcount,
+                   members, clients, conductedMap, canPayroll, role };
+
+    const monthLabel = new Date(month).toLocaleDateString('ru-RU',{month:'long',year:'numeric'});
+
+    // ── [1] ЗП ЗА МЕСЯЦ (только admin/senior) ──
+    const payrollBlock = canPayroll ? `
+      <div class="section-header"><h3>ЗП за месяц</h3>
+        <span style="font-size:12px;color:var(--hint)">${monthLabel}</span></div>
+      <div class="staff-card" style="flex-direction:column;align-items:stretch;gap:8px;margin-bottom:8px">
+        ${members.map(t=>{
+          const r = t.rate_type==='percent' ? `${t.rate_value||0}%`
+                  : t.rate_type==='flat'    ? `${fmt(t.rate_value||75000)} сум/зан`
+                  : 'по явке';
+          return `<div onclick="openTrainerMenu('${t.id}')"
+            style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);${canPayroll?'cursor:pointer':''}">
+            <div>
+              <div style="font-weight:500">${t.profiles?.fio||'—'}${t.role?` <span style="font-size:11px;color:var(--hint)">(${t.role})</span>`:''}</div>
+              <div style="font-size:11px;color:var(--hint)">${r}${t.leader_name?` · 👑 рук. ${t.leader_name}`:''}</div>
             </div>
-            <div style="display:flex;gap:6px;flex-wrap:wrap">
-              <select onchange="updateGroupClientLevel('${c.id}',this.value)"
-                style="font-size:11px;background:var(--card);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:3px 6px">
-                ${LEVELS.map(l=>`<option ${l===c.level?'selected':''}>${l}</option>`).join('')}
-              </select>
-              <button class="btn btn-sm" style="font-size:11px"
-                onclick="renderGroupNoteModal('${groupId}','${c.id}','${encodeURIComponent(c.name)}','${month}','${encodeURIComponent(note?.note||'')}')">
-                📝 ${note?.note?'Заметка':'+ Заметка'}</button>
-              <button class="btn btn-sm" style="font-size:11px;background:var(--card);border:1px solid var(--border)"
-                onclick="renderEditGroupClientModal('${c.id}','${encodeURIComponent(c.name)}',${c.age||0},${c.monthly_price||0},'${groupId}')">
-                ✏️</button>
-              <button class="btn btn-sm btn-danger" style="font-size:11px"
-                onclick="archiveGroupClientConfirm('${c.id}','${encodeURIComponent(c.name)}','${groupId}')">
-                Архив / Удалить</button>
-            </div>
+            <span style="font-size:14px;color:var(--hint)">⋯</span>
           </div>`;
         }).join('')}
+        <button class="btn btn-sm btn-primary btn-full" style="margin-top:4px"
+          onclick="openGroupReport('${groupId}','${month}','detail')">📊 Полный расчёт ЗП</button>
+      </div>` : '';
 
-      <div class="section-header" style="margin-top:24px">
-        <h3>История занятий</h3>
+    // ── [2] ЗАНЯТИЕ СЕГОДНЯ ──
+    const conductedBlock = `
+      <div class="section-header" style="margin-top:16px"><h3>Занятие сегодня</h3>
+        <span style="font-size:12px;color:var(--hint)">${fmtDate(today)}</span></div>
+      <div class="staff-card" style="flex-direction:column;align-items:stretch;gap:10px;margin-bottom:8px">
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary" style="flex:1" onclick="renderGroupAttendance('${groupId}')">✅ Отметить детей</button>
+          <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
+            onclick="renderGroupSubstitutionModal('${groupId}')">🔄 Замена</button>
+        </div>
+        <div style="font-size:12px;color:var(--hint)">Отмечено сегодня: <b>${todayHeadcount}</b> дет.</div>
+        <div>
+          <div style="font-size:13px;font-weight:600;margin-bottom:6px">Кто проводил и где</div>
+          ${members.map(t=>{
+            const cur = conductedMap[t.trainer_id]||[];
+            return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid var(--border)">
+              <span style="font-size:13px">${t.profiles?.fio||'—'}</span>
+              <div style="display:flex;gap:6px;align-items:center">
+                ${CONDUCTED_ROLES.map(cr=>`<button class="btn btn-sm"
+                  style="font-size:11px;${cur.includes(cr)?'background:var(--accent);color:#fff':'background:var(--card);border:1px solid var(--border)'}"
+                  onclick="toggleConducted('${t.trainer_id}','${cr}')">${cr}</button>`).join('')}
+              </div>
+            </div>`;
+          }).join('')||'<p class="hint">Тренеры не назначены</p>'}
+          <div style="font-size:11px;color:var(--hint);margin-top:6px">Тап по роли — отметить «провёл», повторный тап — снять. Кого не было — не отмечайте.</div>
+        </div>
       </div>
+      <div style="display:flex;gap:8px;margin-bottom:16px">
+        <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
+          onclick="renderGroupAttendanceByDate('${groupId}')">📅 За другую дату</button>
+        <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border);font-size:12px"
+          onclick="renderGroupArchiveModal('${groupId}','${instanceId||''}')">📦 Архив</button>
+        ${(()=>{const debtors=clients.filter(c=>!paidMap[c.id]?.paid);return debtors.length?`<button class="btn btn-sm" style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#ef4444;font-size:12px" onclick="renderGroupDebtorsModal(${JSON.stringify(debtors.map(c=>c.name))})">⚠️ Должники: ${debtors.length}</button>`:''})()}
+      </div>`;
+
+    // ── [3] ОТЧЁТ ПО ДЕТЯМ (компакт: оплата + абонемент; подробно/Excel — в полном отчёте) ──
+    const reportBlock = `
+      <div class="section-header" style="margin-top:8px"><h3>Отчёт по детям</h3>
+        <button class="btn btn-sm btn-primary" style="font-size:12px"
+          onclick="openGroupReport('${groupId}','${month}','detail')">📊 Подробно / Excel</button></div>
+      <div style="overflow-x:auto;margin-bottom:8px">
+        <table class="admin-table" style="font-size:12px;min-width:300px">
+          <thead><tr><th style="text-align:left">Ребёнок</th><th>Оплата</th><th>Абонемент</th></tr></thead>
+          <tbody>
+            ${clients.map(c=>{
+              const pay=paidMap[c.id]; const paid=pay?.paid;
+              return `<tr>
+                <td style="font-weight:500">${c.name}${c.age?`, ${c.age}л`:''}</td>
+                <td style="color:${paid?'#10b981':'#ef4444'}">${paid?fmt(pay?.amount||0)+' ✓':'—'}</td>
+                <td style="font-size:11px;color:var(--hint)">${pay?.sub_start?fmtDate(pay.sub_start)+(pay.sub_end?' – '+fmtDate(pay.sub_end):''):'—'}</td>
+              </tr>`;
+            }).join('')||'<tr><td colspan="3" class="hint">Детей пока нет</td></tr>'}
+          </tbody>
+        </table>
+      </div>`;
+
+    // ── [4] СПИСОК ДЕТЕЙ (тап по ребёнку → меню всех функций) ──
+    const listBlock = `
+      <div class="section-header" style="margin-top:16px"><h3>Список детей</h3>
+        <button class="btn btn-sm" onclick="renderAddGroupClientModal('${groupId}')">+ Ребёнок</button></div>
+      ${!clients.length?'<p class="hint">Детей пока нет</p>':
+        clients.map(c=>{
+          const pay=paidMap[c.id]; const paid=pay?.paid; const note=noteMap[c.id];
+          return `<div class="staff-card" onclick="openChildMenu('${c.id}')" style="cursor:pointer">
+            <div style="flex:1">
+              <div class="staff-fio">${c.name}</div>
+              <div class="staff-meta">${c.level} · ${fmt(c.monthly_price)} сум/мес${note?.note?' · 📝':''}</div>
+            </div>
+            <span style="font-size:11px;padding:3px 8px;border-radius:12px;
+              background:${paid?'rgba(16,185,129,.15)':'rgba(239,68,68,.15)'};color:${paid?'#10b981':'#ef4444'}">
+              ${paid?'Оплачен':'Не оплачен'}</span>
+            <span style="font-size:14px;color:var(--hint);margin-left:8px">⋯</span>
+          </div>`;
+        }).join('')}`;
+
+    // ── История занятий (правка/удаление прошлых дат) ──
+    const historyBlock = `
+      <div class="section-header" style="margin-top:24px"><h3>История занятий</h3></div>
       ${!sessionHistory.length
         ? '<p class="hint">Занятий пока не записано</p>'
         : sessionHistory.map(s=>`
           <div class="history-item">
             <div class="hi-main" style="justify-content:space-between">
               <span class="hi-client">${fmtDate(s.date)}</span>
-              <span style="font-size:13px;font-weight:600;color:${s.attended===s.total?'#10b981':'#f59e0b'}">
-                ${s.attended} / ${s.total}
-              </span>
+              <span style="font-size:13px;font-weight:600;color:${s.attended===s.total?'#10b981':'#f59e0b'}">${s.attended} / ${s.total}</span>
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">
-              <span class="hint" style="font-size:12px">
-                ${s.attended===s.total?'Все присутствовали':s.attended===0?'Никого не было':`${s.total-s.attended} отсутств.`}
-              </span>
+              <span class="hint" style="font-size:12px">${s.attended===s.total?'Все присутствовали':s.attended===0?'Никого не было':`${s.total-s.attended} отсутств.`}</span>
               <div style="display:flex;gap:6px">
                 <button class="btn btn-sm" style="font-size:11px;background:var(--card);border:1px solid var(--border)"
                   onclick="renderGroupAttendanceEdit('${groupId}','${s.date}')">✏️ Изменить</button>
@@ -3667,9 +3747,190 @@ async function renderGroupDetail(groupId) {
                   onclick="doDeleteAttendanceDay('${groupId}','${s.date}')">🗑</button>
               </div>
             </div>
-          </div>`).join('')}
+          </div>`).join('')}`;
+
+    setScreen(`<div class="app-header">
+      ${backBtn()}
+      <div class="app-title">${groupInfo.group_types?.name||'Группа'}</div>
+      <button class="btn btn-sm" style="font-size:12px" onclick="renderGroupSubstitutionModal('${groupId}')">🔄 Замена</button>
+    </div>
+    <div class="tab-content"><div class="tab-pad">
+      ${payrollBlock}
+      ${conductedBlock}
+      ${reportBlock}
+      ${listBlock}
+      ${historyBlock}
     </div></div>`);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+
+// Переключатель «кто проводил» — UPSERT/DELETE в group_sessions с conducted_role
+async function toggleConducted(trainerId, conductedRole) {
+  const g = window._gd; if (!g) return;
+  trainerId = parseInt(trainerId);
+  const key = `conducted_${trainerId}_${g.today}_${conductedRole}`;
+  if (_pending.has(key)) return;
+  _pending.add(key);
+  try {
+    // Роли независимы: тренер может вести и сушу, и воду в один день (две оплаты)
+    const roles = g.conductedMap[trainerId] || [];
+    const already = roles.includes(conductedRole);
+    if (already) {
+      await DB.removeGroupConducted(trainerId, g.groupTypeId, g.branch, g.today, conductedRole);
+      g.conductedMap[trainerId] = roles.filter(r=>r!==conductedRole);
+      if (!g.conductedMap[trainerId].length) delete g.conductedMap[trainerId];
+      toast('Отметка снята','success');
+    } else {
+      await DB.setGroupConducted(trainerId, g.groupTypeId, g.branch, g.today, g.todayHeadcount, conductedRole, g.instanceId);
+      g.conductedMap[trainerId] = [...roles, conductedRole];
+      toast('Отмечено ✅','success');
+    }
+    DB.auditLog('group_conducted', STATE.profile.id, STATE.profile.fio, trainerId, 'group_session',
+      { date:g.today, role:conductedRole, removed:already }, g.branch);
+    renderGroupDetail(g.groupId);
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+  finally { _pending.delete(key); }
+}
+
+// Меню функций по ребёнку (тап в списке детей)
+function openChildMenu(clientId) {
+  const g = window._gd; if (!g) return;
+  const c = g.clients.find(x=>String(x.id)===String(clientId)); if (!c) return;
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>${c.name}</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div style="font-size:12px;color:var(--hint);margin-bottom:12px">${c.level} · ${fmt(c.monthly_price)} сум/мес${c.age?` · ${c.age}л`:''}</div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <button class="btn btn-full btn-primary"
+        onclick="this.closest('.modal-overlay').remove();toggleGroupPayment('${g.groupId}','${c.id}',true,${c.monthly_price||0},'${g.month}')">💳 Оплата абонемента</button>
+      <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border)"
+        onclick="this.closest('.modal-overlay').remove();doToggleUnpay('${c.id}')">✕ Снять оплату</button>
+      <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border)"
+        onclick="this.closest('.modal-overlay').remove();renderGroupNoteModal('${g.groupId}','${c.id}','${encodeURIComponent(c.name)}','${g.month}','')">📝 Заметка</button>
+      <div class="form-group" style="margin:0"><label style="font-size:12px">Уровень</label>
+        <select onchange="updateGroupClientLevel('${c.id}',this.value)">
+          ${GROUP_LEVELS.map(l=>`<option ${l===c.level?'selected':''}>${l}</option>`).join('')}
+        </select></div>
+      <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border)"
+        onclick="this.closest('.modal-overlay').remove();renderEditGroupClientModal('${c.id}','${encodeURIComponent(c.name)}',${c.age||0},${c.monthly_price||0},'${g.groupId}')">✏️ Редактировать</button>
+      <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border)"
+        onclick="this.closest('.modal-overlay').remove();renderChildAttendanceHistory('${c.id}','${encodeURIComponent(c.name)}')">📅 История посещений</button>
+      <button class="btn btn-full btn-danger"
+        onclick="this.closest('.modal-overlay').remove();archiveGroupClientConfirm('${c.id}','${encodeURIComponent(c.name)}','${g.groupId}')">📦 Архив / Удалить</button>
+    </div>
+  </div>`;
+  document.body.appendChild(m);
+}
+
+// Снять оплату за текущий месяц без модала суммы
+async function doToggleUnpay(clientId) {
+  const g = window._gd; if (!g) return;
+  try {
+    await DB.setGroupPayment(g.groupId, clientId, g.month, 0, false, null, null, g.instanceId||null);
+    toast('Оплата снята','success');
+    renderGroupDetail(g.groupId);
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+
+// История посещений конкретного ребёнка
+async function renderChildAttendanceHistory(clientId, nameEnc) {
+  const name = decodeURIComponent(nameEnc);
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal"><div class="modal-header"><h3>Посещения — ${name}</h3>
+    <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div id="cah-body"><div class="center-screen"><div class="spinner"></div></div></div></div>`;
+  document.body.appendChild(m);
+  try {
+    const hist = await DB.getGroupClientAttendanceHistory(clientId);
+    const body = document.getElementById('cah-body');
+    if (!hist.length) { body.innerHTML='<p class="hint">Записей нет</p>'; return; }
+    const present = hist.filter(h=>h.attended).length;
+    body.innerHTML=`<div style="font-size:12px;color:var(--hint);margin-bottom:10px">Был: <b>${present}</b> из ${hist.length}</div>
+      <div style="display:flex;flex-direction:column;gap:4px">
+        ${hist.map(h=>`<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">
+          <span style="font-size:13px">${fmtDate(h.session_date)}</span>
+          <span style="font-size:13px;color:${h.attended?'#10b981':'#ef4444'}">${h.attended?'✓ был':'✕ не был'}</span>
+        </div>`).join('')}
+      </div>`;
+  } catch(e) { document.getElementById('cah-body').innerHTML='<p class="hint">Ошибка</p>'; console.error(e); }
+}
+
+// Меню функций по тренеру (только admin/senior_trainer)
+function openTrainerMenu(tgId) {
+  const g = window._gd; if (!g || !g.canPayroll) return;
+  const t = g.members.find(x=>String(x.id)===String(tgId)); if (!t) return;
+  const fio = t.profiles?.fio||'—';
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>${fio}</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div style="font-size:12px;color:var(--hint);margin-bottom:12px">${t.role||'тренер'} · ${t.rate_type==='percent'?(t.rate_value||0)+'%':t.rate_type==='flat'?fmt(t.rate_value||75000)+' сум/зан':'по явке'}</div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <button class="btn btn-full btn-primary"
+        onclick="this.closest('.modal-overlay').remove();renderTrainerRateModal('${t.id}','${t.rate_type||'percent'}',${t.rate_value||0})">💰 Ставка / процент</button>
+      <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border)"
+        onclick="this.closest('.modal-overlay').remove();renderLeaderFeeModal('${g.groupId}','${encodeURIComponent(t.leader_name||'')}',${t.leader_fee_percent||0})">👑 Руководитель группы</button>
+      <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border)"
+        onclick="this.closest('.modal-overlay').remove();renderGroupSubstitutionModal('${g.groupId}')">🔄 Замена</button>
+      <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border)"
+        onclick="this.closest('.modal-overlay').remove();renderTrainerGroupSessions('${t.trainer_id}','${encodeURIComponent(fio)}')">📅 Его занятия за месяц</button>
+      <button class="btn btn-full btn-danger"
+        onclick="this.closest('.modal-overlay').remove();doUnassignGroup(${t.id})">Убрать из группы</button>
+    </div>
+  </div>`;
+  document.body.appendChild(m);
+}
+
+// Модал правки ставки/процента тренера в группе
+function renderTrainerRateModal(tgId, rateType, rateValue) {
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>Ставка тренера</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="form-group"><label>Тип</label>
+      <select id="tr-type" onchange="document.getElementById('tr-label').textContent=this.value==='percent'?'Процент (%)':'Сумма за занятие (сум)'">
+        <option value="percent" ${rateType==='percent'?'selected':''}>Процент (%)</option>
+        <option value="flat" ${rateType==='flat'?'selected':''}>Ставка за занятие</option>
+      </select></div>
+    <div class="form-group"><label id="tr-label">${rateType==='percent'?'Процент (%)':'Сумма за занятие (сум)'}</label>
+      <input id="tr-val" type="number" min="0" value="${rateValue||0}"></div>
+    <button class="btn btn-primary btn-full" onclick="doSaveTrainerRateMenu('${tgId}')">Сохранить</button>
+  </div>`;
+  document.body.appendChild(m);
+}
+async function doSaveTrainerRateMenu(tgId) {
+  const type = document.getElementById('tr-type')?.value||'percent';
+  const val  = parseFloat(document.getElementById('tr-val')?.value)||0;
+  try {
+    await DB.updateTrainerGroupRate(tgId, type, val);
+    document.querySelector('.modal-overlay')?.remove();
+    toast('✅ Ставка сохранена','success');
+    invalidateCache('groupTypes');
+    if (window._gd) renderGroupDetail(window._gd.groupId);
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+// Занятия тренера за текущий месяц (из меню тренера)
+async function renderTrainerGroupSessions(trainerId, fioEnc) {
+  const fio = decodeURIComponent(fioEnc);
+  const now = new Date();
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal"><div class="modal-header"><h3>Занятия — ${fio}</h3>
+    <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div id="tgs-body"><div class="center-screen"><div class="spinner"></div></div></div></div>`;
+  document.body.appendChild(m);
+  try {
+    const sessions = await DB.getGroupSessions(parseInt(trainerId), now.getFullYear(), now.getMonth()+1);
+    const body = document.getElementById('tgs-body');
+    if (!sessions.length) { body.innerHTML='<p class="hint">Занятий за месяц нет</p>'; return; }
+    body.innerHTML=`<div style="font-size:12px;color:var(--hint);margin-bottom:8px">Всего: <b>${sessions.length}</b></div>
+      <div style="display:flex;flex-direction:column;gap:4px">
+        ${sessions.map(s=>`<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">
+          <span style="font-size:13px">${fmtDate(s.session_date)}</span>
+          <span style="font-size:12px;color:var(--hint)">${s.conducted_role||(s.group_types?.name||'')} · ${s.headcount||0} дет.</span>
+        </div>`).join('')}
+      </div>`;
+  } catch(e) { document.getElementById('tgs-body').innerHTML='<p class="hint">Ошибка</p>'; console.error(e); }
 }
 
 // ============================================================
@@ -5195,7 +5456,7 @@ async function loadGroupsList(monthStr) {
           </div>
           <div style="display:flex;gap:6px;margin-left:8px">
             ${gt.type==='children'?`<button class="btn btn-sm btn-primary" style="font-size:12px"
-              onclick="renderGroupMonthReport('${reportId}','${ms}')">📊 Отчёт</button>`:''}
+              onclick="openGroupReport('${reportId}','${ms}','list')">📊 Отчёт</button>`:''}
             <button class="btn btn-sm" style="font-size:12px;background:rgba(124,58,237,.15);color:#a78bfa"
               onclick="openGroupPersonnel('${key}','${ms}')">👥 Персонал</button>
           </div>
@@ -5546,6 +5807,25 @@ async function doUnassignGroup(id) {
 // ОТЧЁТ ПО ДЕТСКОЙ ГРУППЕ + УТВЕРЖДЕНИЕ ЗП + ЗАМЕНЫ
 // ══════════════════════════════════════════════════════════════
 
+// Открыть отчёт, запомнив точку возврата по роли/источнику.
+// kind: 'detail' — назад в карточку группы (открывали из неё);
+//       'list'   — назад в список групп вкладки по роли (координатор/старший/доп.филиалы).
+function openGroupReport(groupId, monthStr, kind='list') {
+  const role = STATE.profile?.role;
+  let backFn;
+  if (kind==='detail') {
+    backFn = ()=>renderGroupDetail(groupId);
+  } else if (role==='admin'||role==='ceo') {
+    backFn = ()=>{ renderAdminApp(); adminTab('groups'); };
+  } else if (role==='senior_trainer') {
+    backFn = ()=>{ renderSeniorApp(); seniorTab('groups'); };
+  } else {
+    backFn = ()=>renderTrainerShell('groups');
+  }
+  navPush(backFn);
+  renderGroupMonthReport(groupId, monthStr);
+}
+
 async function renderGroupMonthReport(groupId, monthStr) {
   // monthStr = 'YYYY-MM-01'
   const isAdmin = ['admin','ceo'].includes(STATE.profile.role);
@@ -5583,11 +5863,12 @@ async function renderGroupMonthReport(groupId, monthStr) {
     const canSeePayroll  = (isAdmin || STATE.profile.role==='senior_trainer') && isArtSwimGroup;
 
     const monthLabel = new Date(monthStr).toLocaleDateString('ru-RU',{month:'long',year:'numeric'});
-    const backFn = `renderGroupDetail('${groupId}')`;
-
-    setupBack(new Function(backFn));
+    // Кнопка «назад» — на точку входа, которую выставил вызывающий (navPush).
+    // Fallback goBack по роли. НЕ хардкодим renderGroupDetail — иначе координатора/старшего
+    // из списка групп выкидывало в тренерский экран детали, который он не открывал.
+    setupBack(goBack);
     setScreen(`<div class="app-header">
-      <button class="btn-icon" onclick="${backFn}">←</button>
+      ${backBtn()}
       <div class="app-title">Отчёт группы</div>
       <div style="display:flex;gap:6px">
         <button class="btn btn-sm btn-primary" onclick="doExportChildGroupExcel('${groupId}','${monthStr}')">⬇️ Excel</button>

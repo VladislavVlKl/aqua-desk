@@ -578,6 +578,14 @@ async unassignTrainerGroup(id) {
       .map(([date,v])=>({date,...v}));
   },
 
+  // История посещений конкретного ребёнка (последние записи)
+  async getGroupClientAttendanceHistory(groupClientId) {
+    const {data,error} = await sb().from('group_attendance')
+      .select('session_date,attended').eq('group_client_id',groupClientId)
+      .order('session_date',{ascending:false}).limit(120);
+    if (error) throw error; return data||[];
+  },
+
   // ─── GROUP PAYMENTS ───────────────────────────
   async getGroupPayments(groupId, month) {
     const {data,error} = await sb().from('group_payments')
@@ -681,11 +689,14 @@ async unassignTrainerGroup(id) {
             .eq('group_instance_id',instanceId).is('subscription_end',null)
         : sb().from('trainer_groups').select('*, profiles(fio), group_types(name,type)')
             .eq('id',groupId).is('subscription_end',null),
-      // Занятия (для ставки по сессиям) — все тренеры instance за месяц
+      // Занятия (для ставки по сессиям) — строго по этому инстансу.
+      // Фильтр по group_instance_id, чтобы занятия того же тренера в ДРУГОЙ группе
+      // не попадали в чужой отчёт. Fallback по trainer_id — для старых записей без
+      // instance (в т.ч. взрослые headcount-записи logGroupSession).
       instanceId
         ? sb().from('group_sessions').select('*')
             .gte('session_date',month).lt('session_date',nextMonthStr)
-            .in('trainer_id',instanceTrainerIds)
+            .or(`group_instance_id.eq.${instanceId},and(group_instance_id.is.null,trainer_id.in.(${instanceTrainerIds.join(',')||0}))`)
         : sb().from('group_sessions').select('*')
             .gte('session_date',month).lt('session_date',nextMonthStr)
             .eq('trainer_id', tgRow?.trainer_id),
@@ -762,6 +773,40 @@ async unassignTrainerGroup(id) {
       .select('*, group_types(name,type,billing_model)')
       .eq('trainer_id',trainerId).gte('session_date',from).lt('session_date',to)
       .order('session_date',{ascending:false});
+    if (error) throw error; return data||[];
+  },
+
+  // ─── КТО ПРОВОДИЛ ДЕТСКОЕ ЗАНЯТИЕ (conducted_role) ──────────
+  // Детский флоу: каждое проведённое занятие тренером инстанса = строка в group_sessions
+  // с conducted_role IN ('суша','вода','процент'). NULL = взрослая запись (logGroupSession).
+  async getGroupConductedByDate(groupInstanceId, date) {
+    const {data,error} = await sb().from('group_sessions')
+      .select('id,trainer_id,group_type_id,branch,session_date,headcount,conducted_role,group_instance_id')
+      .eq('group_instance_id', groupInstanceId).eq('session_date', date)
+      .not('conducted_role','is',null);
+    if (error) throw error; return data||[];
+  },
+  async setGroupConducted(trainerId, groupTypeId, branch, date, headcount, conductedRole, groupInstanceId) {
+    const {data,error} = await sb().from('group_sessions')
+      .upsert({trainer_id:trainerId, group_type_id:groupTypeId, branch,
+               session_date:date, headcount,
+               conducted_role:conductedRole, group_instance_id:groupInstanceId||null},
+              {onConflict:'trainer_id,session_date,group_type_id,branch,conducted_role'})
+      .select().single();
+    if (error) throw error; return data;
+  },
+  async removeGroupConducted(trainerId, groupTypeId, branch, date, conductedRole) {
+    const {error} = await sb().from('group_sessions').delete()
+      .eq('trainer_id',trainerId).eq('group_type_id',groupTypeId).eq('branch',branch)
+      .eq('session_date',date).eq('conducted_role',conductedRole);
+    if (error) throw error;
+  },
+  // Активные группы филиала (строки trainer_groups) — для формы «второй тренер» у старшего
+  async getActiveGroupsByBranch(branch) {
+    const {data,error} = await sb().from('trainer_groups')
+      .select('id, group_type_id, branch, group_instance_id, role, profiles(fio), group_types(name,type)')
+      .eq('branch', branch).is('subscription_end',null)
+      .order('group_type_id');
     if (error) throw error; return data||[];
   },
 
