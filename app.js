@@ -3689,7 +3689,7 @@ async function renderGroupDetail(groupId) {
 
     // ── [3] ОТЧЁТ ПО ДЕТЯМ (компакт: оплата + абонемент; подробно/Excel — в полном отчёте) ──
     const reportBlock = `
-      <div class="section-header" style="margin-top:8px"><h3>Отчёт по детям</h3>
+      <div class="section-header" style="margin-top:0;border-top:1px solid var(--border);padding-top:16px"><h3>Отчёт по детям</h3>
         <button class="btn btn-sm btn-primary" style="font-size:12px"
           onclick="openGroupReport('${groupId}','${month}','detail')">📊 Подробно / Excel</button></div>
       <div style="overflow-x:auto;margin-bottom:8px">
@@ -3710,7 +3710,7 @@ async function renderGroupDetail(groupId) {
 
     // ── [4] СПИСОК ДЕТЕЙ (тап по ребёнку → меню всех функций) ──
     const listBlock = `
-      <div class="section-header" style="margin-top:16px"><h3>Список детей</h3>
+      <div class="section-header" style="margin-top:0;border-top:1px solid var(--border);padding-top:16px"><h3>Список детей</h3>
         <button class="btn btn-sm" onclick="renderAddGroupClientModal('${groupId}')">+ Ребёнок</button></div>
       ${!clients.length?'<p class="hint">Детей пока нет</p>':
         clients.map(c=>{
@@ -3729,7 +3729,7 @@ async function renderGroupDetail(groupId) {
 
     // ── История занятий (правка/удаление прошлых дат) ──
     const historyBlock = `
-      <div class="section-header" style="margin-top:24px"><h3>История занятий</h3></div>
+      <div class="section-header" style="margin-top:0;border-top:1px solid var(--border);padding-top:16px"><h3>История занятий</h3></div>
       ${!sessionHistory.length
         ? '<p class="hint">Занятий пока не записано</p>'
         : sessionHistory.map(s=>`
