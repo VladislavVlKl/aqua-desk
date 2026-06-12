@@ -1367,6 +1367,29 @@ async unassignTrainerGroup(id) {
     };
   },
 
+  // Данные для CEO-аналитики: оплаты групп (тек/прошлый месяц), клиенты, абонементы, слоты
+  async getCeoAnalytics(year, month) {
+    const py = month===1 ? year-1 : year;
+    const pm = month===1 ? 12 : month-1;
+    const monthDay  = `${year}-${String(month).padStart(2,'0')}-01`;
+    const pMonthDay = `${py}-${String(pm).padStart(2,'0')}-01`;
+    const [cgp, pgp, cl, subs, slots] = await Promise.all([
+      sb().from('group_payments').select('group_id,amount,paid,trainer_groups(trainer_id)').eq('month',monthDay),
+      sb().from('group_payments').select('group_id,amount,paid').eq('month',pMonthDay),
+      sb().from('clients').select('id,fio,balance,subscription_end,trainer_id').eq('is_archived',false),
+      sb().from('subscriptions').select('client_id,start_date'),
+      sb().from('schedule_slots').select('day_of_week,start_time,end_time,slot_type').eq('active',true),
+    ]);
+    return {
+      groupPayments:     cgp.data  ||[],
+      prevGroupPayments: pgp.data  ||[],
+      clients:           cl.data   ||[],
+      subscriptions:     subs.data ||[],
+      slots:             slots.data||[],
+      prevMonth: { year:py, month:pm },
+    };
+  },
+
   // ─── REPORTS ─────────────────────────────────
   async getSummary(year, month, branch=null) {
     const from    = new Date(year,month-1,1).toISOString();

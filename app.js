@@ -1592,7 +1592,8 @@ async function renderAddSlotModal() {
   const {mon} = getWeekBounds(_schedWeekOffset);
   const weekDates = DAYS_FULL.map((d,i)=>{
     const date=new Date(mon); date.setDate(mon.getDate()+i);
-    return `<option value="${date.toISOString().slice(0,10)}">${d} (${date.getDate()})</option>`;
+    const ds=[date.getFullYear(),String(date.getMonth()+1).padStart(2,'0'),String(date.getDate()).padStart(2,'0')].join('-');
+    return `<option value="${ds}">${d} (${date.getDate()})</option>`;
   }).join('');
 
   const m=el('div','modal-overlay');
@@ -7296,6 +7297,7 @@ async function renderCeoApp() {
     <div id="tab-content" class="tab-content"></div>
     <nav class="bottom-nav">
       <button class="nav-btn" onclick="ceoTab('dashboard')"><span>📊</span>Дашборд</button>
+      <button class="nav-btn" onclick="ceoTab('analytics')"><span>📈</span>Аналитика</button>
       <button class="nav-btn" onclick="ceoTab('salary')"><span>💰</span>ЗП</button>
       <button class="nav-btn" onclick="ceoTab('groups')"><span>🏊</span>Группы</button>
       <button class="nav-btn" onclick="ceoTab('ops')"><span>⚙️</span>Операционка</button>
@@ -7306,13 +7308,31 @@ async function renderCeoApp() {
 }
 
 function ceoTab(tab) {
-  const tabs = ['dashboard','salary','groups','ops','plans'];
+  const tabs = ['dashboard','analytics','salary','groups','ops','plans'];
   $$('.nav-btn').forEach((b,i)=>b.classList.toggle('active',tabs[i]===tab));
   if (tab==='dashboard') renderCeoDashboard();
+  if (tab==='analytics') renderCeoAnalytics();
   if (tab==='salary')    renderCeoSalary();
   if (tab==='groups')    renderCeoGroups();
   if (tab==='ops')       renderCeoOps();
   if (tab==='plans')     renderCeoPlans();
+}
+
+// ЗП всех тренеров за месяц из данных getSummary → [{p, sal}]
+function ceoFotRows(data) {
+  const {groupPayouts=[],groupSubstitutions=[],ptSubstitutions=[]} = data;
+  const adjMap={}; (data.adjustments||[]).forEach(a=>{adjMap[a.trainer_id]=a;});
+  return (data.profiles||[]).map(p=>({p, sal: calcSalary({
+    workouts:[...(data.workouts||[]).filter(w=>w.trainer_id===p.id),
+              ...(ptSubstitutions||[]).filter(w=>w.trainer_id===p.id)],
+    duties:(data.duties||[]).filter(d=>d.trainer_id===p.id),
+    trainerGroups:(data.trainerGroups||[]).filter(tg=>tg.trainer_id===p.id),
+    groupSessions:(data.groupSessions||[]).filter(gs=>gs.trainer_id===p.id),
+    trialSessions:(data.trialSessions||[]).filter(t=>t.trainer_id===p.id),
+    adjustment:adjMap[p.id]||null,
+    groupPayouts:groupPayouts.filter(gp=>gp.trainer_id===p.id),
+    groupSubstitutions, trainerId:p.id,
+  })}));
 }
 
 // ── ДАШБОРД — главный экран ────────────────────────────────────
@@ -7336,21 +7356,7 @@ async function renderCeoDashboard() {
     ]);
 
     // Финансы
-    const {groupPayouts=[],groupSubstitutions=[],ptSubstitutions=[]} = summaryData;
-    const adjMap={}; (summaryData.adjustments||[]).forEach(a=>{adjMap[a.trainer_id]=a;});
-    const totalFot = (summaryData.profiles||[]).reduce((s,p)=>{
-      return s + calcSalary({
-        workouts:[...(summaryData.workouts||[]).filter(w=>w.trainer_id===p.id),
-                  ...(ptSubstitutions||[]).filter(w=>w.trainer_id===p.id)],
-        duties:(summaryData.duties||[]).filter(d=>d.trainer_id===p.id),
-        trainerGroups:(summaryData.trainerGroups||[]).filter(tg=>tg.trainer_id===p.id),
-        groupSessions:(summaryData.groupSessions||[]).filter(gs=>gs.trainer_id===p.id),
-        trialSessions:(summaryData.trialSessions||[]).filter(t=>t.trainer_id===p.id),
-        adjustment:adjMap[p.id]||null,
-        groupPayouts:groupPayouts.filter(gp=>gp.trainer_id===p.id),
-        groupSubstitutions, trainerId:p.id,
-      }).total;
-    },0);
+    const totalFot = ceoFotRows(summaryData).reduce((s,r)=>s+r.sal.total,0);
 
     // Клиенты
     const activeClients  = allClients.filter(c=>c.balance>0).length;
@@ -7439,23 +7445,7 @@ async function renderCeoSalary() {
     body.innerHTML=`<div class="center-screen"><div class="spinner"></div></div>`;
     try {
       const data = await DB.getSummary(year, month, null);
-      const {groupPayouts=[],groupSubstitutions=[],ptSubstitutions=[]} = data;
-      const adjMap={}; (data.adjustments||[]).forEach(a=>{adjMap[a.trainer_id]=a;});
-
-      const rows = (data.profiles||[]).map(p=>{
-        const sal = calcSalary({
-          workouts:[...(data.workouts||[]).filter(w=>w.trainer_id===p.id),
-                    ...(ptSubstitutions||[]).filter(w=>w.trainer_id===p.id)],
-          duties:(data.duties||[]).filter(d=>d.trainer_id===p.id),
-          trainerGroups:(data.trainerGroups||[]).filter(tg=>tg.trainer_id===p.id),
-          groupSessions:(data.groupSessions||[]).filter(gs=>gs.trainer_id===p.id),
-          trialSessions:(data.trialSessions||[]).filter(t=>t.trainer_id===p.id),
-          adjustment:adjMap[p.id]||null,
-          groupPayouts:groupPayouts.filter(gp=>gp.trainer_id===p.id),
-          groupSubstitutions, trainerId:p.id,
-        });
-        return {p, sal};
-      }).filter(r=>r.sal.total>0).sort((a,b)=>b.sal.total-a.sal.total);
+      const rows = ceoFotRows(data).filter(r=>r.sal.total>0).sort((a,b)=>b.sal.total-a.sal.total);
 
       const totalFot = rows.reduce((s,r)=>s+r.sal.total,0);
 
