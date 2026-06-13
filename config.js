@@ -51,6 +51,27 @@ const SLOT_COLORS = {
   group: { bg:'rgba(16,185,129,0.2)', color:'#10b981', label:'Группа'    },
 };
 
+// ─── СМЕНЫ ДЕЖУРСТВ ──────────────────────────
+// Пресеты времени по филиалу: будни / выходные, утро/день/вечер.
+// Ключи филиалов = name из таблицы branches. Филиалы без пресета
+// (напр. Chekhov Bukhara) → только ручной ввод.
+const DUTY_SHIFTS = {
+  'Chekhov Light': {
+    weekday: { morning:['07:00','13:00'], day:['13:00','18:00'], evening:['18:00','23:00'] },
+    weekend: { morning:['09:00','15:30'],                        evening:['15:30','22:00'] },
+  },
+  'Chekhov Sport': {
+    weekday: { morning:['07:00','12:00'], day:['12:00','17:00'], evening:['17:00','23:00'] },
+    weekend: { morning:['09:00','15:30'],                        evening:['15:30','22:00'] },
+  },
+  'Chekhov Moms': {
+    weekday: { morning:['07:00','12:00'], day:['12:00','17:00'], evening:['17:00','21:00'] },
+    weekend: { morning:['09:00','12:00'], day:['12:00','17:00'], evening:['17:00','21:00'] },
+  },
+};
+const SHIFT_ORDER  = ['morning','day','evening'];
+const SHIFT_LABELS = { morning:'Утренняя', day:'Дневная', evening:'Вечерняя' };
+
 const EVENT_TYPES = {
   competition:   '🏆 Соревнование',
   qualification: '📚 Квалификация',

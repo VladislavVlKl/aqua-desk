@@ -153,6 +153,52 @@ function branchSelect(id, branches) {
   return `<div class="form-group"><label>Филиал</label>
     <select id="${id}">${branches.map(b=>`<option>${b}</option>`).join('')}</select></div>`;
 }
+
+// ─── СМЕНЫ ДЕЖУРСТВ ──────────────────────────
+// Селект «Смена» автозаполняет duty-start/duty-end по DUTY_SHIFTS.
+// branchId — id поля филиала ('duty-branch' на Главной, 'sel-branch' в табе Дежурства).
+function dutyShiftSelect(branchId) {
+  return `<div class="form-group"><label>Смена</label>
+    <select id="duty-shift" onchange="applyDutyShift('${branchId}')">
+      <option value="">Ручной ввод</option>
+    </select></div>`;
+}
+function _dutyShiftCfg(branchId) {
+  const branch = document.getElementById(branchId)?.value || STATE.profile?.branches?.[0] || '';
+  const v = document.getElementById('duty-start')?.value;
+  const d = v ? new Date(v) : new Date();
+  const isWeekend = d.getDay()===0 || d.getDay()===6;
+  return (typeof DUTY_SHIFTS!=='undefined' && DUTY_SHIFTS[branch])
+    ? DUTY_SHIFTS[branch][isWeekend?'weekend':'weekday'] : null;
+}
+function refreshDutyShiftOptions(branchId) {
+  const sel = document.getElementById('duty-shift'); if (!sel) return;
+  const cfg = _dutyShiftCfg(branchId), prev = sel.value;
+  let html = '<option value="">Ручной ввод</option>';
+  if (cfg) for (const k of SHIFT_ORDER) if (cfg[k])
+    html += `<option value="${k}">${SHIFT_LABELS[k]} · ${cfg[k][0]}–${cfg[k][1]}</option>`;
+  sel.innerHTML = html;
+  if ([...sel.options].some(o=>o.value===prev)) sel.value = prev;
+}
+function applyDutyShift(branchId) {
+  const sel = document.getElementById('duty-shift'); if (!sel||!sel.value) return;
+  const t = _dutyShiftCfg(branchId)?.[sel.value]; if (!t) return;
+  const startEl = document.getElementById('duty-start');
+  const endEl   = document.getElementById('duty-end');
+  const date = (startEl?.value || new Date().toISOString().slice(0,16)).slice(0,10);
+  if (startEl) startEl.value = `${date}T${t[0]}`;
+  if (endEl)   endEl.value   = `${date}T${t[1]}`;
+}
+function wireDutyShift(branchId) {
+  refreshDutyShiftOptions(branchId);
+  document.getElementById(branchId)?.addEventListener('change', () => {
+    refreshDutyShiftOptions(branchId); applyDutyShift(branchId);
+  });
+  document.getElementById('duty-start')?.addEventListener('change', () => {
+    refreshDutyShiftOptions(branchId);
+    if (document.getElementById('duty-shift')?.value) applyDutyShift(branchId);
+  });
+}
 // ============================================================
 // SECTION: CORE:UI — setScreen, toast, setupBack, navPush, goBack
 // ============================================================
@@ -392,7 +438,7 @@ function renderTrainerShell(tab) {
       <div><div class="app-title">🏋️ AquaDesk</div>
         <div class="app-sub">${STATE.profile.fio}</div></div>
     <div style="display:flex;gap:6px;align-items:center">
-      <button class="btn-icon" id="note-badge" onclick="switchTab('clients')" style="display:none">📝</button>
+      <button class="btn-icon" id="note-badge" onclick="switchTab('clients')" style="position:relative">📝</button>
       <button class="btn-icon" onclick="openSchedule()">📅</button>
       <button class="btn-icon" onclick="renderHelpModal()">?</button>
       <button class="btn-icon" onclick="renderTrainerEditProfile()">👤</button>
@@ -435,18 +481,18 @@ async function checkNoteBadge() {
     const pending = Object.values(overdueMap).reduce((s,n)=>s+n, 0);
     const badge = document.getElementById('note-badge');
     if (badge) {
-      badge.style.display = pending > 0 ? '' : 'none';
-      badge.textContent   = pending > 0 ? `📝 ${pending}` : '📝';
       if (pending > 0) {
         window._overdueMap = overdueMap;
+        badge.innerHTML = `📝<span style="position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;border-radius:50%;font-size:9px;width:16px;height:16px;line-height:16px;text-align:center;display:inline-block">${pending}</span>`;
         badge.onclick = () => {
-          if (window._clientsList?.length) {
-            renderOverdueNotesModal(window._overdueMap, window._clientsList);
-          } else {
-            switchTab('clients');
-          }
+          if (window._clientsList?.length) renderOverdueNotesModal(window._overdueMap, window._clientsList);
+          else switchTab('clients');
         };
+      } else {
+        badge.innerHTML = '📝';
+        badge.onclick = () => switchTab('clients');
       }
+      badge.style.cssText = 'display:inline-flex;position:relative';
     }
   } catch(e) { /* тихо */ }
 }
@@ -551,6 +597,8 @@ async function renderHomeTab() {
     <!-- БЛОК: Дежурство -->
     <div class="home-block" style="margin-top:16px">
       <div class="home-block-title">⏱ Запись дежурства</div>
+      ${branchSelect('duty-branch',branches)}
+      ${dutyShiftSelect('duty-branch')}
       <div class="form-group" style="display:flex;gap:10px">
         <div style="flex:1"><label>Начало</label>
           <input type="datetime-local" id="duty-start" value="${defStart}" step="3600"
@@ -559,7 +607,6 @@ async function renderHomeTab() {
           <input type="datetime-local" id="duty-end" value="${defEnd.slice(0,13)+':00'}" step="3600"
             onchange="this.value=this.value.slice(0,13)+':00'"></div>
       </div>
-      ${branchSelect('duty-branch',branches)}
       <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border)"
         onclick="doLogDutyHome()">Записать дежурство</button>
       ${duties.length?`<div style="margin-top:10px">
@@ -576,6 +623,7 @@ async function renderHomeTab() {
 
   </div>`;
   renderDateFields();
+  wireDutyShift('duty-branch');
   // Закрывать дропдаун при касании/клике вне поля поиска
   const _closeWkDrop = (e) => {
     const drop = document.getElementById('wk-client-drop');
@@ -726,11 +774,12 @@ async function renderClientsTab() {
   if (noteBadge) {
     if (pendingNotes > 0) {
       noteBadge.innerHTML = `📝<span style="position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;border-radius:50%;font-size:9px;width:16px;height:16px;line-height:16px;text-align:center;display:inline-block">${pendingNotes}</span>`;
-      noteBadge.style.cssText = 'display:inline-flex;position:relative';
       noteBadge.onclick = () => renderOverdueNotesModal(overdueMap, clients);
     } else {
-      noteBadge.style.display = 'none';
+      noteBadge.innerHTML = '📝';
+      noteBadge.onclick = () => switchTab('clients');
     }
+    noteBadge.style.cssText = 'display:inline-flex;position:relative';
   }
 
   $('#tab-content').innerHTML=`<div class="tab-pad">
@@ -1888,7 +1937,9 @@ async function renderDutyTab() {
 
   $('#tab-content').innerHTML=`<div class="tab-pad">
     <h3>Записать дежурство</h3>
-    <p class="hint" style="margin-bottom:16px">Введите фактическое время начала и окончания.</p>
+    <p class="hint" style="margin-bottom:16px">Выберите смену или введите время вручную.</p>
+    ${branchSelect('sel-branch',branches)}
+    ${dutyShiftSelect('sel-branch')}
     <div class="form-group" style="display:flex;gap:10px">
       <div style="flex:1"><label>Начало</label>
         <input type="datetime-local" id="duty-start" value="${defStart}" step="3600"
@@ -1897,7 +1948,6 @@ async function renderDutyTab() {
         <input type="datetime-local" id="duty-end" value="${defEnd.slice(0,13)+':00'}" step="3600"
           onchange="this.value=this.value.slice(0,13)+':00'"></div>
     </div>
-    ${branchSelect('sel-branch',branches)}
     <button class="btn btn-primary btn-full" onclick="doLogDuty()">Записать</button>
     <h4 style="margin-top:20px">Дежурства в этом месяце</h4>
     ${!duties.length?'<p class="hint">Нет записей</p>':duties.map(d=>{
@@ -1921,6 +1971,7 @@ async function renderDutyTab() {
       </div>`;
     }).join('')}
   </div>`;
+  wireDutyShift('sel-branch');
 }
 async function doLogDuty() {
   const start=document.getElementById('duty-start')?.value;
