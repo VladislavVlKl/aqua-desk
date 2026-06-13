@@ -492,11 +492,13 @@ async unassignTrainerGroup(id) {
       .select('*').eq('group_id',groupId).eq('is_active',true).order('name');
     if (error) throw error; return data||[];
   },
-  async addGroupClient(groupId, name, age, monthlyPrice, startDate, groupInstanceId=null) {
+  async addGroupClient(groupId, name, age, monthlyPrice, startDate, groupInstanceId=null, subgroup='') {
+    // subgroup: '' = основная подгруппа (колонка group_clients.subgroup, NOT NULL DEFAULT '')
     const {data,error} = await sb().from('group_clients')
       .insert({group_id:groupId, name, age:age||null,
                monthly_price:monthlyPrice||0, start_date:startDate,
-               group_instance_id: groupInstanceId})
+               group_instance_id: groupInstanceId,
+               subgroup: subgroup||''})
       .select().single();
     if (error) throw error; return data;
   },
@@ -642,6 +644,40 @@ async unassignTrainerGroup(id) {
       .eq('month', month);
     if (error) throw error; return data||[];
   },
+  // Премия/штраф к авто-расчёту детской группы. payout_value пишем = итог для аудита,
+  // но в расчётах он больше НЕ читается (ЗП считается авто через calcChildGroupPayroll).
+  async saveGroupAdjustment(groupId, trainerId, month, bonus, penalty, finalForAudit, savedBy, note='') {
+    return DB.setGroupTrainerPayout(groupId, trainerId, month, 'fixed', finalForAudit, savedBy, note, bonus, penalty);
+  },
+  // ─── ИСТОРИЯ СТАВОК (trainer_group_rate_history) ───
+  // Действующая ставка на дату D = последняя запись с effective_from <= D;
+  // нет записей → fallback trainer_groups.rate_type/rate_value.
+  // try/catch fallback []: до применения миграции таблицы нет — код не должен падать.
+  async getRateHistory(trainerGroupIds, monthStr) {
+    if (!trainerGroupIds?.length) return [];
+    try {
+      const next = new Date(monthStr); next.setMonth(next.getMonth()+1);
+      const {data,error} = await sb().from('trainer_group_rate_history')
+        .select('*').in('trainer_group_id', trainerGroupIds)
+        .lt('effective_from', next.toISOString().slice(0,10))
+        .order('effective_from',{ascending:true});
+      if (error) throw error; return data||[];
+    } catch(e) { console.warn('[getRateHistory]', e?.message||e); return []; }
+  },
+  async getRateHistoryByTg(tgId, limit=5) {
+    try {
+      const {data,error} = await sb().from('trainer_group_rate_history')
+        .select('*').eq('trainer_group_id', tgId)
+        .order('effective_from',{ascending:false}).limit(limit);
+      if (error) throw error; return data||[];
+    } catch(e) { console.warn('[getRateHistoryByTg]', e?.message||e); return []; }
+  },
+  async addRateHistory(trainerGroupId, rateType, rateValue, effectiveFrom, createdBy) {
+    const {error} = await sb().from('trainer_group_rate_history')
+      .insert({trainer_group_id:trainerGroupId, rate_type:rateType, rate_value:rateValue,
+               effective_from:effectiveFrom, created_by:createdBy});
+    if (error) throw error;
+  },
   // Отчёт по детской группе за месяц (для старшего/админа)
   async getGroupMonthReport(groupId, month) {
     const nextMonth = new Date(month); nextMonth.setMonth(nextMonth.getMonth()+1);
@@ -780,25 +816,29 @@ async unassignTrainerGroup(id) {
   // Детский флоу: каждое проведённое занятие тренером инстанса = строка в group_sessions
   // с conducted_role IN ('суша','вода','процент'). NULL = взрослая запись (logGroupSession).
   async getGroupConductedByDate(groupInstanceId, date) {
+    // select('*') — безопасно и до миграции subgroup (явный список колонок упал бы)
     const {data,error} = await sb().from('group_sessions')
-      .select('id,trainer_id,group_type_id,branch,session_date,headcount,conducted_role,group_instance_id')
+      .select('*')
       .eq('group_instance_id', groupInstanceId).eq('session_date', date)
       .not('conducted_role','is',null);
     if (error) throw error; return data||[];
   },
-  async setGroupConducted(trainerId, groupTypeId, branch, date, headcount, conductedRole, groupInstanceId) {
+  async setGroupConducted(trainerId, groupTypeId, branch, date, headcount, conductedRole, groupInstanceId, subgroup='') {
+    // subgroup ВСЕГДА в payload ('' = основная) — уникальный индекс из 6 колонок
     const {data,error} = await sb().from('group_sessions')
       .upsert({trainer_id:trainerId, group_type_id:groupTypeId, branch,
                session_date:date, headcount,
-               conducted_role:conductedRole, group_instance_id:groupInstanceId||null},
-              {onConflict:'trainer_id,session_date,group_type_id,branch,conducted_role'})
+               conducted_role:conductedRole, group_instance_id:groupInstanceId||null,
+               subgroup: subgroup||''},
+              {onConflict:'trainer_id,session_date,group_type_id,branch,conducted_role,subgroup'})
       .select().single();
     if (error) throw error; return data;
   },
-  async removeGroupConducted(trainerId, groupTypeId, branch, date, conductedRole) {
+  async removeGroupConducted(trainerId, groupTypeId, branch, date, conductedRole, subgroup='') {
     const {error} = await sb().from('group_sessions').delete()
       .eq('trainer_id',trainerId).eq('group_type_id',groupTypeId).eq('branch',branch)
-      .eq('session_date',date).eq('conducted_role',conductedRole);
+      .eq('session_date',date).eq('conducted_role',conductedRole)
+      .eq('subgroup', subgroup||'');
     if (error) throw error;
   },
   // Активные группы филиала (строки trainer_groups) — для формы «второй тренер» у старшего
@@ -1410,15 +1450,22 @@ async unassignTrainerGroup(id) {
     if (branch) dq = dq.eq('branch',branch);
 
     let tgq = sb().from('trainer_groups')
-      .select('trainer_id,group_types(name,type,billing_model,price_per_month,trainer_percentage)')
+      .select('id,trainer_id,group_instance_id,rate_type,rate_value,role,leader_name,leader_fee_percent,branch,profiles(fio),group_types(name,type,billing_model,price_per_month,trainer_percentage)')
       .lte('subscription_start',toDay)
       .or(`subscription_end.is.null,subscription_end.gte.${fromDay}`);
     if (branch) tgq = tgq.eq('branch',branch);
 
     let gsq = sb().from('group_sessions')
-      .select('trainer_id,group_type_id,branch,headcount,session_date,group_types(billing_model)')
+      .select('trainer_id,group_type_id,branch,headcount,session_date,group_instance_id,group_types(billing_model)')
       .gte('session_date',fromDay).lt('session_date',toDay);
     if (branch) gsq = gsq.eq('branch',branch);
+
+    // Оплаты и посещаемость детских групп за месяц — для авто-ЗП (фильтруются по инстансам ниже)
+    let gpayq = sb().from('group_payments')
+      .select('group_id,group_instance_id,amount,paid,paid_at').eq('month',fromDay);
+    let gattq = sb().from('group_attendance')
+      .select('group_id,group_instance_id,session_date')
+      .gte('session_date',fromDay).lt('session_date',toDay);
 
     let pq = sb().from('profiles').select('id,fio,branches,role')
       .in('role',['trainer','senior_trainer']);
@@ -1441,7 +1488,29 @@ async unassignTrainerGroup(id) {
       .select('trainer_id,category').gte('session_date',from).lt('session_date',to);
     if (branch) trialq = trialq.eq('branch',branch);
 
-    const [w,d,tg,gs,p,adj,gp,gsubR,ptsubR,trialR] = await Promise.all([wq,dq,tgq,gsq,pq,aq,gpq,gsub,ptsub,trialq]);
+    const [w,d,tg,gs,p,adj,gp,gsubR,ptsubR,trialR,gpayR,gattR] =
+      await Promise.all([wq,dq,tgq,gsq,pq,aq,gpq,gsub,ptsub,trialq,gpayq,gattq]);
+
+    // ── АВТО-ЗП детских групп: один расчёт на инстанс, без N+1 ──
+    const childTgs = (tg.data||[]).filter(_isChildTg);
+    const rateHistory = childTgs.length
+      ? await DB.getRateHistory(childTgs.map(t=>t.id), fromDay) : [];
+    const childAutoByTrainer = {};
+    _calcChildInstances({
+      childTgs,
+      payments:      gpayR.data||[],
+      sessions:      gs.data   ||[],
+      substitutions: gsubR.data||[],   // уже только approved
+      adjustments:   gp.data   ||[],
+      rateHistory,
+      attendance:    gattR.data||[],
+      monthStr:      fromDay,
+    }).forEach(({result})=>{
+      result.rows.forEach(r=>{
+        childAutoByTrainer[r.trainerId] = (childAutoByTrainer[r.trainerId]||0) + r.final;
+      });
+    });
+
     return {
       workouts:            w.data      ||[],
       duties:              d.data      ||[],
@@ -1453,7 +1522,70 @@ async unassignTrainerGroup(id) {
       groupSubstitutions:  gsubR.data  ||[],
       ptSubstitutions:     ptsubR.data ||[],
       trialSessions:       trialR.data ||[],
+      childAutoByTrainer,
     };
+  },
+
+  // Авто-ЗП тренера по всем его детским группам за месяц — та же формула calcChildGroupPayroll.
+  // Используется в отчёте тренера (loadTrainerReport) и деталях (getTrainerDetail).
+  async getChildGroupsAutoSalary(trainerId, monthStr) {
+    try {
+      const nextD = new Date(monthStr); nextD.setMonth(nextD.getMonth()+1);
+      const toDay = nextD.toISOString().slice(0,10);
+      const {data:myTgs} = await sb().from('trainer_groups')
+        .select('id,trainer_id,group_instance_id,group_types(name,type,billing_model)')
+        .eq('trainer_id',trainerId)
+        .lte('subscription_start',toDay)
+        .or(`subscription_end.is.null,subscription_end.gte.${monthStr}`);
+      const childMy = (myTgs||[]).filter(_isChildTg);
+      if (!childMy.length) return {total:0, rows:[]};
+
+      const instanceIds = [...new Set(childMy.map(t=>t.group_instance_id).filter(Boolean))];
+      // Полный состав инстансов — формула зависит от всех тренеров группы
+      let childTgs = childMy.filter(t=>!t.group_instance_id);
+      if (instanceIds.length) {
+        const {data:instTgs} = await sb().from('trainer_groups')
+          .select('*, profiles(fio), group_types(name,type,billing_model)')
+          .in('group_instance_id',instanceIds).is('subscription_end',null);
+        childTgs = [...childTgs, ...(instTgs||[])];
+      }
+      const gIds  = childTgs.map(t=>t.id);
+      const trIds = [...new Set(childTgs.map(t=>t.trainer_id))];
+      const orInst = instanceIds.length
+        ? `group_instance_id.in.(${instanceIds.join(',')}),group_id.in.(${gIds.join(',')})`
+        : `group_id.in.(${gIds.join(',')})`;
+      const orSess = instanceIds.length
+        ? `group_instance_id.in.(${instanceIds.join(',')}),and(group_instance_id.is.null,trainer_id.in.(${trIds.join(',')}))`
+        : `trainer_id.in.(${trIds.join(',')})`;
+
+      const [pays, sess, subs, adjs, rh, atts] = await Promise.all([
+        sb().from('group_payments').select('group_id,group_instance_id,amount,paid,paid_at')
+          .eq('month',monthStr).or(orInst).then(r=>r.data||[]),
+        sb().from('group_sessions').select('trainer_id,session_date,group_instance_id')
+          .gte('session_date',monthStr).lt('session_date',toDay).or(orSess).then(r=>r.data||[]),
+        sb().from('group_substitutions').select('*').in('group_id',gIds)
+          .gte('session_date',monthStr).lt('session_date',toDay)
+          .eq('status','approved').then(r=>r.data||[]),
+        sb().from('group_trainer_payouts').select('*')
+          .eq('month',monthStr).in('group_id',gIds).then(r=>r.data||[]),
+        DB.getRateHistory(gIds, monthStr),
+        sb().from('group_attendance').select('group_id,group_instance_id,session_date')
+          .gte('session_date',monthStr).lt('session_date',toDay).or(orInst).then(r=>r.data||[]),
+      ]);
+
+      let total = 0; const rows = [];
+      _calcChildInstances({childTgs, payments:pays, sessions:sess, substitutions:subs,
+                           adjustments:adjs, rateHistory:rh, attendance:atts, monthStr})
+        .forEach(({members, result})=>{
+          const groupName = members[0]?.group_types?.name || 'Группа';
+          result.rows.filter(r=>r.trainerId===trainerId).forEach(r=>{
+            total += r.final;
+            rows.push({tgId:r.tgId, groupName, autoAmt:r.autoAmt, calcNote:r.calcNote,
+                       bonus:r.bonus, penalty:r.penalty, final:r.final});
+          });
+        });
+      return {total, rows};
+    } catch(e) { console.error('[getChildGroupsAutoSalary]', e); return {total:0, rows:[]}; }
   },
 
   async getTrainerDetail(trainerId, year, month) {
@@ -1461,7 +1593,7 @@ async unassignTrainerGroup(id) {
     const to      = new Date(year,month,  1).toISOString();
     const fromDay = `${year}-${String(month).padStart(2,'0')}-01`;
     const toDay   = new Date(year,month,1).toISOString().slice(0,10);
-    const [w,d,tg,gs,adj,gp,gsub,notes,trials] = await Promise.all([
+    const [w,d,tg,gs,adj,gp,gsub,notes,trials,childAuto] = await Promise.all([
       sb().from('workouts').select('*, clients(fio,age), sub_profile:profiles!substitute_for(fio)')
         .eq('trainer_id',trainerId).gte('workout_date',from).lt('workout_date',to)
         .eq('pending_confirmation',false)
@@ -1489,6 +1621,7 @@ async unassignTrainerGroup(id) {
       sb().from('trial_sessions').select('*').eq('trainer_id',trainerId)
         .gte('session_date',from).lt('session_date',to)
         .order('session_date',{ascending:false}),
+      DB.getChildGroupsAutoSalary(trainerId, fromDay),
     ]);
     return {
       workouts:           w.data      ||[],
@@ -1500,6 +1633,8 @@ async unassignTrainerGroup(id) {
       groupSubstitutions: gsub.data   ||[],
       sessionNotes:       notes.data  ||[],
       trialSessions:      trials.data ||[],
+      childAutoSum:       childAuto.total,
+      childAutoRows:      childAuto.rows,
     };
   },
 
@@ -1654,7 +1789,8 @@ async unassignTrainerGroup(id) {
 
 // ─── РАСЧЁТ ЗП ───────────────────────────────
 function calcSalary({workouts=[], duties=[], trainerGroups=[], groupSessions=[], adjustment=null,
-                     groupPayouts=[], groupSubstitutions=[], trainerId=null, trialSessions=[]}) {
+                     groupPayouts=[], groupSubstitutions=[], trainerId=null, trialSessions=[],
+                     childAutoSum=0}) {
   const cat={1:0,2:0,3:0,debt:0,dropIn1:0,dropIn2:0,dropIn3:0,trial1:0,trial2:0,trial3:0};
   workouts.forEach(w=>{
     // Замены с кастомной ставкой идут только в ptSubSum — не двойной счёт
@@ -1680,11 +1816,9 @@ function calcSalary({workouts=[], duties=[], trainerGroups=[], groupSessions=[],
   const hours    = duties.reduce((s,d)=>s+(new Date(d.end_time)-new Date(d.start_time))/3600000,0);
   const dutySum  = Math.round(hours*RATES.duty_per_hour);
 
-  // Детские группы: утверждённые payout (всегда fixed, авто-расчёт при утверждении)
-  const myGroupIds = new Set(trainerGroups.map(tg=>tg.id));
-  const childSum = groupPayouts
-    .filter(p => myGroupIds.has(p.group_id) && (!trainerId || p.trainer_id===trainerId))
-    .reduce((s,p) => s + Number(p.payout_value), 0);
+  // Детские группы: полностью АВТО — сумма считается вызывающим через calcChildGroupPayroll
+  // (премии/штрафы из group_trainer_payouts уже внутри). payout_value не читается.
+  const childSum = Number(childAutoSum)||0;
 
   // Взрослые группы: по явке (авто)
   const adultSum = groupSessions
@@ -1714,6 +1848,196 @@ function calcSalary({workouts=[], duties=[], trainerGroups=[], groupSessions=[],
   const penalty = adjustment?.penalty||0;
   const total   = ptSum+dropInSum+trialSum+ptSubSum+dutySum+childSum+adultSum+groupSubSum+bonus-penalty;
   return {cat,hours,ptSum,dropInSum,trialSum,ptSubSum,dutySum,childSum,adultSum,groupSubSum,bonus,penalty,total};
+}
+
+// ─── АВТО-РАСЧЁТ ЗП ДЕТСКОЙ ГРУППЫ ───────────
+// Чистая функция: один вызов = один инстанс группы за месяц. Единственный источник
+// формулы — используется в отчёте группы, экспорте ЗП и сводке (getSummary).
+//   payments         — group_payments месяца (paid фильтруется внутри)
+//   trainers         — строки trainer_groups инстанса (желательно с profiles(fio))
+//   instanceSessions — group_sessions месяца этого инстанса (для ставочников)
+//   substitutions    — замены месяца, УЖЕ отфильтрованные по status==='approved'
+//   rateHistory      — trainer_group_rate_history по tg-id инстанса (DB.getRateHistory)
+//   adjustments      — строки group_trainer_payouts месяца (источник bonus/penalty)
+//   monthStr         — 'YYYY-MM-01'
+//   isArtSwim        — формула арт-свима: вычет ставочников у процентника, пул-лимит, allFlat
+//   attendance       — group_attendance месяца (для не-арт ставочника: занятий × ставка)
+// Замены НЕ входят в autoAmt/final — выплачиваются заменяющему отдельной строкой (groupSubSum).
+function calcChildGroupPayroll({payments=[], trainers=[], instanceSessions=[], substitutions=[],
+                                rateHistory=[], adjustments=[], monthStr,
+                                isArtSwim=true, attendance=[]}) {
+  const F = typeof fmt==='function' ? fmt : (n=>Number(n||0).toLocaleString('ru-RU'));
+
+  const paidPayments = (payments||[]).filter(p=>p.paid);
+  // Вал — всегда от реальных оплат месяца
+  const totalRevenue = paidPayments.reduce((s,p)=>s+Number(p.amount||0),0);
+  // Пул = вал/2 — ЛИМИТ суммарных выплат, не база процентов
+  const pool = Math.round(totalRevenue/2);
+  // Уникальные даты занятий (для не-арт ставочника — старая логика по посещаемости)
+  const sessionDates = [...new Set((attendance||[]).map(a=>String(a.session_date).slice(0,10)))].sort();
+
+  const tgWithLeader = trainers.find(t=>t.leader_name);
+  const leaderName   = tgWithLeader?.leader_name || '';
+  const leaderPct    = tgWithLeader?.leader_fee_percent || 0;
+
+  // ── История ставок: действующая запись на дату D — последняя с effective_from <= D ──
+  const histByTg = {};
+  (rateHistory||[]).forEach(h=>{ (histByTg[h.trainer_group_id] ||= []).push(h); });
+  Object.values(histByTg).forEach(l=>l.sort((a,b)=>String(a.effective_from).localeCompare(String(b.effective_from))));
+  const rateAt = (t, dateStr) => {
+    const list = histByTg[t.id];
+    const d = String(dateStr||monthStr).slice(0,10);
+    let eff = null;
+    (list||[]).forEach(h=>{ if (String(h.effective_from).slice(0,10) <= d) eff = h; });
+    if (!eff) return {type:t.rate_type, value:Number(t.rate_value||0), fromHistory:false};
+    return {type:eff.rate_type, value:Number(eff.rate_value||0), fromHistory:true};
+  };
+
+  const percentTrainers = trainers.filter(t=>t.rate_type==='percent');
+  const flatTrainers    = trainers.filter(t=>t.rate_type==='flat');
+  const allFlat         = percentTrainers.length===0 && flatTrainers.length>0;
+
+  // Ставочник: каждое занятие по ставке на session_date (история), fallback 75 000
+  const flatSessionsCost = t => (instanceSessions||[])
+    .filter(s=>s.trainer_id===t.trainer_id)
+    .reduce((acc,s)=>acc + (rateAt(t, s.session_date).value || 75000), 0);
+  // Суммарные выплаты ставочников — вычитаются у процентных тренеров (арт-свим)
+  const flatCost = flatTrainers.reduce((acc,ft)=>acc+flatSessionsCost(ft),0);
+
+  // Процентник: оплаты по % на дату paid_at (история); без paid_at — % на 1-е число месяца
+  const pctBase = (t, fallbackPct) => {
+    const list = histByTg[t.id];
+    if (!list?.length) {
+      const pct = Number(t.rate_value)||fallbackPct;
+      return {base: Math.round(totalRevenue*pct/100), pctLabel:`${pct}%`};
+    }
+    let base=0; const pcts=[];
+    paidPayments.forEach(p=>{
+      const r = rateAt(t, p.paid_at ? String(p.paid_at).slice(0,10) : monthStr);
+      const pct = r.type==='percent' ? r.value : (Number(t.rate_value)||fallbackPct);
+      if (!pcts.includes(pct)) pcts.push(pct);
+      base += Number(p.amount||0)*pct/100;
+    });
+    return {base: Math.round(base), pctLabel: (pcts.length?pcts:[Number(t.rate_value)||fallbackPct]).join('→')+'%'};
+  };
+
+  const adjByTrainer = {};
+  (adjustments||[]).forEach(a=>{ adjByTrainer[a.trainer_id] = a; });
+
+  const subs = substitutions||[];
+  const rows = trainers.map(t=>{
+    const mySessions   = (instanceSessions||[]).filter(s=>s.trainer_id===t.trainer_id);
+    // Замены, где заменяли ЭТОГО тренера (вычитаются у него)
+    const mySubs       = subs.filter(s=>s.original_trainer_id===t.trainer_id);
+    const mySubCost    = mySubs.reduce((acc,s)=>acc+Number(s.rate||75000),0);
+    // Замены, которые провёл ЭТОТ тренер (как заменяющий) — отдельной строкой в сводке
+    const subsICovered = subs.filter(s=>s.substitute_trainer_id===t.trainer_id);
+    const subsICoveredCost = subsICovered.reduce((acc,s)=>acc+Number(s.rate||75000),0);
+    const hasHist = !!histByTg[t.id]?.length;
+
+    let autoAmt=0, calcNote='';
+    if (isArtSwim) {
+      if (t.rate_type==='percent') {
+        // Процентный тренер: % от ПОЛНОГО вала − ставки ставочников − его замены
+        const {base,pctLabel} = pctBase(t,0);
+        autoAmt  = Math.max(0, base - flatCost - mySubCost);
+        calcNote = `${pctLabel} × вал ${F(totalRevenue)}${flatCost?` − ставки (${F(flatCost)})`:''}${mySubCost?` − замены (${F(mySubCost)})`:''}`;
+      } else {
+        // Flat тренер: занятия × ставка (по истории на дату занятия)
+        autoAmt  = flatSessionsCost(t);
+        calcNote = hasHist
+          ? `${mySessions.length} занятий × ставка на дату занятия`
+          : `${mySessions.length} занятий × ${F(t.rate_value||75000)}`;
+      }
+    } else {
+      // Детские группы (не Арт-свим) — старая логика
+      if (t.rate_type==='flat') {
+        autoAmt  = hasHist
+          ? sessionDates.reduce((acc,d)=>acc + (rateAt(t,d).value||0), 0)
+          : sessionDates.length*(Number(t.rate_value)||0);
+        calcNote = hasHist
+          ? `${sessionDates.length} занятий × ставка на дату занятия`
+          : `${sessionDates.length} занятий × ${F(t.rate_value||0)}`;
+      } else {
+        const {base,pctLabel} = pctBase(t,40);
+        autoAmt  = Math.max(0, base - mySubCost);
+        calcNote = `${pctLabel} × ${F(totalRevenue)}${mySubCost?` − замены (${F(mySubCost)})`:''}`;
+      }
+    }
+
+    const adj = adjByTrainer[t.trainer_id];
+    const bonus   = Number(adj?.bonus||0);
+    const penalty = Number(adj?.penalty||0);
+    const rateLabel = t.rate_type==='percent' ? `${t.rate_value||0}%`
+                    : t.rate_type==='flat'    ? `${F(t.rate_value||75000)} сум/зан` : 'по явке';
+    return {trainerId:t.trainer_id, tgId:t.id, fio:t.profiles?.fio||'—', role:t.role||'основной',
+            rateType:t.rate_type, rateLabel, autoAmt, calcNote, bonus, penalty,
+            final:0, mySubs, subsICovered, subsICoveredCost};
+  });
+
+  // Руководитель: % от ПОЛНОГО вала (без истории); кейс «все flat» (арт-свим) — остаток пула
+  let leaderFee = 0;
+  if (allFlat && isArtSwim) {
+    const totalFlatPay = rows.reduce((s,r)=>s+r.autoAmt,0);
+    leaderFee = Math.max(0, pool - totalFlatPay);
+  } else {
+    leaderFee = leaderPct>0 ? Math.round(totalRevenue*leaderPct/100) : 0;
+  }
+
+  // ЛИМИТ ПУЛА (только Арт-свим): суммарные выплаты не превышают пул (вал/2).
+  // Ставки ставочников — фикс. обязательства, ужимаем только процентные суммы пропорционально.
+  let poolCapped = false;
+  if (isArtSwim && !allFlat) {
+    const flatTotal = rows.filter(r=>r.rateType!=='percent').reduce((s,r)=>s+r.autoAmt,0);
+    const pctTotal  = leaderFee + rows.filter(r=>r.rateType==='percent').reduce((s,r)=>s+r.autoAmt,0);
+    if (flatTotal + pctTotal > pool && pctTotal > 0) {
+      poolCapped = true;
+      const k = Math.max(0, pool - flatTotal) / pctTotal;
+      leaderFee = Math.round(leaderFee * k);
+      rows.forEach(r=>{
+        if (r.rateType==='percent') {
+          r.autoAmt  = Math.round(r.autoAmt * k);
+          r.calcNote += ' · ужато до лимита пула';
+        }
+      });
+    }
+  }
+
+  // Итог по тренеру = авто + премия − штраф (замены НЕ входят)
+  rows.forEach(r=>{ r.final = r.autoAmt + r.bonus - r.penalty; });
+  const totalTrainerPay = rows.reduce((s,r)=>s+r.autoAmt,0);
+  const remainder = pool - totalTrainerPay - leaderFee;
+
+  return {totalRevenue, pool, leaderName, leaderPct, leaderFee, poolCapped, remainder, rows};
+}
+
+// Детский инстанс = trainer_groups с billing_model !== 'headcount' (взрослые — headcount)
+function _isChildTg(t) { return !!t.group_types && t.group_types.billing_model!=='headcount'; }
+
+// Группировка детских trainer_groups по «физическим» инстансам и авто-расчёт каждого.
+// Возвращает [{key, instanceId, members, result}] — result от calcChildGroupPayroll.
+function _calcChildInstances({childTgs, payments, sessions, substitutions, adjustments, rateHistory, attendance, monthStr}) {
+  const instances = {};
+  (childTgs||[]).forEach(t=>{ const key = t.group_instance_id || `tg_${t.id}`; (instances[key] ||= []).push(t); });
+  return Object.entries(instances).map(([key, members])=>{
+    const iid   = members[0].group_instance_id||null;
+    const gIds  = new Set(members.map(m=>m.id));
+    const trIds = new Set(members.map(m=>m.trainer_id));
+    const isArtSwim = members.some(m=>m.group_types?.name?.toLowerCase().includes('art'));
+    // Оплаты: по инстансу, иначе по group_id (паритет с getGroupMonthReport)
+    const pays = (payments||[]).filter(p=> iid ? p.group_instance_id===iid : gIds.has(p.group_id));
+    // Занятия: по инстансу + fallback по trainer_id для записей без instance (паритет с отчётом)
+    const sess = (sessions||[]).filter(s=> iid
+      ? (s.group_instance_id===iid || (!s.group_instance_id && trIds.has(s.trainer_id)))
+      : trIds.has(s.trainer_id));
+    const subsI = (substitutions||[]).filter(s=>gIds.has(s.group_id));
+    const adjI  = (adjustments||[]).filter(p=>gIds.has(p.group_id));
+    const rhI   = (rateHistory||[]).filter(h=>gIds.has(h.trainer_group_id));
+    const attI  = (attendance||[]).filter(a=> iid ? a.group_instance_id===iid : gIds.has(a.group_id));
+    const result = calcChildGroupPayroll({payments:pays, trainers:members, instanceSessions:sess,
+      substitutions:subsI, rateHistory:rhI, adjustments:adjI, monthStr, isArtSwim, attendance:attI});
+    return {key, instanceId:iid, members, result};
+  });
 }
 
 // ─── ТЕХНИЧКА ────────────────────────────────

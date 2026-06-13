@@ -86,7 +86,7 @@ function exportSummaryExcel(year, month, summaryData, branch) {
   const monthName = new Date(year,month-1).toLocaleDateString('ru-RU',{month:'long',year:'numeric'});
   const daysInMonth = new Date(year,month,0).getDate();
 
-  const {workouts,duties,groupSessions,profiles,adjustments,groupPayouts,groupSubstitutions,ptSubstitutions,trialSessions:allTrials} = summaryData;
+  const {workouts,duties,groupSessions,profiles,adjustments,groupSubstitutions,ptSubstitutions,trialSessions:allTrials,childAutoByTrainer={}} = summaryData;
   const adjMap = {};
   (adjustments||[]).forEach(a => { adjMap[a.trainer_id] = a; });
 
@@ -123,7 +123,7 @@ function exportSummaryExcel(year, month, summaryData, branch) {
     const adj = adjMap[p.id]||null;
     const pts = (allTrials||[]).filter(t=>t.trainer_id===p.id);
     const sal = calcSalary({workouts:pw, duties:pd, groupSessions:pgs, adjustment:adj,
-                             groupPayouts:(groupPayouts||[]), groupSubstitutions:(groupSubstitutions||[]),
+                             childAutoSum:childAutoByTrainer[p.id]||0, groupSubstitutions:(groupSubstitutions||[]),
                              ptSubstitutions:(ptSubstitutions||[]), trialSessions:pts, trainerId:p.id});
     const ptCount = sal.cat[1]+sal.cat[2]+sal.cat[3]+(sal.cat.dropIn1||0)+(sal.cat.dropIn2||0)+(sal.cat.dropIn3||0);
     const adultGP = sal.adultSum;
@@ -300,7 +300,7 @@ function exportSummaryExcel(year, month, summaryData, branch) {
     const pgs = (groupSessions||[]).filter(gs=>gs.trainer_id===p.id && gs.group_types?.billing_model==='headcount');
     const pts = (allTrials||[]).filter(t=>t.trainer_id===p.id);
     const sal = calcSalary({workouts:pw, duties:pd, groupSessions:pgs, adjustment:adj,
-                             groupPayouts:(groupPayouts||[]), groupSubstitutions:(groupSubstitutions||[]),
+                             childAutoSum:childAutoByTrainer[p.id]||0, groupSubstitutions:(groupSubstitutions||[]),
                              ptSubstitutions:(ptSubstitutions||[]), trialSessions:pts, trainerId:p.id});
 
     rows.push(sr(['── Расчёт зарплаты ──'], hStyle(XL.BLUE_DARK)));
@@ -318,6 +318,8 @@ function exportSummaryExcel(year, month, summaryData, branch) {
       ['Дежурство',         +tot.dh.toFixed(2), mc(RATES.duty_per_hour), mc(sal.dutySum)],
     ];
     if (sal.adultSum)  salLines.push(['Взрослые ГП','','',mc(sal.adultSum)]);
+    if (sal.childSum)  salLines.push(['Детские ГП (авто)','','',mc(sal.childSum)]);
+    if (sal.groupSubSum) salLines.push(['Замены в группах','','',mc(sal.groupSubSum)]);
     if (sal.bonus)     salLines.push(['Премия',     '','',mc(sal.bonus)]);
     if (sal.penalty)   salLines.push(['Штраф',      '','',mc(-sal.penalty)]);
 
@@ -507,15 +509,8 @@ function exportChildGroupExcel(groupId, monthStr, report, groupInfo) {
     }));
 
   rows.push([]);
-
-  // Блок выплат тренеру
-  if (payouts?.length) {
-    rows.push(sr(['── Выплата тренеру ──'], hStyle(XL.BLUE_DARK)));
-    payouts.forEach((p,i) => {
-      const typeLabel = p.payout_type==='fixed'?'Фиксированная':'Процент';
-      rows.push(sr([trainerFio, typeLabel, p.payout_type==='fixed'?mc(p.payout_value):`${p.payout_value}%`, '', '', mc(p.payout_value),'','','',''], rStyle(i%2===0)));
-    });
-  }
+  // Блок «Выплата тренеру» убран: ЗП считается авто (calcChildGroupPayroll),
+  // отдельная выгрузка — кнопка «⬇️ ЗП» (exportGroupPayrollExcel)
 
   const ws = buildSheet(rows);
   ws['!cols'] = [{wch:4},{wch:22},{wch:8},{wch:12},{wch:8},{wch:14},{wch:14},{wch:14},{wch:14},{wch:14},{wch:12},{wch:30}];
@@ -658,14 +653,7 @@ function exportBranchChildGroupsExcel(branch, monthStr, groupReports) {
         ...rStyle(false),fill:{fgColor:{rgb:'FEE2E2'}},font:{color:{rgb:'DC2626'},bold:true,sz:10,name:'Arial'}
       }));
 
-    if (payouts?.length) {
-      rows.push([]);
-      rows.push(sr(['── Выплата тренеру ──'], hStyle(XL.BLUE_DARK)));
-      payouts.forEach((p,i)=>{
-        rows.push(sr([trainerFio, p.payout_type==='fixed'?'Фикс.':'Процент',
-          mc(p.payout_value),'','','','','','',''], rStyle(i%2===0)));
-      });
-    }
+    // Блок «Выплата тренеру» убран: ЗП считается авто, выгрузка — exportGroupPayrollExcel
 
     const ws = buildSheet(rows);
     ws['!cols'] = [{wch:4},{wch:20},{wch:7},{wch:10},{wch:6},{wch:12},{wch:14},{wch:12},{wch:10},{wch:28}];
@@ -700,13 +688,13 @@ function exportGroupPayrollExcel(groupName, monthStr, totalRevenue, activeCount,
              tc(`Оплаты за месяц: ${fmt(totalRevenue)} сум (в группе ${activeCount} детей)`,
                 {font:{sz:12,name:'Arial',bold:false,color:{rgb:XL.TEXT_DARK}}})]);
   rows.push([]);
-  rows.push(sr(['Тренер','Роль','Формула','К выплате','Утверждено','Статус'], hStyle()));
+  // ЗП полностью авто: колонка «Утверждено» заменена на Авто/Премия/Штраф/К выплате
+  rows.push(sr(['Тренер','Роль','Формула','Авто','Премия','Штраф','К выплате'], hStyle()));
 
   let grandTotal = 0;
   trainerRows.forEach((r,i)=>{
-    const toPayAmt = r.approved !== null ? r.approved : r.autoAmt;
-    grandTotal += toPayAmt;
-    const status = r.approved !== null ? '✅ Утверждено' : '⏳ Авто';
+    const finalAmt = r.final !== undefined ? r.final : r.autoAmt;
+    grandTotal += finalAmt;
     const rs = rStyle(i%2===0);
     const payStyle = {...rs, font:{...rs.font, bold:true, color:{rgb:XL.GREEN_DARK}}};
     rows.push([
@@ -714,8 +702,9 @@ function exportGroupPayrollExcel(groupName, monthStr, totalRevenue, activeCount,
       tc(r.role, rs),
       tc(r.note, rs),
       mc(r.autoAmt, rs),
-      r.approved !== null ? mc(r.approved, payStyle) : tc('—', rs),
-      tc(status, rs),
+      mc(r.bonus||0, rs),
+      mc(r.penalty||0, rs),
+      mc(finalAmt, payStyle),
     ]);
   });
 
@@ -728,16 +717,17 @@ function exportGroupPayrollExcel(groupName, monthStr, totalRevenue, activeCount,
       tc(`${leaderPct}% от вала`, ls),
       mc(leaderFee, ls),
       tc('—', ls),
-      tc('ℹ️ Отдельно', ls),
+      tc('—', ls),
+      mc(leaderFee, ls),
     ]);
   }
 
   rows.push([]);
-  rows.push(sr(['ИТОГО к выплате:','','', mc(grandTotal),'',''], gStyle()));
+  rows.push(sr(['ИТОГО к выплате:','','','','','', mc(grandTotal)], gStyle()));
 
   const ws = buildSheet(rows);
-  ws['!cols'] = [{wch:22},{wch:14},{wch:30},{wch:14},{wch:14},{wch:14}];
-  ws['!merges'] = [{s:{r:0,c:0},e:{r:0,c:5}}];
+  ws['!cols'] = [{wch:22},{wch:14},{wch:34},{wch:14},{wch:10},{wch:10},{wch:14}];
+  ws['!merges'] = [{s:{r:0,c:0},e:{r:0,c:6}}];
   XLSX.utils.book_append_sheet(wb, ws, 'ЗП тренерам');
   XLSX.writeFile(wb, `ЗП_${safeName}_${monthLabel}.xlsx`);
 }

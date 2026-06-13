@@ -51,6 +51,7 @@
 `workouts.client_id→clients`, `session_notes.client_id→clients`, `training_goals.client_id→clients`,
 `duties.trainer_id→profiles`, `workouts.trainer_id→profiles`, `subscriptions.trainer_id→profiles`,
 `branch_access.trainer_id→profiles`, `group_trainer_payouts.*`, `group_sessions.*`,
+`trainer_group_rate_history.trainer_group_id→trainer_groups`,
 `workout_delete_requests.trainer_id→profiles` и пр.
 
 Поэтому `DB.forceDeleteClient` удаляет вручную в правильном порядке:
@@ -155,18 +156,23 @@ leader_name + leader_fee_percent · group_instance_id uuid · days_of_week text[
 ```
 > `group_instance_id` связывает несколько trainer_groups в одну «физическую» группу (второй тренер).
 
-**group_clients** — дети: `group_id, group_instance_id, name, age, start_date, monthly_price, level, is_active`
+**group_clients** — дети: `group_id, group_instance_id, name, age, start_date, monthly_price, level, is_active, subgroup`
+> `subgroup text NOT NULL DEFAULT ''` — подгруппа внутри группы (`''` = основная, иначе название, напр. `'16:00'`). Одна группа = N подгрупп с раздельными списками детей, общий вал/оплаты.
 
 **adult_group_clients** — взрослые: `group_id, name, is_active`
 
-**group_sessions** — проведённые занятия групп: `trainer_id, group_type_id, branch, session_date, headcount, client_ids uuid[], session_type, conducted_role, group_instance_id`
-> Взрослые группы: запись создаёт `logGroupSession`, `conducted_role IS NULL`. Детские (арт-свим): запись = отметка «кто проводил» с ролью `'суша'|'вода'|'процент'` (CHECK) и `group_instance_id`. Unique index `uq_group_sessions_conducted (trainer_id, session_date, group_type_id, branch, conducted_role)` — upsert детских отметок по этим 5 колонкам (PostgREST onConflict); взрослые записи с `conducted_role IS NULL` не ограничиваются (NULLS DISTINCT), их дубли (две тренировки в день) легитимны.
+**group_sessions** — проведённые занятия групп: `trainer_id, group_type_id, branch, session_date, headcount, client_ids uuid[], session_type, conducted_role, group_instance_id, subgroup`
+> Взрослые группы: запись создаёт `logGroupSession`, `conducted_role IS NULL`. Детские (арт-свим): запись = отметка «кто проводил» с ролью `'суша'|'вода'|'процент'` (CHECK), `group_instance_id` и `subgroup` (`''` = основная). Unique index `uq_group_sessions_conducted (trainer_id, session_date, group_type_id, branch, conducted_role, subgroup)` — upsert детских отметок по этим 6 колонкам (PostgREST onConflict); взрослые записи с `conducted_role IS NULL` не ограничиваются (NULLS DISTINCT), их дубли (две тренировки в день) легитимны.
 
 **group_attendance** — посещаемость детей: `group_id, group_client_id, group_instance_id, session_date, attended`
 
 **group_payments** — оплата детей за месяц: `group_id, group_client_id, group_instance_id, month, amount, paid, paid_at, sub_start, sub_end`
 
 **group_trainer_payouts** — выплаты: `group_id, trainer_id, month, payout_type, payout_value, bonus, penalty, approved_by, approved_at`
+> ЗП детских групп считается **полностью авто** (`calcChildGroupPayroll` в db.js: вал, проценты, ставки, пул-лимит). Эта таблица хранит только ручные `bonus`/`penalty`; `payout_value` пишется для аудита, но в расчётах **не читается**.
+
+**trainer_group_rate_history** — история ставок: `id, trainer_group_id→trainer_groups (CASCADE), rate_type ('percent'|'flat'), rate_value, effective_from, created_by, created_at`
+> Действующая ставка тренера на дату `D` = последняя запись с `effective_from <= D`; нет записей — legacy `trainer_groups.rate_type/rate_value`. Пересмотр ставки: «за весь текущий месяц» (1-е тек.), «прошлый» (1-е прош.), «с этого дня» (сегодня). Ставочник — занятие по ставке на `session_date`; процентник — вал делится по `paid_at` оплат до/после `effective_from`.
 
 **group_substitutions** — замены: `group_id, original_trainer_id, substitute_trainer_id, session_date, rate, status`
 
