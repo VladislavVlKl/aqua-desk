@@ -8904,6 +8904,8 @@ async function doLogAdultGroupSession(groupId) {
     document.querySelector('.modal-overlay')?.remove();
     const rate = headcount>=7?130000:headcount>=4?120000:110000;
     toast(`Записано: ${headcount} чел. · ${(rate/1000).toFixed(0)}к сум · ${time} ✅`,'success');
+    // Обновляем хаб, чтобы счётчик занятий/сумма за месяц подтянулись
+    if (typeof renderAdultGroupDetail==='function') renderAdultGroupDetail(groupId);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 
