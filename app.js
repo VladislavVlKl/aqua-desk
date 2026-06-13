@@ -3583,20 +3583,55 @@ async function doSeniorAssignSecond() {
   finally { _pending.delete(`sa2_${groupId}_${trainerId}`); }
 }
 
+// Цветная точка роли (суша=жёлтый, вода=синий, суша+вода=градиент)
+function _groupRoleDot(role) {
+  if (role==='суша')      return '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#eab308;margin-right:4px;vertical-align:middle"></span>';
+  if (role==='вода')      return '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#3b82f6;margin-right:4px;vertical-align:middle"></span>';
+  if (role==='суша+вода') return '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:linear-gradient(90deg,#eab308 50%,#3b82f6 50%);margin-right:4px;vertical-align:middle"></span>';
+  return '';
+}
+
 async function loadSeniorGroupsList() {
   const body=document.getElementById('groups-list'); if (!body) return;
   try {
     const groups = await DB.getTrainerGroups(STATE.profile.id);
     if (!groups.length) { body.innerHTML='<p class="hint">Нет назначенных групп</p>'; return; }
     const canEdit = ['admin','senior_trainer'].includes(STATE.profile.role);
-    body.innerHTML = groups.map(g=>{
-      const roleDot = g.role==='суша'
-        ? '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#eab308;margin-right:4px;vertical-align:middle"></span>'
-        : g.role==='вода'
-        ? '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#3b82f6;margin-right:4px;vertical-align:middle"></span>'
-        : g.role==='суша+вода'
-        ? '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:linear-gradient(90deg,#eab308 50%,#3b82f6 50%);margin-right:4px;vertical-align:middle"></span>'
-        : '';
+
+    // Детские группы схлопываем по group_instance_id — одна карточка на физгруппу.
+    // Роли (вода/суша) и расписание живут внутри хаба. Взрослые остаются как были.
+    const children = groups.filter(g=>g.group_types?.type==='children');
+    const adults   = groups.filter(g=>g.group_types?.type!=='children');
+
+    const byInstance = {};
+    children.forEach(g=>{ const k = g.group_instance_id || `solo_${g.id}`; (byInstance[k] ||= []).push(g); });
+
+    const childCards = Object.values(byInstance).map(rows=>{
+      const rep = rows[0];
+      // Все роли тренера в этой физгруппе (вода + суша → две строки)
+      const roles = [...new Set(rows.map(r=>r.role).filter(Boolean))];
+      const dots  = roles.map(_groupRoleDot).join('');
+      const roleLabel = roles.length ? ` (${roles.join(' + ')})` : '';
+      // Расписание: показываем строки, у которых оно задано; иначе предупреждение
+      const sched = rows.filter(r=>r.days_of_week?.length)
+        .map(r=>`${r.days_of_week.join('/')}${r.session_time?' '+r.session_time:''}`);
+      const schedLabel = sched.length
+        ? `<span style="font-size:11px;background:rgba(124,58,237,.15);color:#a78bfa;padding:2px 8px;border-radius:6px;margin-top:4px;display:inline-block">${[...new Set(sched)].join(' · ')}</span>`
+        : `<span style="font-size:11px;color:var(--hint);margin-top:4px;display:inline-block">⚠️ Расписание не задано — задайте внутри</span>`;
+      return `<div class="staff-card" style="flex-direction:column;align-items:flex-start;gap:8px">
+        <div style="display:flex;justify-content:space-between;width:100%">
+          <div>
+            <div class="staff-fio">${dots}${rep.group_types?.name||'Группа'}${roleLabel}</div>
+            <div class="staff-meta">${rep.branch} · с ${rep.subscription_start||'—'}</div>
+            ${schedLabel}
+          </div>
+          <button class="btn btn-sm btn-primary" style="align-self:flex-start"
+            onclick="renderGroupDetail('${rep.id}')">Открыть</button>
+        </div>
+      </div>`;
+    });
+
+    const adultCards = adults.map(g=>{
       const schedLabel = g.days_of_week?.length
         ? `<span style="font-size:11px;background:rgba(124,58,237,.15);color:#a78bfa;padding:2px 8px;border-radius:6px;margin-top:4px;display:inline-block">
             ${g.days_of_week.join('/')}${g.session_time?' '+g.session_time:''}</span>`
@@ -3604,23 +3639,24 @@ async function loadSeniorGroupsList() {
       return `<div class="staff-card" style="flex-direction:column;align-items:flex-start;gap:8px">
         <div style="display:flex;justify-content:space-between;width:100%">
           <div>
-            <div class="staff-fio">${roleDot}${g.group_types?.name||'Группа'}${g.role?' ('+g.role+')':''}</div>
+            <div class="staff-fio">${g.group_types?.name||'Группа'}</div>
             <div class="staff-meta">${g.branch} · с ${g.subscription_start||'—'}</div>
             ${schedLabel}
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-start">
-            <button class="btn btn-sm btn-primary"
-              onclick="${g.group_types?.type==='children'?`renderGroupDetail('${g.id}')`:`renderAdultGroupDetail('${g.id}')`}">Открыть</button>
+            <button class="btn btn-sm btn-primary" onclick="renderAdultGroupDetail('${g.id}')">Открыть</button>
             ${canEdit?`<button class="btn btn-sm" style="font-size:12px;background:rgba(124,58,237,.15);color:#a78bfa"
               onclick="openSeniorGroupPersonnel('${g.id}')">👥 Персонал</button>`:''}
             ${canEdit?`<button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
               onclick="renderGroupScheduleModal('${g.id}','${encodeURIComponent(JSON.stringify(g.days_of_week||[]))}','${g.session_time||''}')">🗓️</button>`:''}
-            ${g.group_types?.type!=='children'?`<button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
-              onclick="renderGroupSubstitutionModal('${g.id}')">🔄 Замена</button>`:''}
+            <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
+              onclick="renderGroupSubstitutionModal('${g.id}')">🔄 Замена</button>
           </div>
         </div>
       </div>`;
-    }).join('');
+    });
+
+    body.innerHTML = [...childCards, ...adultCards].join('');
   } catch(e) { body.innerHTML='<p class="hint">Ошибка</p>'; console.error(e); }
 }
 
@@ -3733,8 +3769,28 @@ async function renderGroupDetail(groupId) {
         ${canPayroll?bigBtn('💰','ЗП за месяц','авто-расчёт · премии/штрафы',`openGroupReport('${groupId}','${month}','detail','payroll')`):''}
         ${bigBtn('📅','История занятий','по датам · явка · кто проводил',`renderGroupHistoryScreen('${groupId}')`)}
         ${bigBtn('🔄','Замена','кто провёл занятие вместо вас',`renderGroupSubstitutionModal('${groupId}')`)}
+        ${canPayroll?bigBtn('👥','Персонал','тренеры группы · ставки',`openSeniorGroupPersonnel('${groupId}')`):''}
         ${bigBtn('📦','Архив детей','вернуть ребёнка в группу',`renderGroupArchiveModal('${groupId}','${instanceId||''}')`)}
       </div>
+
+      ${canPayroll?`
+      <!-- Расписание по ролям: у вода/суша-строк оно своё, редактируется раздельно -->
+      <h4 style="margin:18px 0 8px">Расписание по ролям</h4>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        ${members.map(mb=>{
+          const sched = mb.days_of_week?.length
+            ? `${mb.days_of_week.join('/')}${mb.session_time?' '+mb.session_time:''}`
+            : '⚠️ не задано';
+          return `<div class="staff-card" style="align-items:center;justify-content:space-between">
+            <div>
+              <div class="staff-fio" style="font-size:14px">${_groupRoleDot(mb.role)}${mb.role||'роль не указана'}</div>
+              <div class="staff-meta">${mb.profiles?.fio||'—'} · ${sched}</div>
+            </div>
+            <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
+              onclick="renderGroupScheduleModal('${mb.id}','${encodeURIComponent(JSON.stringify(mb.days_of_week||[]))}','${mb.session_time||''}')">🗓️ Изменить</button>
+          </div>`;
+        }).join('')}
+      </div>`:''}
     </div></div>`);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
@@ -8103,7 +8159,9 @@ async function doSaveGroupSchedule(groupId) {
     await DB.updateTrainerGroupSchedule(groupId, days, time);
     document.querySelector('.modal-overlay')?.remove();
     toast('Расписание сохранено ✅','success');
-    loadSeniorGroupsList();
+    // Из списка групп — перерисовать список; из хаба группы — перерисовать хаб
+    if (document.getElementById('groups-list')) loadSeniorGroupsList();
+    else if (window._gd?.groupId) renderGroupDetail(window._gd.groupId);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 
