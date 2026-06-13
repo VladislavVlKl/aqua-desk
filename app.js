@@ -3964,13 +3964,30 @@ function toggleSubgroupAccordion(idx, sEnc) {
 }
 
 // Создание подгруппы = появление опции в списках (дети добавляются/переводятся с этим subgroup)
+// prompt() в Telegram WebApp заблокирован — используем модалку с input.
 function promptAddSubgroup() {
   const g = window._gd; if (!g) return;
-  const name = (prompt('Название подгруппы (например, 16:00):')||'').trim();
-  if (!name) return;
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>Новая подгруппа</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="form-group"><label>Название (например, 16:00)</label>
+      <input id="new-subgroup-name" type="text" placeholder="16:00" autocomplete="off"
+        style="width:100%;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text)"
+        onkeydown="if(event.key==='Enter')doAddSubgroup()"></div>
+    <button class="btn btn-primary btn-full" onclick="doAddSubgroup()">Добавить</button>
+  </div>`;
+  document.body.appendChild(m);
+  setTimeout(()=>document.getElementById('new-subgroup-name')?.focus(), 50);
+}
+function doAddSubgroup() {
+  const g = window._gd; if (!g) return;
+  const name = (document.getElementById('new-subgroup-name')?.value||'').trim();
+  if (!name) return toast('Введите название','error');
   if (g.subgroups.includes(name)) return toast('Такая подгруппа уже есть','error');
   (g.extraSubgroups ||= []).push(name);
   g.subgroups = [...new Set([...g.subgroups, name])].sort();
+  document.querySelector('.modal-overlay')?.remove();
   toast(`Подгруппа «${name}» добавлена — переведите в неё детей`,'success');
   if (g._screen==='children') renderGroupChildrenScreenHtml();
 }
@@ -6168,10 +6185,13 @@ function openGroupReport(groupId, monthStr, kind='list', anchor='') {
     backFn = ()=>renderTrainerShell('groups');
   }
   navPush(backFn);
-  renderGroupMonthReport(groupId, monthStr, anchor);
+  // anchor 'payroll' → отдельный экран ЗП; из хаба 'detail' без anchor → только дети; список (админ) → всё
+  const view = anchor==='payroll' ? 'payroll' : (kind==='detail' ? 'children' : 'full');
+  renderGroupMonthReport(groupId, monthStr, view);
 }
 
-async function renderGroupMonthReport(groupId, monthStr, anchor='') {
+// view: 'children' = отчёт по детям (явка/оплаты), 'payroll' = ЗП персоналу, 'full' = всё (список из админки)
+async function renderGroupMonthReport(groupId, monthStr, view='full') {
   // monthStr = 'YYYY-MM-01'
   const isAdmin = ['admin','ceo'].includes(STATE.profile.role);
   loading('Загрузка...');
@@ -6213,23 +6233,27 @@ async function renderGroupMonthReport(groupId, monthStr, anchor='') {
     // Fallback goBack по роли. НЕ хардкодим renderGroupDetail — иначе координатора/старшего
     // из списка групп выкидывало в тренерский экран детали, который он не открывал.
     setupBack(goBack);
+    const showChildren = view!=='payroll';
+    const showPayroll  = view!=='children';
+    const screenTitle = view==='payroll' ? 'ЗП за месяц' : (view==='children' ? 'Отчёт по детям' : 'Отчёт группы');
     setScreen(`<div class="app-header">
       ${backBtn()}
-      <div class="app-title">Отчёт группы</div>
+      <div class="app-title">${screenTitle}</div>
       <div style="display:flex;gap:6px">
-        <button class="btn btn-sm btn-primary" onclick="doExportChildGroupExcel('${groupId}','${monthStr}')">⬇️ Excel</button>
-        ${canSeePayroll?`<button class="btn btn-sm" style="background:rgba(16,185,129,.2);color:#10b981" onclick="doExportGroupPayroll('${groupId}','${monthStr}')">⬇️ ЗП</button>`:''}
+        ${showChildren?`<button class="btn btn-sm btn-primary" onclick="doExportChildGroupExcel('${groupId}','${monthStr}')">⬇️ Excel</button>`:''}
+        ${showPayroll&&canSeePayroll?`<button class="btn btn-sm" style="background:rgba(16,185,129,.2);color:#10b981" onclick="doExportGroupPayroll('${groupId}','${monthStr}')">⬇️ ЗП</button>`:''}
       </div>
     </div>
     <div class="tab-content"><div class="tab-pad">
       <div class="section-header">
         <h3>${monthLabel}</h3>
         <div class="month-nav">
-          <button onclick="renderGroupMonthReport('${groupId}','${prevMonthStr(monthStr)}')">‹</button>
-          <button onclick="renderGroupMonthReport('${groupId}','${nextMonthStr(monthStr)}')">›</button>
+          <button onclick="renderGroupMonthReport('${groupId}','${prevMonthStr(monthStr)}','${view}')">‹</button>
+          <button onclick="renderGroupMonthReport('${groupId}','${nextMonthStr(monthStr)}','${view}')">›</button>
         </div>
       </div>
 
+      ${showChildren?`
       <!-- Сводка -->
       <div class="summary-cards" style="margin-bottom:16px">
         <div class="summary-card"><div class="s-val">${clients.filter(c=>c.is_active).length}</div><div class="s-lbl">Детей</div></div>
@@ -6323,9 +6347,10 @@ async function renderGroupMonthReport(groupId, monthStr, anchor='') {
           </div>`;
         }).join('')}
       </div>` : ''}
+      `:''}
 
       <!-- ЗП тренерам — авто-расчёт (только координатор / старший) -->
-      ${(()=>{
+      ${showPayroll?(()=>{
         const canSee = isAdmin || STATE.profile.role==='senior_trainer';
         if (!canSee) return '';
 
@@ -6462,11 +6487,9 @@ async function renderGroupMonthReport(groupId, monthStr, anchor='') {
           ${isAdmin ? `<div style="margin-top:8px"><button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
             onclick="renderLeaderFeeModal('${groupId}','',0)">+ Руководитель группы</button></div>` : ''}`}
         </div>`;
-      })()}
+      })():''}
 
     </div></div>`);
-    // Вход «ЗП за месяц» с хаба группы — проматываем сразу к блоку ЗП
-    if (anchor==='payroll') setTimeout(()=>document.getElementById('gmr-payroll')?.scrollIntoView({behavior:'smooth',block:'start'}), 60);
   } catch(e) {
     toast('Ошибка: ' + (e?.message||String(e)), 'error');
     console.error('[renderGroupMonthReport]', e);
