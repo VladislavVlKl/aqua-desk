@@ -3682,8 +3682,11 @@ async function openSeniorGroupPersonnel(tgId) {
 
 // Уровни детей в группе (справочник UI)
 const GROUP_LEVELS = ['Подготовительный','Обучающий','Совершенствование','Спортивный'];
-// Роли проведённого детского занятия (справочник UI; ставки — из config/ставок группы)
-const CONDUCTED_ROLES = ['суша','вода','процент'];
+// Станции занятия (кто где был). «процент» убран из UI — процентникам ЗП идёт
+// от пула независимо от присутствия (calcChildGroupPayroll). Старые 'процент'-записи
+// в истории отображаются как есть, но новые не создаём.
+const CONDUCTED_ROLES = ['суша','вода'];
+const STATION_META = { 'суша': {icon:'☀️', dot:'#eab308'}, 'вода': {icon:'🌊', dot:'#3b82f6'} };
 
 // ═══ ЭКРАН ГРУППЫ — ХАБ ═══
 // Главный экран = шапка (филиал/дети/тренеры/должники) + крупные кнопки-входы.
@@ -3713,24 +3716,24 @@ async function renderGroupDetail(groupId) {
     const instanceId = groupInfo.group_instance_id;
     const branch = groupInfo.branch;
     const groupTypeId = groupInfo.group_type_id;
-    const [clients, payments, members] = await Promise.all([
+    const [clients, payments, members, dbSubgroups] = await Promise.all([
       instanceId ? DB.getGroupClientsByInstance(instanceId) : DB.getGroupClients(groupId),
       instanceId ? DB.getGroupPaymentsByInstance(instanceId, month) : DB.getGroupPayments(groupId, month),
       instanceId ? DB.getGroupInstanceMembers(instanceId) : Promise.resolve([groupInfo]),
+      DB.getGroupSubgroups(instanceId, groupId),
     ]);
     const paidMap = Object.fromEntries(payments.map(p=>[p.group_client_id, p]));
     const debtors = clients.filter(c=>!paidMap[c.id]?.paid);
 
-    // Подгруппы: из колонки subgroup (до миграции undefined → '') + созданные в этой сессии
-    const prevExtra = (window._gd && String(window._gd.groupId)===String(groupId) && window._gd.extraSubgroups) || [];
-    const subgroups = [...new Set([...clients.map(c=>c.subgroup||'').filter(Boolean), ...prevExtra])].sort();
+    // Подгруппы: персистентные (group_subgroups) ∪ те, в которые уже переведены дети
+    const subgroups = [...new Set([...(dbSubgroups||[]), ...clients.map(c=>c.subgroup||'').filter(Boolean)])].sort();
     const prevSub = (window._gd && String(window._gd.groupId)===String(groupId)) ? (window._gd.currentSubgroup||'') : '';
 
     // Кешируем контекст для onclick-обработчиков (без JSON в атрибутах)
     window._gd = { groupId, instanceId, branch, groupTypeId, month, today,
                    members, clients, paidMap, noteMap:{}, canPayroll, role,
                    groupName: groupInfo.group_types?.name||'Группа',
-                   subgroups, extraSubgroups: prevExtra,
+                   subgroups, dbSubgroups: dbSubgroups||[],
                    currentSubgroup: subgroups.includes(prevSub) ? prevSub : '',
                    conductedMap: {}, attMap: {}, _screen: 'hub' };
 
@@ -3821,13 +3824,15 @@ async function renderGroupSessionScreen(groupId) {
   setupBack(()=>renderGroupDetail(groupId));
   loading('Загрузка занятия...');
   try {
-    const [conducted, todayAtt, clients] = await Promise.all([
+    const [conducted, todayAtt, clients, dbSubgroups] = await Promise.all([
       g.instanceId ? DB.getGroupConductedByDate(g.instanceId, g.today) : Promise.resolve([]),
       g.instanceId ? DB.getGroupAttendanceByInstance(g.instanceId, g.today) : DB.getGroupAttendance(g.groupId, g.today),
       g.instanceId ? DB.getGroupClientsByInstance(g.instanceId) : DB.getGroupClients(g.groupId),
+      DB.getGroupSubgroups(g.instanceId, g.groupId),
     ]);
     g.clients = clients;
-    g.subgroups = [...new Set([...clients.map(c=>c.subgroup||'').filter(Boolean), ...(g.extraSubgroups||[])])].sort();
+    g.dbSubgroups = dbSubgroups||[];
+    g.subgroups = [...new Set([...(dbSubgroups||[]), ...clients.map(c=>c.subgroup||'').filter(Boolean)])].sort();
     if (g.currentSubgroup && !g.subgroups.includes(g.currentSubgroup)) g.currentSubgroup = '';
     // Карта «кто проводил»: подгруппа → trainer_id → [роли]
     const cm = {};
@@ -3838,11 +3843,25 @@ async function renderGroupSessionScreen(groupId) {
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 
-// Стиль чипа роли «кто проводил» — активная роль акцентным цветом (Блок F)
-function _cndChipStyle(active) {
+// Пилюля тренера на станции (мультивыбор: тренер может быть на нескольких станциях)
+function _cndPillStyle(active) {
   return active
-    ? 'font-size:12px;padding:5px 12px;border-radius:14px;background:var(--accent);color:#fff;border:1px solid var(--accent);cursor:pointer'
-    : 'font-size:12px;padding:5px 12px;border-radius:14px;background:var(--card);color:var(--text);border:1px solid var(--border);cursor:pointer';
+    ? 'font-size:13px;padding:7px 14px;border-radius:16px;background:var(--accent);color:#fff;border:1px solid var(--accent);cursor:pointer'
+    : 'font-size:13px;padding:7px 14px;border-radius:16px;background:var(--card);color:var(--text);border:1px solid var(--border);cursor:pointer';
+}
+function _cndPill(trainerId, role, fio, active) {
+  return `<button class="cnd-chip" id="cnd-${trainerId}-${role}" style="${_cndPillStyle(active)}"
+    onclick="toggleConducted('${trainerId}','${role}')">${fio}${active?' ✓':''}</button>`;
+}
+// Сводка «кто где сегодня» по текущей подгруппе
+function _cndSummaryInner(g, sub) {
+  const cm = g.conductedMap[sub]||{};
+  const parts = CONDUCTED_ROLES.map(role=>{
+    const names = g.members.filter(t=>(cm[t.trainer_id]||[]).includes(role)).map(t=>t.profiles?.fio||'—');
+    if (!names.length) return '';
+    return `<span style="white-space:nowrap">${STATION_META[role]?.icon||''} ${role[0].toUpperCase()+role.slice(1)} — ${names.join(', ')}</span>`;
+  }).filter(Boolean);
+  return parts.length ? parts.join(' &nbsp;·&nbsp; ') : '<span style="color:var(--hint)">пока никто не отмечен</span>';
 }
 
 function renderGroupSessionScreenHtml() {
@@ -3858,6 +3877,19 @@ function renderGroupSessionScreenHtml() {
         style="font-size:12px;${s===sub?'background:var(--accent);color:#fff':'background:var(--card);border:1px solid var(--border)'}"
         onclick="switchSessionSubgroup('${encodeURIComponent(s)}')">${s||'Основная'}</button>`).join('')}
     </div>` : '';
+
+  const stationCards = g.members.length ? CONDUCTED_ROLES.map(role=>{
+    const m = STATION_META[role]||{};
+    const pills = g.members.map(t=>_cndPill(t.trainer_id, role, t.profiles?.fio||'—', (cm[t.trainer_id]||[]).includes(role))).join('');
+    return `<div class="staff-card" style="flex-direction:column;align-items:stretch;gap:10px;margin-bottom:10px">
+      <div style="display:flex;align-items:center;gap:6px;font-size:14px;font-weight:600">
+        <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${m.dot}"></span>
+        ${m.icon||''} ${role[0].toUpperCase()+role.slice(1)}
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">${pills}</div>
+    </div>`;
+  }).join('') : '<p class="hint">Тренеры не назначены</p>';
+
   setScreen(`<div class="app-header">
     ${backBtn()}
     <div class="app-title">Занятие сегодня</div>
@@ -3873,25 +3905,43 @@ function renderGroupSessionScreenHtml() {
       </div>
       <div style="font-size:12px;color:var(--hint)">Отмечено сегодня${hasSubs?` (${sub||'основная'})`:''}: <b>${headcount}</b> из ${subClients.length} дет.</div>
     </div>
-    <div class="staff-card" style="flex-direction:column;align-items:stretch;gap:0;margin-bottom:12px">
-      <div style="font-size:13px;font-weight:600;margin-bottom:4px">Кто проводил и где${hasSubs?` — ${sub||'основная'}`:''}</div>
-      ${g.members.map(t=>{
-        const cur = cm[t.trainer_id]||[];
-        return `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--border)">
-          <span style="font-size:13px;min-width:0;overflow:hidden;text-overflow:ellipsis;${g.canPayroll?'cursor:pointer':''}"
-            ${g.canPayroll?`onclick="openTrainerMenu('${t.id}')"`:''}>${t.profiles?.fio||'—'}${t.role?` <span style="font-size:11px;color:var(--hint)">(${t.role})</span>`:''}</span>
-          <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
-            ${CONDUCTED_ROLES.map(cr=>`<button class="cnd-chip" id="cnd-${t.trainer_id}-${cr}"
-              style="${_cndChipStyle(cur.includes(cr))}"
-              onclick="toggleConducted('${t.trainer_id}','${cr}')">${cr}</button>`).join('')}
-          </div>
-        </div>`;
-      }).join('')||'<p class="hint">Тренеры не назначены</p>'}
-      <div style="font-size:11px;color:var(--hint);margin-top:6px">Тап по роли — отметить «провёл», повторный тап — снять. Кого не было — не отмечайте.${g.canPayroll?' Тап по ФИО — меню тренера.':''}</div>
+
+    <div class="staff-card" style="background:rgba(124,58,237,.08);border:1px solid rgba(124,58,237,.25);flex-direction:column;align-items:stretch;gap:6px;margin-bottom:10px">
+      <div style="font-size:12px;color:var(--hint)">Кто где сегодня${hasSubs?` — ${sub||'основная'}`:''}</div>
+      <div id="cnd-summary" style="font-size:13px;line-height:1.6">${_cndSummaryInner(g, sub)}</div>
     </div>
+
+    <button class="btn btn-sm btn-full" style="background:var(--card);border:1px solid var(--border);margin-bottom:12px"
+      onclick="repeatLastConducted('${g.groupId}')">🔁 Повторить прошлое занятие</button>
+
+    <div style="font-size:13px;font-weight:600;margin-bottom:8px">Кто на какой станции${hasSubs?` — ${sub||'основная'}`:''}</div>
+    ${stationCards}
+    <div style="font-size:11px;color:var(--hint);margin:2px 0 12px">Тап по имени — отметить на станции, повторный тап — снять. Можно отметить тренера на обеих станциях. Кого не было — не отмечайте. Процентникам ЗП идёт независимо от присутствия.</div>
+
     <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
       onclick="renderGroupAttendanceByDate('${g.groupId}')">📅 Посещаемость за другую дату</button>
   </div></div>`);
+}
+
+// «Повторить прошлое занятие» — переносит отметки последнего занятия на сегодня (текущая подгруппа)
+async function repeatLastConducted(groupId) {
+  const g = window._gd; if (!g || !g.instanceId) return toast('Недоступно для этой группы','error');
+  if (_pending.has('repeatcnd')) return;
+  _pending.add('repeatcnd');
+  try {
+    const {date, rows} = await DB.getLastConductedBefore(g.instanceId, g.today);
+    if (!date || !rows.length) { toast('Нет прошлых занятий для копирования','info'); return; }
+    const sub = g.currentSubgroup||'';
+    const mine = rows.filter(r=>(r.subgroup||'')===sub && CONDUCTED_ROLES.includes(r.conducted_role));
+    if (!mine.length) { toast('В прошлом занятии нет отметок для этой подгруппы','info'); return; }
+    const headcount = g.clients.filter(c=>(c.subgroup||'')===sub && g.attMap[c.id]).length;
+    for (const r of mine) {
+      await DB.setGroupConducted(r.trainer_id, g.groupTypeId, g.branch, g.today, headcount, r.conducted_role, g.instanceId, sub);
+    }
+    toast(`Перенесено с ${fmtDate(date)} ✅`,'success');
+    renderGroupSessionScreen(groupId); // перезагрузка с обновлёнными отметками
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+  finally { _pending.delete('repeatcnd'); }
 }
 
 function switchSessionSubgroup(subEnc) {
@@ -3929,8 +3979,12 @@ async function toggleConducted(trainerId, conductedRole) {
     }
     DB.auditLog('group_conducted', STATE.profile.id, STATE.profile.fio, trainerId, 'group_session',
       { date:g.today, role:conductedRole, removed:already, subgroup:sub }, g.branch);
+    // Обновляем только нажатую пилюлю и сводку — без перерисовки экрана (не прыгает)
     const btn = document.getElementById(`cnd-${trainerId}-${conductedRole}`);
-    if (btn) btn.style.cssText = _cndChipStyle(!already);
+    if (btn) { const fio = g.members.find(t=>t.trainer_id===trainerId)?.profiles?.fio||'—';
+               btn.outerHTML = _cndPill(trainerId, conductedRole, fio, !already); }
+    const sumEl = document.getElementById('cnd-summary');
+    if (sumEl) sumEl.innerHTML = _cndSummaryInner(g, sub);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
   finally { _pending.delete(key); }
 }
@@ -3943,15 +3997,17 @@ async function renderGroupChildrenScreen(groupId) {
   setupBack(()=>renderGroupDetail(groupId));
   loading('Загрузка списка...');
   try {
-    const [clients, payments, notes] = await Promise.all([
+    const [clients, payments, notes, dbSubgroups] = await Promise.all([
       g.instanceId ? DB.getGroupClientsByInstance(g.instanceId) : DB.getGroupClients(g.groupId),
       g.instanceId ? DB.getGroupPaymentsByInstance(g.instanceId, g.month) : DB.getGroupPayments(g.groupId, g.month),
       DB.getGroupProgressNotes(g.groupId, g.month),
+      DB.getGroupSubgroups(g.instanceId, g.groupId),
     ]);
     g.clients = clients;
     g.paidMap = Object.fromEntries(payments.map(p=>[p.group_client_id, p]));
     g.noteMap = Object.fromEntries(notes.map(n=>[n.group_client_id, n]));
-    g.subgroups = [...new Set([...clients.map(c=>c.subgroup||'').filter(Boolean), ...(g.extraSubgroups||[])])].sort();
+    g.dbSubgroups = dbSubgroups||[];
+    g.subgroups = [...new Set([...(dbSubgroups||[]), ...clients.map(c=>c.subgroup||'').filter(Boolean)])].sort();
     renderGroupChildrenScreenHtml();
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
@@ -4041,16 +4097,23 @@ function promptAddSubgroup() {
   document.body.appendChild(m);
   setTimeout(()=>document.getElementById('new-subgroup-name')?.focus(), 50);
 }
-function doAddSubgroup() {
+async function doAddSubgroup() {
   const g = window._gd; if (!g) return;
   const name = (document.getElementById('new-subgroup-name')?.value||'').trim();
   if (!name) return toast('Введите название','error');
   if (g.subgroups.includes(name)) return toast('Такая подгруппа уже есть','error');
-  (g.extraSubgroups ||= []).push(name);
-  g.subgroups = [...new Set([...g.subgroups, name])].sort();
-  document.querySelector('.modal-overlay')?.remove();
-  toast(`Подгруппа «${name}» добавлена — переведите в неё детей`,'success');
-  if (g._screen==='children') renderGroupChildrenScreenHtml();
+  if (_pending.has('addsubg')) return;
+  _pending.add('addsubg');
+  try {
+    await DB.addGroupSubgroup(g.instanceId, g.groupId, name, STATE.profile?.id);
+    (g.dbSubgroups ||= []).push(name);
+    g.subgroups = [...new Set([...g.subgroups, name])].sort();
+    document.querySelector('.modal-overlay')?.remove();
+    toast(`Подгруппа «${name}» добавлена — переведите в неё детей`,'success');
+    if (g._screen==='children') renderGroupChildrenScreenHtml();
+    else if (g._screen==='session') renderGroupSessionScreenHtml();
+  } catch(e) { toast('Ошибка сохранения подгруппы','error'); console.error(e); }
+  finally { _pending.delete('addsubg'); }
 }
 
 // Модал «Перевести в подгруппу…» из меню ребёнка

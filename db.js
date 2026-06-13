@@ -854,6 +854,43 @@ async unassignTrainerGroup(id) {
   // ─── КТО ПРОВОДИЛ ДЕТСКОЕ ЗАНЯТИЕ (conducted_role) ──────────
   // Детский флоу: каждое проведённое занятие тренером инстанса = строка в group_sessions
   // с conducted_role IN ('суша','вода','процент'). NULL = взрослая запись (logGroupSession).
+  // ─── ПОДГРУППЫ (персистентные, не зависят от наличия детей) ───
+  async getGroupSubgroups(groupInstanceId, groupId) {
+    return cached(`grp:subg:${groupInstanceId||'g'+groupId}`, async () => {
+      let q = sb().from('group_subgroups').select('name');
+      q = groupInstanceId ? q.eq('group_instance_id', groupInstanceId) : q.eq('group_id', groupId).is('group_instance_id', null);
+      const {data,error} = await q;
+      if (error) { console.warn('[getGroupSubgroups]', error.message); return []; }
+      return (data||[]).map(r=>r.name);
+    });
+  },
+  async addGroupSubgroup(groupInstanceId, groupId, name, createdBy=null) {
+    invalidateCachePrefix('grp:subg:');
+    const {error} = await sb().from('group_subgroups')
+      .insert({group_instance_id: groupInstanceId||null, group_id: groupInstanceId?null:groupId, name, created_by: createdBy});
+    if (error && error.code!=='23505') throw error; // 23505 = уже есть, не ошибка
+  },
+  async removeGroupSubgroup(groupInstanceId, groupId, name) {
+    invalidateCachePrefix('grp:subg:');
+    let q = sb().from('group_subgroups').delete().eq('name', name);
+    q = groupInstanceId ? q.eq('group_instance_id', groupInstanceId) : q.eq('group_id', groupId).is('group_instance_id', null);
+    const {error} = await q;
+    if (error) throw error;
+  },
+  // Отметки «кто проводил» последнего занятия ДО указанной даты (для «повторить прошлое»)
+  async getLastConductedBefore(groupInstanceId, beforeDate) {
+    const {data,error} = await sb().from('group_sessions')
+      .select('trainer_id,conducted_role,subgroup,session_date,headcount')
+      .eq('group_instance_id', groupInstanceId)
+      .not('conducted_role','is',null)
+      .lt('session_date', beforeDate)
+      .order('session_date',{ascending:false}).limit(50);
+    if (error) throw error;
+    const rows = data||[];
+    if (!rows.length) return {date:null, rows:[]};
+    const lastDate = rows[0].session_date;
+    return {date:lastDate, rows: rows.filter(r=>r.session_date===lastDate)};
+  },
   async getGroupConductedByDate(groupInstanceId, date) {
     // select('*') — безопасно и до миграции subgroup (явный список колонок упал бы)
     const {data,error} = await sb().from('group_sessions')

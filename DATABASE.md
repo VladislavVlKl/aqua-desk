@@ -162,7 +162,10 @@ leader_name + leader_fee_percent · group_instance_id uuid · days_of_week text[
 **adult_group_clients** — взрослые: `group_id, name, is_active`
 
 **group_sessions** — проведённые занятия групп: `trainer_id, group_type_id, branch, session_date, headcount, client_ids uuid[], session_type, conducted_role, group_instance_id, subgroup`
-> Взрослые группы: запись создаёт `logGroupSession`, `conducted_role IS NULL`. Детские (арт-свим): запись = отметка «кто проводил» с ролью `'суша'|'вода'|'процент'` (CHECK), `group_instance_id` и `subgroup` (`''` = основная). Unique index `uq_group_sessions_conducted (trainer_id, session_date, group_type_id, branch, conducted_role, subgroup)` — upsert детских отметок по этим 6 колонкам (PostgREST onConflict); взрослые записи с `conducted_role IS NULL` не ограничиваются (NULLS DISTINCT), их дубли (две тренировки в день) легитимны.
+> Взрослые группы: запись создаёт `logGroupSession`, `conducted_role IS NULL`. Детские (арт-свим): запись = отметка «кто проводил» на станции `'суша'|'вода'` (CHECK ещё допускает `'процент'` для старых записей, но UI его больше не создаёт — процентникам ЗП идёт от пула независимо от присутствия), `group_instance_id` и `subgroup` (`''` = основная). Станции — мультивыбор: один тренер может быть и на суше, и на воде. Unique index `uq_group_sessions_conducted (trainer_id, session_date, group_type_id, branch, conducted_role, subgroup)` — upsert детских отметок по этим 6 колонкам (PostgREST onConflict); взрослые записи с `conducted_role IS NULL` не ограничиваются (NULLS DISTINCT), их дубли (две тренировки в день) легитимны.
+
+**group_subgroups** — персистентные подгруппы: `id, group_instance_id (uuid, null для одиночной группы), group_id (int, заполнен если нет instance), name, created_by, created_at`
+> Подгруппа существует независимо от наличия детей (раньше пустая подгруппа жила только в памяти `_gd.extraSubgroups` и исчезала после перезахода). Список подгрупп = `group_subgroups.name` ∪ `group_clients.subgroup`. Unique: `(group_instance_id,name)` или `(group_id,name)` при NULL instance.
 
 **group_attendance** — посещаемость детей: `group_id, group_client_id, group_instance_id, session_date, attended`
 
