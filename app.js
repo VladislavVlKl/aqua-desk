@@ -4085,12 +4085,14 @@ function renderSubgroupManagerHtml() {
   navPush(_subgroupBack(g));
   const subOptions = (cur) => ['', ...g.subgroups]
     .map(s=>`<option value="${encodeURIComponent(s)}" ${s===(cur||'')?'selected':''}>${s||'Основная'}</option>`).join('');
-  const subsLine = _subgroupCountsLine(g);
   const childRows = g.clients.length ? g.clients.map(c=>`
-    <div class="staff-card" style="align-items:center;justify-content:space-between;gap:8px">
-      <span style="font-size:14px;min-width:0;overflow:hidden;text-overflow:ellipsis">${c.name}</span>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:10px 12px">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:14px;font-weight:500;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.name||'Без имени'}</div>
+        ${c.level?`<div style="font-size:11px;color:var(--hint)">${c.level}</div>`:''}
+      </div>
       <select onchange="quickAssignSubgroup('${c.id}',this.value)"
-        style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:6px 8px;color:var(--text);font-size:13px;flex-shrink:0">
+        style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:7px 8px;color:var(--text);font-size:13px;flex-shrink:0;max-width:140px">
         ${subOptions(c.subgroup)}
       </select>
     </div>`).join('') : '<p class="hint">Детей пока нет</p>';
@@ -4100,16 +4102,17 @@ function renderSubgroupManagerHtml() {
     <button class="btn btn-sm btn-primary" style="font-size:12px" onclick="promptAddSubgroup()">+ подгруппа</button>
   </div>
   <div class="tab-content"><div class="tab-pad">
-    <div id="subg-counts" class="staff-card" style="margin-bottom:12px;font-size:12px;color:var(--hint)">${subsLine||'Подгрупп нет'}</div>
+    <div id="subg-counts" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px">${_subgroupCountsChips(g)}</div>
     <div style="font-size:13px;font-weight:600;margin-bottom:8px">Кто в какой подгруппе</div>
     <div style="display:flex;flex-direction:column;gap:8px">${childRows}</div>
-    <p class="hint" style="margin-top:10px">«Основная» = без подгруппы. Изменения сразу видны в «Сегодня» и «Список детей».</p>
+    <p class="hint" style="margin-top:12px">«Основная» = без подгруппы. Изменения сразу видны в «Сегодня» и «Список детей».</p>
   </div></div>`);
 }
-function _subgroupCountsLine(g) {
+function _subgroupCountsChips(g) {
   const counts = {};
   g.clients.forEach(c=>{ const s=c.subgroup||''; counts[s]=(counts[s]||0)+1; });
-  return ['', ...g.subgroups].map(s=>`${s||'Основная'} · ${counts[s]||0}`).join('  ·  ');
+  return ['', ...g.subgroups].map(s=>`<span style="font-size:12px;padding:5px 10px;border-radius:14px;background:rgba(124,58,237,.1);border:1px solid rgba(124,58,237,.25);color:var(--text)">
+    ${s||'Основная'} <b style="color:var(--accent)">${counts[s]||0}</b></span>`).join('');
 }
 async function quickAssignSubgroup(childId, encSub) {
   const g = window._gd; if (!g) return;
@@ -4121,7 +4124,7 @@ async function quickAssignSubgroup(childId, encSub) {
     const c = g.clients.find(x=>String(x.id)===String(childId)); if (c) c.subgroup = sub;
     // Обновляем только строку-сводку счётчиков — без перерисовки (не сбрасывает скролл)
     const el = document.getElementById('subg-counts');
-    if (el) el.innerHTML = _subgroupCountsLine(g)||'Подгрупп нет';
+    if (el) el.innerHTML = _subgroupCountsChips(g);
   } catch(e) { toast('Ошибка сохранения','error'); console.error(e); }
   finally { _pending.delete(`qsub_${childId}`); }
 }
