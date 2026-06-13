@@ -77,6 +77,13 @@ async function cached(key, fn, ttl=300000) {
 function invalidateCache(...keys) {
   keys.forEach(k => delete _cache[k]);
 }
+// Сбросить все кеши по префиксу. Группы используют префикс 'grp:' —
+// любой write-метод групп в db.js вызывает invalidateCachePrefix('grp:'),
+// поэтому отчёты/списки/ставки гарантированно свежие после оплаты,
+// отметки «кто проводил», перевода в подгруппу, смены ставок.
+function invalidateCachePrefix(prefix) {
+  Object.keys(_cache).forEach(k => { if (k.startsWith(prefix)) delete _cache[k]; });
+}
 
 // ── LAZY LOAD XLSX ────────────────────────────
 let _xlsxLoaded = false;
@@ -182,8 +189,8 @@ function navPush(fn) { STATE._backFn = fn; }
 function goBack() {
   if (STATE._backFn) { const f=STATE._backFn; STATE._backFn=null; f(); return; }
   const role = STATE.profile?.role;
-  if (role==='admin'||role==='ceo') { renderAdminApp(); adminTab('groups'); }
-  else if (role==='senior_trainer') { renderSeniorApp(); seniorTab('groups'); }
+  if (role==='admin'||role==='ceo') { renderAdminApp('groups'); }
+  else if (role==='senior_trainer') { renderSeniorApp('groups'); }
   else { renderTrainerApp(); switchTab('groups'); }
 }
 // Кнопка назад с правильным цветом темы
@@ -2728,7 +2735,7 @@ async function doAdminTransfer(clientId) {
 async function renderClientProfile(clientId, backTab='home') {
   const isAdmin = STATE.profile.role === 'admin';
   setupBack(()=>{
-    if (backTab === 'admin-clients') { renderAdminApp(); adminTab('clients'); }
+    if (backTab === 'admin-clients') { renderAdminApp('clients'); }
     else switchTab(backTab);
     setupBack(null);
   });
@@ -3286,7 +3293,7 @@ async function doExportSummary(year,month,branch) {
 // ============================================================
 // SECTION: SENIOR — renderSeniorApp, renderSeniorAnalytics, seniorTab
 // ============================================================
-async function renderSeniorApp() {
+async function renderSeniorApp(initialTab='home') {
   setupBack(null);
   setScreen(`<div class="app-header">
     <div><div class="app-title">⭐ AquaDesk</div>
@@ -3307,7 +3314,7 @@ async function renderSeniorApp() {
     <button class="nav-btn" onclick="seniorTab('groups')"><span>🏊</span>Группы</button>
     <button class="nav-btn" onclick="seniorTab('more')"><span>⋯</span>Ещё</button>
   </nav>`);
-  seniorTab('home');
+  seniorTab(initialTab);
   setTimeout(checkInAppNotifications, 2000);
 }
 async function renderSeniorAnalytics() {
@@ -3604,14 +3611,12 @@ async function loadSeniorGroupsList() {
           <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-start">
             <button class="btn btn-sm btn-primary"
               onclick="${g.group_types?.type==='children'?`renderGroupDetail('${g.id}')`:`renderAdultGroupDetail('${g.id}')`}">Открыть</button>
-            ${g.group_types?.type==='children'?`<button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
-              onclick="openGroupReport('${g.id}','${new Date().toISOString().slice(0,7)+'-01'}','list')">📊 Отчёт</button>`:''}
             ${canEdit?`<button class="btn btn-sm" style="font-size:12px;background:rgba(124,58,237,.15);color:#a78bfa"
               onclick="openSeniorGroupPersonnel('${g.id}')">👥 Персонал</button>`:''}
             ${canEdit?`<button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
               onclick="renderGroupScheduleModal('${g.id}','${encodeURIComponent(JSON.stringify(g.days_of_week||[]))}','${g.session_time||''}')">🗓️</button>`:''}
-            <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
-              onclick="renderGroupSubstitutionModal('${g.id}')">🔄 Замена</button>
+            ${g.group_types?.type!=='children'?`<button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
+              onclick="renderGroupSubstitutionModal('${g.id}')">🔄 Замена</button>`:''}
           </div>
         </div>
       </div>`;
@@ -3653,9 +3658,9 @@ async function renderGroupDetail(groupId) {
   const role = STATE.profile?.role;
   const canPayroll = ['admin','senior_trainer'].includes(role);
   const _backToGroups = role==='admin'||role==='ceo'
-    ? ()=>{ renderAdminApp(); adminTab('groups'); }
+    ? ()=>{ renderAdminApp('groups'); }
     : role==='senior_trainer'
-    ? ()=>{ renderSeniorApp(); seniorTab('groups'); }
+    ? ()=>{ renderSeniorApp('groups'); }
     : ()=>{ renderTrainerShell('groups'); };
   navPush(_backToGroups);
   setupBack(_backToGroups);
@@ -4309,7 +4314,7 @@ async function loadBranchSummary(year,month,branch) {
 // ============================================================
 // SECTION: ADMIN:SHELL — renderAdminApp, adminTab, renderAdminMore
 // ============================================================
-function renderAdminApp() {
+function renderAdminApp(initialTab='summary') {
   setupBack(null);
   setScreen(`<div class="app-header">
     <div><div class="app-title">👑 Координатор</div>
@@ -4330,7 +4335,7 @@ function renderAdminApp() {
     <button class="nav-btn" onclick="adminTab('control')"><span>🔍</span>Контроль</button>
     <button class="nav-btn" onclick="adminTab('more')"><span>⋯</span>Ещё</button>
   </nav>`);
-  adminTab('summary');
+  adminTab(initialTab);
   setTimeout(checkInAppNotifications, 2000);
 }
 function adminTab(tab) {
@@ -4429,7 +4434,7 @@ const AUDIT_LABELS = {
   group_progress_note:       { icon:'📝', label:'Заметка о прогрессе' },
 };
 async function renderAuditLog() {
-  setupBack(()=>{renderAdminApp();adminTab('more');setupBack(null);});
+  setupBack(()=>{renderAdminApp('more');setupBack(null);});
   $('#tab-content').innerHTML=`<div class="tab-pad">
     <div class="section-header"><h3>🗂 Реестр действий</h3></div>
     <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
@@ -4496,7 +4501,7 @@ async function loadAuditLog() {
 }
 
 async function renderAdminSessionNotes() {
-  setupBack(()=>{renderAdminApp();adminTab('more');setupBack(null);});
+  setupBack(()=>{renderAdminApp('more');setupBack(null);});
   $('#tab-content').innerHTML=`<div class="tab-pad">
     <div class="section-header"><h3>📝 Конспекты и цели</h3></div>
     <div class="form-group" style="display:flex;gap:8px">
@@ -4894,7 +4899,7 @@ function renderSummaryTable(data,year,month,isAdmin) {
 
 async function adminDetail(trainerId,fioEnc,year,month) {
   const fio=decodeURIComponent(fioEnc);
-  setupBack(()=>{renderAdminApp();adminTab('summary');setupBack(null);});
+  setupBack(()=>{renderAdminApp('summary');setupBack(null);});
   $('#tab-content').innerHTML=`<div class="tab-pad"><h3>${fio}</h3><div class="center-screen"><div class="spinner"></div></div></div>`;
   try {
     const d=await DB.getTrainerDetail(trainerId,year,month);
@@ -5661,7 +5666,7 @@ async function renderAdminGroups() {
   render();
 }
 async function renderGroupsStructure() {
-  setupBack(()=>{ renderAdminApp(); adminTab('groups'); setupBack(null); });
+  setupBack(()=>{ renderAdminApp('groups'); setupBack(null); });
   $('#tab-content').innerHTML=`<div class="tab-pad">
     <div class="section-header"><h3>📋 Структура групп</h3></div>
     <div id="gs-body"><div class="center-screen"><div class="spinner"></div></div></div>
@@ -6178,9 +6183,9 @@ function openGroupReport(groupId, monthStr, kind='list', anchor='') {
   if (kind==='detail') {
     backFn = ()=>renderGroupDetail(groupId);
   } else if (role==='admin'||role==='ceo') {
-    backFn = ()=>{ renderAdminApp(); adminTab('groups'); };
+    backFn = ()=>{ renderAdminApp('groups'); };
   } else if (role==='senior_trainer') {
-    backFn = ()=>{ renderSeniorApp(); seniorTab('groups'); };
+    backFn = ()=>{ renderSeniorApp('groups'); };
   } else {
     backFn = ()=>renderTrainerShell('groups');
   }
@@ -6218,12 +6223,15 @@ async function renderGroupMonthReport(groupId, monthStr, view='full') {
 
     // Флаги потенциальных дублей (только для координатора/старшего)
     const instanceId = trainers[0]?.group_instance_id||null;
-    const dupFlags = (isAdmin||STATE.profile.role==='senior_trainer') && instanceId
-      ? await DB.getDuplicateFlags(instanceId) : [];
-
-    // История ставок для авто-расчёта ЗП (до применения миграции вернёт [])
-    const rateHistory = (isAdmin||STATE.profile.role==='senior_trainer')
-      ? await DB.getRateHistory(trainers.map(t=>t.id), monthStr) : [];
+    const canSeePayrollData = isAdmin||STATE.profile.role==='senior_trainer';
+    // Оба запроса независимы и от отчёта, и друг от друга — грузим параллельно,
+    // а не двумя последовательными await (экономит один сетевой round-trip).
+    // dupFlags — флаги дублей имён; rateHistory — история ставок для авто-ЗП
+    // (до применения миграции вернёт []).
+    const [dupFlags, rateHistory] = await Promise.all([
+      (canSeePayrollData && instanceId) ? DB.getDuplicateFlags(instanceId) : Promise.resolve([]),
+      canSeePayrollData ? DB.getRateHistory(trainers.map(t=>t.id), monthStr) : Promise.resolve([]),
+    ]);
 
     const isArtSwimGroup = groupTypeInfo?.name?.toLowerCase().includes('art');
     const canSeePayroll  = (isAdmin || STATE.profile.role==='senior_trainer') && isArtSwimGroup;
@@ -8228,9 +8236,9 @@ async function renderAdultGroupDetail(groupId, monthStr) {
   const role = STATE.profile?.role;
   if (!STATE._backFn) { // не перезаписываем если уже есть (навигация по месяцам)
     const _backToGroups = role==='admin'||role==='ceo'
-      ? ()=>{ renderAdminApp(); adminTab('groups'); }
+      ? ()=>{ renderAdminApp('groups'); }
       : role==='senior_trainer'
-      ? ()=>{ renderSeniorApp(); seniorTab('groups'); }
+      ? ()=>{ renderSeniorApp('groups'); }
       : ()=>{ renderTrainerShell('groups'); };
     navPush(_backToGroups);
     setupBack(_backToGroups);

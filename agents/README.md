@@ -72,7 +72,7 @@ client = anthropic.Anthropic()  # ANTHROPIC_API_KEY в окружении
 AGENTS = pathlib.Path(__file__).parent
 
 def ask(agent: str, messages: list[dict]) -> str:
-    system = (AGENTS / f"{agent}.md").read_text()
+    system_prompt = (AGENTS / f"{agent}.md").read_text()
     # контекст-якоря проекта
     root = AGENTS.parent
     anchors = {"orchestrator": ["CLAUDE.md"],
@@ -81,14 +81,26 @@ def ask(agent: str, messages: list[dict]) -> str:
                "devops": ["CLAUDE.md"]}
     ctx = "\n\n".join(f"<doc name=\"{f}\">\n{(root/f).read_text()}\n</doc>"
                       for f in anchors[agent] if (root/f).exists())
+    # Системный блок статичен в пределах диалога → кешируем его.
+    # cache_control на последнем блоке кеширует весь префикс system.
+    # Кеш живёт ~5 мин, бьётся при правке .md или якоря; messages НЕ кешируем
+    # (они меняются каждый ход и сбили бы кеш).
+    system = [
+        {"type": "text", "text": system_prompt},
+        {"type": "text",
+         "text": "# Актуальные документы проекта\n" + ctx,
+         "cache_control": {"type": "ephemeral"}},
+    ]
     resp = client.messages.create(
         model="claude-fable-5",
         max_tokens=8192,
-        system=system + "\n\n# Актуальные документы проекта\n" + ctx,
+        system=system,
         messages=messages,
     )
     return resp.content[0].text
 ```
+
+> **Caching (п.1 оптимизации токенов):** системный блок (промпт агента + якоря) одинаков на каждом ходе диалога, поэтому помечается `cache_control: ephemeral` — повторные ходы читают его из кеша по ~0.1× цены. Порядок блоков не менять и волатильный контент (сообщения пользователя) внутрь кешируемого префикса не класть, иначе кеш не попадёт.
 
 Инструменты (чтение/запись файлов, git, Supabase) подключаются через tool use — схемы инструментов перечислены в промпте каждого агента в секции «Инструменты». На первом этапе можно запускать агентов без инструментов, в режиме «советника»: они выдают diff/SQL/команды, а применяешь ты руками или через Claude Code.
 

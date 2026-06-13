@@ -448,15 +448,19 @@ async getAssignedTrainers(groupTypeId) {
   },
   // Клиенты по instance (общий список)
   async getGroupClientsByInstance(groupInstanceId) {
-    const {data,error} = await sb().from('group_clients')
-      .select('*').eq('group_instance_id', groupInstanceId)
-      .eq('is_active',true).order('name');
-    if (error) throw error; return data||[];
+    return cached(`grp:cli:i:${groupInstanceId}`, async () => {
+      const {data,error} = await sb().from('group_clients')
+        .select('*').eq('group_instance_id', groupInstanceId)
+        .eq('is_active',true).order('name');
+      if (error) throw error; return data||[];
+    });
   },
   async getGroupPaymentsByInstance(groupInstanceId, month) {
-    const {data,error} = await sb().from('group_payments')
-      .select('*').eq('group_instance_id', groupInstanceId).eq('month',month);
-    if (error) throw error; return data||[];
+    return cached(`grp:pay:i:${groupInstanceId}:${month}`, async () => {
+      const {data,error} = await sb().from('group_payments')
+        .select('*').eq('group_instance_id', groupInstanceId).eq('month',month);
+      if (error) throw error; return data||[];
+    });
   },
   async getGroupAttendanceByInstance(groupInstanceId, date) {
     const {data,error} = await sb().from('group_attendance')
@@ -464,16 +468,18 @@ async getAssignedTrainers(groupTypeId) {
     if (error) throw error; return data||[];
   },
   async getDuplicateFlags(groupInstanceId) {
-    const {data,error} = await sb().from('group_client_duplicate_flags')
-      .select('*')
-      .eq('group_instance_id', groupInstanceId).eq('status','pending');
-    if (error) return []; // таблица или FK не настроены — просто пропускаем
-    if (!data?.length) return [];
-    // Подтягиваем имена клиентов отдельно
-    const ids = [...new Set(data.flatMap(f=>[f.client_id_1, f.client_id_2].filter(Boolean)))];
-    const {data:clients} = await sb().from('group_clients').select('id,name,age').in('id',ids);
-    const cMap = Object.fromEntries((clients||[]).map(c=>[c.id,c]));
-    return data.map(f=>({...f, c1: cMap[f.client_id_1]||null, c2: cMap[f.client_id_2]||null}));
+    return cached(`grp:dup:${groupInstanceId}`, async () => {
+      const {data,error} = await sb().from('group_client_duplicate_flags')
+        .select('*')
+        .eq('group_instance_id', groupInstanceId).eq('status','pending');
+      if (error) return []; // таблица или FK не настроены — просто пропускаем
+      if (!data?.length) return [];
+      // Подтягиваем имена клиентов отдельно
+      const ids = [...new Set(data.flatMap(f=>[f.client_id_1, f.client_id_2].filter(Boolean)))];
+      const {data:clients} = await sb().from('group_clients').select('id,name,age').in('id',ids);
+      const cMap = Object.fromEntries((clients||[]).map(c=>[c.id,c]));
+      return data.map(f=>({...f, c1: cMap[f.client_id_1]||null, c2: cMap[f.client_id_2]||null}));
+    });
   },
   async resolveDuplicateFlag(id, status) {
     const {error} = await sb().from('group_client_duplicate_flags')
