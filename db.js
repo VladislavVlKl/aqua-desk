@@ -380,10 +380,12 @@ async deleteClient(id) {
   },
 
   async updateGroupType(id, fields) {
+    invalidateCachePrefix('grp:');
     const {error} = await sb().from('group_types').update(fields).eq('id',id);
     if (error) throw error;
   },
   async deleteGroupType(id) {
+    invalidateCachePrefix('grp:');
     // Unassign all trainers first
     await sb().from('trainer_groups')
       .update({subscription_end: new Date().toISOString().slice(0,10)})
@@ -392,6 +394,7 @@ async deleteClient(id) {
     if (error) throw error;
   },
   async addGroupType(fields) {
+    invalidateCachePrefix('grp:');
     const {data,error} = await sb().from('group_types').insert(fields).select().single();
     if (error) throw error; return data;
   },
@@ -411,6 +414,7 @@ async getAssignedTrainers(groupTypeId) {
     if (error) throw error; return data||[];
   },
   async addTrainerGroup(trainerId, groupTypeId, branch, startDate, rateType='percent', rateValue=40, role=null, groupInstanceId=null) {
+    invalidateCachePrefix('grp:');
     const {data,error} = await sb().from('trainer_groups')
       .insert({trainer_id:trainerId, group_type_id:groupTypeId, branch,
                subscription_start:startDate, rate_type:rateType,
@@ -420,16 +424,19 @@ async getAssignedTrainers(groupTypeId) {
     if (error) throw error; return data;
   },
   async updateTrainerGroupSchedule(id, daysOfWeek, sessionTime) {
+    invalidateCachePrefix('grp:');
     const {error} = await sb().from('trainer_groups')
       .update({days_of_week: daysOfWeek, session_time: sessionTime}).eq('id',id);
     if (error) throw error;
   },
   async updateTrainerGroupRate(id, rateType, rateValue) {
+    invalidateCachePrefix('grp:');
     const {error} = await sb().from('trainer_groups')
       .update({rate_type: rateType, rate_value: rateValue}).eq('id',id);
     if (error) throw error;
   },
   async updateTrainerGroupLeader(id, leaderName, leaderFeePct) {
+    invalidateCachePrefix('grp:');
     const {error} = await sb().from('trainer_groups')
       .update({leader_name: leaderName||null, leader_fee_percent: leaderFeePct||0}).eq('id',id);
     if (error) throw error;
@@ -440,11 +447,13 @@ async getAssignedTrainers(groupTypeId) {
     if (error) throw error;
   },
   async getGroupInstanceMembers(groupInstanceId) {
-    const {data,error} = await sb().from('trainer_groups')
-      .select('*, profiles(fio), group_types(name,type)')
-      .eq('group_instance_id', groupInstanceId)
-      .is('subscription_end',null);
-    if (error) throw error; return data||[];
+    return cached(`grp:members:${groupInstanceId}`, async () => {
+      const {data,error} = await sb().from('trainer_groups')
+        .select('*, profiles(fio), group_types(name,type)')
+        .eq('group_instance_id', groupInstanceId)
+        .is('subscription_end',null);
+      if (error) throw error; return data||[];
+    });
   },
   // Клиенты по instance (общий список)
   async getGroupClientsByInstance(groupInstanceId) {
@@ -482,11 +491,13 @@ async getAssignedTrainers(groupTypeId) {
     });
   },
   async resolveDuplicateFlag(id, status) {
+    invalidateCachePrefix('grp:');
     const {error} = await sb().from('group_client_duplicate_flags')
       .update({status}).eq('id',id);
     if (error) throw error;
   },
 async unassignTrainerGroup(id) {
+    invalidateCachePrefix('grp:');
     const {error} = await sb().from('trainer_groups')
       .update({subscription_end: todayStr()}).eq('id',id);
     if (error) throw error;
@@ -494,11 +505,14 @@ async unassignTrainerGroup(id) {
 
   // ─── GROUP CLIENTS ────────────────────────────
   async getGroupClients(groupId) {
-    const {data,error} = await sb().from('group_clients')
-      .select('*').eq('group_id',groupId).eq('is_active',true).order('name');
-    if (error) throw error; return data||[];
+    return cached(`grp:cli:g:${groupId}`, async () => {
+      const {data,error} = await sb().from('group_clients')
+        .select('*').eq('group_id',groupId).eq('is_active',true).order('name');
+      if (error) throw error; return data||[];
+    });
   },
   async addGroupClient(groupId, name, age, monthlyPrice, startDate, groupInstanceId=null, subgroup='') {
+    invalidateCachePrefix('grp:');
     // subgroup: '' = основная подгруппа (колонка group_clients.subgroup, NOT NULL DEFAULT '')
     const {data,error} = await sb().from('group_clients')
       .insert({group_id:groupId, name, age:age||null,
@@ -509,15 +523,18 @@ async unassignTrainerGroup(id) {
     if (error) throw error; return data;
   },
   async updateGroupClient(id, fields) {
+    invalidateCachePrefix('grp:');
     const {error} = await sb().from('group_clients').update(fields).eq('id',id);
     if (error) throw error;
   },
   async archiveGroupClient(id) {
+    invalidateCachePrefix('grp:');
     const {error} = await sb().from('group_clients')
       .update({is_active:false}).eq('id',id);
     if (error) throw error;
   },
   async restoreGroupClient(id) {
+    invalidateCachePrefix('grp:');
     const {error} = await sb().from('group_clients')
       .update({is_active:true}).eq('id',id);
     if (error) throw error;
@@ -534,14 +551,17 @@ async unassignTrainerGroup(id) {
   },
 
   async deleteGroupClient(id) {
+    invalidateCachePrefix('grp:');
     const {error} = await sb().from('group_clients').delete().eq('id',id);
     if (error) throw error;
   },
   async deleteAdultGroupClient(id) {
+    invalidateCachePrefix('grp:');
     const {error} = await sb().from('adult_group_clients').delete().eq('id',id);
     if (error) throw error;
   },
   async deleteGroupAttendanceDay(groupId, date, groupInstanceId=null) {
+    invalidateCachePrefix('grp:');
     // Удаляем по instance_id если есть, иначе по group_id
     let q = sb().from('group_attendance').delete().eq('session_date',date);
     if (groupInstanceId) q = q.eq('group_instance_id', groupInstanceId);
@@ -557,6 +577,7 @@ async unassignTrainerGroup(id) {
     if (error) throw error; return data||[];
   },
   async saveGroupAttendance(groupId, groupClientId, date, attended, groupInstanceId=null) {
+    invalidateCachePrefix('grp:');
     const {error} = await sb().from('group_attendance')
       .upsert({group_id:groupId, group_client_id:groupClientId,
                session_date:date, attended,
@@ -596,11 +617,14 @@ async unassignTrainerGroup(id) {
 
   // ─── GROUP PAYMENTS ───────────────────────────
   async getGroupPayments(groupId, month) {
-    const {data,error} = await sb().from('group_payments')
-      .select('*').eq('group_id',groupId).eq('month',month);
-    if (error) throw error; return data||[];
+    return cached(`grp:pay:g:${groupId}:${month}`, async () => {
+      const {data,error} = await sb().from('group_payments')
+        .select('*').eq('group_id',groupId).eq('month',month);
+      if (error) throw error; return data||[];
+    });
   },
   async setGroupPayment(groupId, groupClientId, month, amount, paid, subStart=null, subEnd=null, groupInstanceId=null) {
+    invalidateCachePrefix('grp:');
     // Сохраняем оригинальную дату оплаты если уже была оплачена
     const {data:existing} = await sb().from('group_payments')
       .select('paid_at').eq('group_client_id',groupClientId).eq('month',month).maybeSingle();
@@ -623,6 +647,7 @@ async unassignTrainerGroup(id) {
     if (error) throw error; return data||[];
   },
   async saveGroupProgressNote(groupId, groupClientId, trainerId, month, note) {
+    invalidateCachePrefix('grp:');
     const {error} = await sb().from('group_progress_notes')
       .upsert({group_id:groupId, group_client_id:groupClientId,
                trainer_id:trainerId, month, note},
@@ -636,6 +661,7 @@ async unassignTrainerGroup(id) {
     if (error) throw error; return data;
   },
   async setGroupTrainerPayout(groupId, trainerId, month, payoutType, payoutValue, approvedBy, note='', bonus=0, penalty=0) {
+    invalidateCachePrefix('grp:');
     const {error} = await sb().from('group_trainer_payouts')
       .upsert({group_id:groupId, trainer_id:trainerId, month,
                payout_type:payoutType, payout_value:payoutValue,
@@ -661,6 +687,7 @@ async unassignTrainerGroup(id) {
   // try/catch fallback []: до применения миграции таблицы нет — код не должен падать.
   async getRateHistory(trainerGroupIds, monthStr) {
     if (!trainerGroupIds?.length) return [];
+    return cached(`grp:rate:${[...trainerGroupIds].sort().join(',')}:${monthStr}`, async () => {
     try {
       const next = new Date(monthStr); next.setMonth(next.getMonth()+1);
       const {data,error} = await sb().from('trainer_group_rate_history')
@@ -669,6 +696,7 @@ async unassignTrainerGroup(id) {
         .order('effective_from',{ascending:true});
       if (error) throw error; return data||[];
     } catch(e) { console.warn('[getRateHistory]', e?.message||e); return []; }
+    });
   },
   async getRateHistoryByTg(tgId, limit=5) {
     try {
@@ -679,6 +707,7 @@ async unassignTrainerGroup(id) {
     } catch(e) { console.warn('[getRateHistoryByTg]', e?.message||e); return []; }
   },
   async addRateHistory(trainerGroupId, rateType, rateValue, effectiveFrom, createdBy) {
+    invalidateCachePrefix('grp:');
     const {error} = await sb().from('trainer_group_rate_history')
       .insert({trainer_group_id:trainerGroupId, rate_type:rateType, rate_value:rateValue,
                effective_from:effectiveFrom, created_by:createdBy});
@@ -686,6 +715,7 @@ async unassignTrainerGroup(id) {
   },
   // Отчёт по детской группе за месяц (для старшего/админа)
   async getGroupMonthReport(groupId, month) {
+    return cached(`grp:report:${groupId}:${month}`, async () => {
     const nextMonth = new Date(month); nextMonth.setMonth(nextMonth.getMonth()+1);
     const nextMonthStr = nextMonth.toISOString().slice(0,10);
 
@@ -763,9 +793,11 @@ async unassignTrainerGroup(id) {
       substitutions:    substitutions.data||[],
       groupTypeInfo:    tgRow?.group_types||null,
     };
+    });
   },
 
   async updateGroupSubstitutionRate(id, rate) {
+    invalidateCachePrefix('grp:');
     const {error} = await sb().from('group_substitutions').update({rate}).eq('id',id);
     if (error) throw error;
   },
@@ -803,6 +835,7 @@ async unassignTrainerGroup(id) {
 
   // ─── GROUP SESSIONS ──────────────────────────
   async logGroupSession(trainerId, groupTypeId, branch, date, headcount) {
+    invalidateCachePrefix('grp:');
     const {data,error} = await sb().from('group_sessions')
       .insert({trainer_id:trainerId,group_type_id:groupTypeId,branch,session_date:date,headcount})
       .select().single();
@@ -830,6 +863,7 @@ async unassignTrainerGroup(id) {
     if (error) throw error; return data||[];
   },
   async setGroupConducted(trainerId, groupTypeId, branch, date, headcount, conductedRole, groupInstanceId, subgroup='') {
+    invalidateCachePrefix('grp:');
     // subgroup ВСЕГДА в payload ('' = основная) — уникальный индекс из 6 колонок
     const {data,error} = await sb().from('group_sessions')
       .upsert({trainer_id:trainerId, group_type_id:groupTypeId, branch,
@@ -841,6 +875,7 @@ async unassignTrainerGroup(id) {
     if (error) throw error; return data;
   },
   async removeGroupConducted(trainerId, groupTypeId, branch, date, conductedRole, subgroup='') {
+    invalidateCachePrefix('grp:');
     const {error} = await sb().from('group_sessions').delete()
       .eq('trainer_id',trainerId).eq('group_type_id',groupTypeId).eq('branch',branch)
       .eq('session_date',date).eq('conducted_role',conductedRole)
@@ -1535,6 +1570,7 @@ async unassignTrainerGroup(id) {
   // Авто-ЗП тренера по всем его детским группам за месяц — та же формула calcChildGroupPayroll.
   // Используется в отчёте тренера (loadTrainerReport) и деталях (getTrainerDetail).
   async getChildGroupsAutoSalary(trainerId, monthStr) {
+    return cached(`grp:autosal:${trainerId}:${monthStr}`, async () => {
     try {
       const nextD = new Date(monthStr); nextD.setMonth(nextD.getMonth()+1);
       const toDay = nextD.toISOString().slice(0,10);
@@ -1592,6 +1628,7 @@ async unassignTrainerGroup(id) {
         });
       return {total, rows};
     } catch(e) { console.error('[getChildGroupsAutoSalary]', e); return {total:0, rows:[]}; }
+    });
   },
 
   async getTrainerDetail(trainerId, year, month) {
@@ -2267,6 +2304,7 @@ Object.assign(DB, {
     if (error) throw error; return data||[];
   },
   async addAdultGroupClient(groupId, name) {
+    invalidateCachePrefix('grp:');
     const {data,error} = await sb().from('adult_group_clients')
       .insert({group_id:groupId, name}).select().single();
     if (error) throw error; return data;
@@ -2279,6 +2317,7 @@ Object.assign(DB, {
 
   // ─── ЗАМЕНА В ГРУППАХ ────────────────────────
   async createGroupSubstitution(groupId, originalTrainerId, substituteTrainerId, sessionDate) {
+    invalidateCachePrefix('grp:');
     const {data,error} = await sb().from('group_substitutions')
       .insert({group_id:groupId, original_trainer_id:originalTrainerId,
                substitute_trainer_id:substituteTrainerId,
@@ -2294,6 +2333,7 @@ Object.assign(DB, {
     if (error) throw error; return data||[];
   },
   async approveSubstitution(id, rate) {
+    invalidateCachePrefix('grp:');
     const {error} = await sb().from('group_substitutions')
       .update({status:'approved', rate}).eq('id',id);
     if (error) throw error;
