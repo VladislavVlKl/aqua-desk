@@ -1967,6 +1967,22 @@ function calcChildGroupPayroll({payments=[], trainers=[], instanceSessions=[], s
   const adjByTrainer = {};
   (adjustments||[]).forEach(a=>{ adjByTrainer[a.trainer_id] = a; });
 
+  // ── НОВАЯ модель Арт-свим: ВСЁ считается от ПУЛА (вал/2) ──
+  // 1) руководитель = leaderPct% пула; 2) ставочники = занятия×ставка;
+  // 3) остаток пула делят процентники ПРОПОРЦИОНАЛЬНО своим % (один — берёт весь остаток);
+  // 4) процентников нет (все ставочники) → остаток уходит руководителю.
+  const leaderFeeBaseArt = leaderPct>0 ? Math.round(pool*leaderPct/100) : 0;
+  const remainderArt = pool - leaderFeeBaseArt - flatCost; // на процентников
+  const sumPctWeight = percentTrainers.reduce((s,t)=>s+(Number(t.rate_value)||0),0);
+  const pctShareArt = {}; // trainerId → доля остатка пула (до вычета его замен)
+  percentTrainers.forEach(t=>{
+    const w = Number(t.rate_value)||0;
+    const share = percentTrainers.length===1 ? remainderArt
+                : sumPctWeight>0               ? remainderArt * w / sumPctWeight
+                :                                remainderArt / percentTrainers.length;
+    pctShareArt[t.trainer_id] = Math.max(0, Math.round(share));
+  });
+
   const subs = substitutions||[];
   const rows = trainers.map(t=>{
     const mySessions   = (instanceSessions||[]).filter(s=>s.trainer_id===t.trainer_id);
@@ -1981,10 +1997,13 @@ function calcChildGroupPayroll({payments=[], trainers=[], instanceSessions=[], s
     let autoAmt=0, calcNote='';
     if (isArtSwim) {
       if (t.rate_type==='percent') {
-        // Процентный тренер: % от ПОЛНОГО вала − ставки ставочников − его замены
-        const {base,pctLabel} = pctBase(t,0);
-        autoAmt  = Math.max(0, base - flatCost - mySubCost);
-        calcNote = `${pctLabel} × вал ${F(totalRevenue)}${flatCost?` − ставки (${F(flatCost)})`:''}${mySubCost?` − замены (${F(mySubCost)})`:''}`;
+        // Процентник берёт долю ОСТАТКА ПУЛА (пропорц. своему %; один — весь остаток),
+        // из неё вычитаются замены, где заменяли его.
+        const share = pctShareArt[t.trainer_id]||0;
+        autoAmt  = Math.max(0, share - mySubCost);
+        calcNote = percentTrainers.length>1
+          ? `доля пула ${t.rate_value||0}%: ${F(share)}${mySubCost?` − замены (${F(mySubCost)})`:''}`
+          : `остаток пула: ${F(share)}${mySubCost?` − замены (${F(mySubCost)})`:''}`;
       } else {
         // Flat тренер: занятия × ставка (по истории на дату занятия)
         autoAmt  = flatSessionsCost(t);
@@ -2018,32 +2037,21 @@ function calcChildGroupPayroll({payments=[], trainers=[], instanceSessions=[], s
             final:0, mySubs, subsICovered, subsICoveredCost};
   });
 
-  // Руководитель: % от ПОЛНОГО вала (без истории); кейс «все flat» (арт-свим) — остаток пула
+  // Руководитель.
+  //  • Арт-свим, есть процентники → leaderPct% пула (база).
+  //  • Арт-свим, все ставочники   → leaderPct% пула + ВЕСЬ остаток пула (остаток руководителю).
+  //  • Не арт-свим                → старая логика: % от полного вала.
   let leaderFee = 0;
-  if (allFlat && isArtSwim) {
-    const totalFlatPay = rows.reduce((s,r)=>s+r.autoAmt,0);
-    leaderFee = Math.max(0, pool - totalFlatPay);
+  let poolCapped = false; // в новой модели пул сходится по построению, ужатие не нужно
+  if (isArtSwim) {
+    if (allFlat) {
+      const totalFlatPay = rows.reduce((s,r)=>s+r.autoAmt,0);
+      leaderFee = Math.max(0, pool - totalFlatPay); // 10% базы + остаток пула
+    } else {
+      leaderFee = leaderFeeBaseArt;
+    }
   } else {
     leaderFee = leaderPct>0 ? Math.round(totalRevenue*leaderPct/100) : 0;
-  }
-
-  // ЛИМИТ ПУЛА (только Арт-свим): суммарные выплаты не превышают пул (вал/2).
-  // Ставки ставочников — фикс. обязательства, ужимаем только процентные суммы пропорционально.
-  let poolCapped = false;
-  if (isArtSwim && !allFlat) {
-    const flatTotal = rows.filter(r=>r.rateType!=='percent').reduce((s,r)=>s+r.autoAmt,0);
-    const pctTotal  = leaderFee + rows.filter(r=>r.rateType==='percent').reduce((s,r)=>s+r.autoAmt,0);
-    if (flatTotal + pctTotal > pool && pctTotal > 0) {
-      poolCapped = true;
-      const k = Math.max(0, pool - flatTotal) / pctTotal;
-      leaderFee = Math.round(leaderFee * k);
-      rows.forEach(r=>{
-        if (r.rateType==='percent') {
-          r.autoAmt  = Math.round(r.autoAmt * k);
-          r.calcNote += ' · ужато до лимита пула';
-        }
-      });
-    }
   }
 
   // Итог по тренеру = авто + премия − штраф (замены НЕ входят)

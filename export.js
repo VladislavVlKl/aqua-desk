@@ -714,7 +714,7 @@ function exportGroupPayrollExcel(groupName, monthStr, totalRevenue, activeCount,
     rows.push([
       tc(leaderName, ls),
       tc('Руководитель', ls),
-      tc(`${leaderPct}% от вала`, ls),
+      tc(`${leaderPct}% пула (+ остаток, если все ставочники)`, ls),
       mc(leaderFee, ls),
       tc('—', ls),
       tc('—', ls),

@@ -6462,18 +6462,17 @@ async function renderGroupMonthReport(groupId, monthStr, view='full') {
               <span style="font-weight:700;font-size:15px">${fmt(totalRevenue)} сум</span>
             </div>
             <div style="display:flex;justify-content:space-between;margin-bottom:4px">
-              <span style="font-size:13px;color:var(--hint)">Лимит выплат — пул (50% вала)</span>
+              <span style="font-size:13px;color:var(--hint)">Пул (50% вала) — распределяется весь</span>
               <span style="font-weight:600;font-size:14px">${fmt(pool)} сум</span>
             </div>
             ${leaderName ? `<div style="display:flex;justify-content:space-between;margin-bottom:4px">
-              <span style="font-size:12px;color:var(--hint)">Руководитель${allFlat ? ' (остаток пула)' : ` (${leaderPct}% от вала)`}: ${leaderName}</span>
+              <span style="font-size:12px;color:var(--hint)">Руководитель${allFlat ? ` (${leaderPct}% пула + остаток)` : ` (${leaderPct}% пула)`}: ${leaderName}</span>
               <span style="font-size:13px;color:#f59e0b;font-weight:600">−${fmt(leaderFee)} сум</span>
             </div>` : ''}
             <div style="display:flex;justify-content:space-between;padding-top:8px;border-top:1px solid rgba(124,58,237,.2)">
-              <span style="font-size:12px;color:var(--hint)">Остаток лимита</span>
-              <span style="font-size:13px;font-weight:600;color:${remainder>=0?'#10b981':'#ef4444'}">${fmt(remainder)} сум</span>
+              <span style="font-size:12px;color:var(--hint)">Нераспределённый остаток пула</span>
+              <span style="font-size:13px;font-weight:600;color:${Math.abs(remainder)<1000?'#10b981':'#f59e0b'}">${fmt(remainder)} сум</span>
             </div>
-            ${poolCapped ? `<div style="margin-top:8px;font-size:12px;color:#f59e0b;font-weight:600">⚠️ выплаты ограничены пулом — процентные суммы ужаты пропорционально</div>` : ''}
           </div>` : ''}
 
           ${trainerRows.map(r => `
@@ -6539,7 +6538,7 @@ async function renderGroupMonthReport(groupId, monthStr, view='full') {
             <div style="display:flex;justify-content:space-between;align-items:center">
               <div>
                 <div style="font-weight:600;font-size:14px">Руководитель: ${leaderName}</div>
-                <div style="font-size:12px;color:var(--hint)">${allFlat ? 'Остаток пула' : leaderPct+'% от вала '+fmt(totalRevenue)+' сум'+(poolCapped?' (ужато лимитом пула)':'')}</div>
+                <div style="font-size:12px;color:var(--hint)">${isArtSwim ? (allFlat ? `${leaderPct}% пула + остаток пула` : `${leaderPct}% пула ${fmt(pool)} сум`) : leaderPct+'% от вала '+fmt(totalRevenue)+' сум'}</div>
               </div>
               <div style="display:flex;align-items:center;gap:8px">
                 <span style="font-size:18px;font-weight:700;color:var(--accent)">${fmt(leaderFee)} сум</span>
