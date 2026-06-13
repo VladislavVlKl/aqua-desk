@@ -2370,6 +2370,20 @@ Object.assign(DB, {
       .select().single();
     if (error) throw error; return data;
   },
+  // История замен группы (по всем строкам инстанса), новые сверху
+  async getGroupSubstitutionsHistory(groupId) {
+    const {data:tg} = await sb().from('trainer_groups').select('group_instance_id').eq('id',groupId).single();
+    let gIds = [groupId];
+    if (tg?.group_instance_id) {
+      const {data:rows} = await sb().from('trainer_groups').select('id').eq('group_instance_id',tg.group_instance_id);
+      gIds = (rows||[]).map(r=>r.id);
+    }
+    const {data,error} = await sb().from('group_substitutions')
+      .select('*, original:profiles!original_trainer_id(fio), substitute:profiles!substitute_trainer_id(fio)')
+      .in('group_id', gIds)
+      .order('session_date',{ascending:false});
+    if (error) throw error; return data||[];
+  },
   async getPendingSubstitutions(branch) {
     const {data,error} = await sb().from('group_substitutions')
       .select('*, original:profiles!original_trainer_id(fio), substitute:profiles!substitute_trainer_id(fio), trainer_groups(*, group_types(name))')

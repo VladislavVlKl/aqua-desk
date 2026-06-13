@@ -3759,41 +3759,39 @@ async function renderGroupDetail(groupId) {
       <div class="staff-card" style="flex-direction:column;align-items:stretch;gap:8px;margin-bottom:14px">
         ${infoRow('Филиал', `<span style="font-weight:600;font-size:13px">${branch}</span>`)}
         ${infoRow('Детей', `<span style="font-weight:600;font-size:13px">${clients.length}${subgroups.length?` · подгрупп: ${subgroups.length+1}`:''}</span>`)}
-        ${infoRow('Тренеров', `<span style="font-weight:600;font-size:13px">${members.length}</span>`)}
+        ${infoRow('Тренеров', `<span style="font-weight:600;font-size:13px">${new Set(members.map(t=>t.trainer_id)).size}</span>`)}
         ${infoRow('Должники', debtors.length
           ? `<button class="btn btn-sm" style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#ef4444;font-size:12px"
               onclick="renderGroupDebtorsModal(${JSON.stringify(debtors.map(c=>c.name)).replace(/"/g,'&quot;')})">⚠️ ${debtors.length}</button>`
           : `<span style="font-weight:600;font-size:13px;color:#10b981">нет</span>`)}
       </div>
-      <div style="display:flex;flex-direction:column;gap:10px">
-        ${bigBtn('✅','Занятие сегодня',`${fmtDate(today)} · отметка детей и «кто проводил»`,`renderGroupSessionScreen('${groupId}')`)}
-        ${bigBtn('👶',`Список детей (${clients.length})`, subgroups.length?'по подгруппам · оплаты · заметки':'добавление · оплаты · заметки',`renderGroupChildrenScreen('${groupId}')`)}
-        ${bigBtn('📊','Отчёт по детям','посещаемость · оплаты · Excel',`openGroupReport('${groupId}','${month}','detail')`)}
-        ${canPayroll?bigBtn('💰','ЗП за месяц','авто-расчёт · премии/штрафы',`openGroupReport('${groupId}','${month}','detail','payroll')`):''}
-        ${bigBtn('📅','История занятий','по датам · явка · кто проводил',`renderGroupHistoryScreen('${groupId}')`)}
-        ${bigBtn('🔄','Замена','кто провёл занятие вместо вас',`renderGroupSubstitutionModal('${groupId}')`)}
-        ${canPayroll?bigBtn('👥','Персонал','тренеры группы · ставки',`openSeniorGroupPersonnel('${groupId}')`):''}
-        ${bigBtn('📦','Архив детей','вернуть ребёнка в группу',`renderGroupArchiveModal('${groupId}','${instanceId||''}')`)}
-      </div>
+      ${(()=>{
+        const grpHdr = t => `<div style="font-size:12px;font-weight:600;color:var(--hint);text-transform:uppercase;letter-spacing:.4px;margin:6px 2px 2px">${t}</div>`;
+        return `
+        ${grpHdr('Управление')}
+        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px">
+          ${canPayroll?bigBtn('👥','Персонал','тренеры · ставки · расписание',`openSeniorGroupPersonnel('${groupId}')`):''}
+          ${bigBtn('👶',`Список детей (${clients.length})`, subgroups.length?'по подгруппам · оплаты · заметки':'добавление · оплаты · заметки',`renderGroupChildrenScreen('${groupId}')`)}
+        </div>
 
-      ${canPayroll?`
-      <!-- Расписание по ролям: у вода/суша-строк оно своё, редактируется раздельно -->
-      <h4 style="margin:18px 0 8px">Расписание по ролям</h4>
-      <div style="display:flex;flex-direction:column;gap:8px">
-        ${members.map(mb=>{
-          const sched = mb.days_of_week?.length
-            ? `${mb.days_of_week.join('/')}${mb.session_time?' '+mb.session_time:''}`
-            : '⚠️ не задано';
-          return `<div class="staff-card" style="align-items:center;justify-content:space-between">
-            <div>
-              <div class="staff-fio" style="font-size:14px">${_groupRoleDot(mb.role)}${mb.role||'роль не указана'}</div>
-              <div class="staff-meta">${mb.profiles?.fio||'—'} · ${sched}</div>
-            </div>
-            <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
-              onclick="renderGroupScheduleModal('${mb.id}','${encodeURIComponent(JSON.stringify(mb.days_of_week||[]))}','${mb.session_time||''}')">🗓️ Изменить</button>
-          </div>`;
-        }).join('')}
-      </div>`:''}
+        ${grpHdr('Занятия')}
+        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px">
+          ${bigBtn('✅','Занятие сегодня',`${fmtDate(today)} · кто на станции`,`renderGroupSessionScreen('${groupId}')`)}
+          ${bigBtn('📅','История занятий','по датам · явка · кто проводил',`renderGroupHistoryScreen('${groupId}')`)}
+          ${bigBtn('🔄','История замен','прошедшие и текущие замены',`renderGroupSubstitutionsHistory('${groupId}')`)}
+        </div>
+
+        ${grpHdr('Финансы и отчёты')}
+        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px">
+          ${bigBtn('📊','Отчёт по детям','посещаемость · оплаты · Excel',`openGroupReport('${groupId}','${month}','detail')`)}
+          ${canPayroll?bigBtn('💰','ЗП за месяц','авто-расчёт · премии/штрафы',`openGroupReport('${groupId}','${month}','detail','payroll')`):''}
+        </div>
+
+        ${grpHdr('Прочее')}
+        <div style="display:flex;flex-direction:column;gap:8px">
+          ${bigBtn('📦','Архив детей','вернуть ребёнка в группу',`renderGroupArchiveModal('${groupId}','${instanceId||''}')`)}
+        </div>`;
+      })()}
     </div></div>`);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
@@ -3853,11 +3851,17 @@ function _cndPill(trainerId, role, fio, active) {
   return `<button class="cnd-chip" id="cnd-${trainerId}-${role}" style="${_cndPillStyle(active)}"
     onclick="toggleConducted('${trainerId}','${role}')">${fio}${active?' ✓':''}</button>`;
 }
+// Уникальные тренеры (один человек может быть в двух строках инстанса: вода + суша)
+function _uniqMembers(members) {
+  const seen = new Set();
+  return (members||[]).filter(t=>{ if (seen.has(t.trainer_id)) return false; seen.add(t.trainer_id); return true; });
+}
 // Сводка «кто где сегодня» по текущей подгруппе
 function _cndSummaryInner(g, sub) {
   const cm = g.conductedMap[sub]||{};
+  const uniq = _uniqMembers(g.members);
   const parts = CONDUCTED_ROLES.map(role=>{
-    const names = g.members.filter(t=>(cm[t.trainer_id]||[]).includes(role)).map(t=>t.profiles?.fio||'—');
+    const names = uniq.filter(t=>(cm[t.trainer_id]||[]).includes(role)).map(t=>t.profiles?.fio||'—');
     if (!names.length) return '';
     return `<span style="white-space:nowrap">${STATION_META[role]?.icon||''} ${role[0].toUpperCase()+role.slice(1)} — ${names.join(', ')}</span>`;
   }).filter(Boolean);
@@ -3878,9 +3882,10 @@ function renderGroupSessionScreenHtml() {
         onclick="switchSessionSubgroup('${encodeURIComponent(s)}')">${s||'Основная'}</button>`).join('')}
     </div>` : '';
 
-  const stationCards = g.members.length ? CONDUCTED_ROLES.map(role=>{
+  const uniqMembers = _uniqMembers(g.members);
+  const stationCards = uniqMembers.length ? CONDUCTED_ROLES.map(role=>{
     const m = STATION_META[role]||{};
-    const pills = g.members.map(t=>_cndPill(t.trainer_id, role, t.profiles?.fio||'—', (cm[t.trainer_id]||[]).includes(role))).join('');
+    const pills = uniqMembers.map(t=>_cndPill(t.trainer_id, role, t.profiles?.fio||'—', (cm[t.trainer_id]||[]).includes(role))).join('');
     return `<div class="staff-card" style="flex-direction:column;align-items:stretch;gap:10px;margin-bottom:10px">
       <div style="display:flex;align-items:center;gap:6px;font-size:14px;font-weight:600">
         <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${m.dot}"></span>
@@ -8278,6 +8283,41 @@ async function doLinkGroupInstance(groupId, newInstanceId) {
     document.querySelector('.modal-overlay')?.remove();
     toast('Связано ✅','success');
     loadSeniorGroupsList();
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+
+// Экран «История замен» — список замен группы (создание замены живёт на «Занятие сегодня»)
+async function renderGroupSubstitutionsHistory(groupId) {
+  navPush(()=>renderGroupDetail(groupId));
+  setupBack(()=>renderGroupDetail(groupId));
+  loading('Загрузка замен...');
+  try {
+    const subs = await DB.getGroupSubstitutionsHistory(groupId);
+    const statusMeta = {
+      approved: {label:'утверждена', color:'#10b981', bg:'rgba(16,185,129,.12)'},
+      pending:  {label:'⏳ ожидает', color:'#f59e0b', bg:'rgba(245,158,11,.12)'},
+      rejected: {label:'отклонена', color:'#ef4444', bg:'rgba(239,68,68,.12)'},
+    };
+    const list = subs.length ? subs.map(s=>{
+      const st = statusMeta[s.status]||statusMeta.pending;
+      return `<div class="staff-card" style="flex-direction:column;align-items:stretch;gap:4px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span style="font-size:14px;font-weight:500">${s.substitute?.fio||'?'}</span>
+          <span style="font-size:11px;font-weight:600;color:${st.color};background:${st.bg};padding:2px 8px;border-radius:8px">${st.label}</span>
+        </div>
+        <div style="font-size:12px;color:var(--hint)">вместо ${s.original?.fio||'?'} · ${fmtDate(s.session_date)}${s.status==='approved'&&s.rate?` · ${fmt(s.rate)} сум`:''}</div>
+      </div>`;
+    }).join('') : '<div class="empty-state">🔄<p>Замен пока не было</p></div>';
+    setScreen(`<div class="app-header">
+      ${backBtn()}
+      <div class="app-title">История замен</div>
+      <span></span>
+    </div>
+    <div class="tab-content"><div class="tab-pad">
+      <button class="btn btn-primary btn-full" style="margin-bottom:12px"
+        onclick="renderGroupSubstitutionModal('${groupId}')">＋ Новая замена</button>
+      <div style="display:flex;flex-direction:column;gap:8px">${list}</div>
+    </div></div>`);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 
