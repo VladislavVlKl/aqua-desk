@@ -3642,15 +3642,8 @@ async function loadSeniorGroupsList() {
             <div class="staff-meta">${g.branch} · с ${g.subscription_start||'—'}</div>
             ${schedLabel}
           </div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-start">
-            <button class="btn btn-sm btn-primary" onclick="renderAdultGroupDetail('${g.id}')">Открыть</button>
-            ${canEdit?`<button class="btn btn-sm" style="font-size:12px;background:rgba(124,58,237,.15);color:#a78bfa"
-              onclick="openSeniorGroupPersonnel('${g.id}')">👥 Персонал</button>`:''}
-            ${canEdit?`<button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
-              onclick="renderGroupScheduleModal('${g.id}','${encodeURIComponent(JSON.stringify(g.days_of_week||[]))}','${g.session_time||''}')">🗓️</button>`:''}
-            <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
-              onclick="renderGroupSubstitutionModal('${g.id}')">🔄 Замена</button>
-          </div>
+          <button class="btn btn-sm btn-primary" style="align-self:flex-start"
+            onclick="renderAdultGroupDetail('${g.id}')">Открыть</button>
         </div>
       </div>`;
     });
