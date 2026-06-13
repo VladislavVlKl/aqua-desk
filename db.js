@@ -855,13 +855,16 @@ async unassignTrainerGroup(id) {
   // Детский флоу: каждое проведённое занятие тренером инстанса = строка в group_sessions
   // с conducted_role IN ('суша','вода','процент'). NULL = взрослая запись (logGroupSession).
   // ─── ПОДГРУППЫ (персистентные, не зависят от наличия детей) ───
+  // {names:[обычные подгруппы], mainLabel:строка|null} — метка главной ('') подгруппы
   async getGroupSubgroups(groupInstanceId, groupId) {
     return cached(`grp:subg:${groupInstanceId||'g'+groupId}`, async () => {
-      let q = sb().from('group_subgroups').select('name');
+      let q = sb().from('group_subgroups').select('name,is_main');
       q = groupInstanceId ? q.eq('group_instance_id', groupInstanceId) : q.eq('group_id', groupId).is('group_instance_id', null);
       const {data,error} = await q;
-      if (error) { console.warn('[getGroupSubgroups]', error.message); return []; }
-      return (data||[]).map(r=>r.name);
+      if (error) { console.warn('[getGroupSubgroups]', error.message); return {names:[], mainLabel:null}; }
+      const rows = data||[];
+      const mainRow = rows.find(r=>r.is_main);
+      return { names: rows.filter(r=>!r.is_main).map(r=>r.name), mainLabel: mainRow?.name || null };
     });
   },
   async addGroupSubgroup(groupInstanceId, groupId, name, createdBy=null) {
@@ -872,10 +875,36 @@ async unassignTrainerGroup(id) {
   },
   async removeGroupSubgroup(groupInstanceId, groupId, name) {
     invalidateCachePrefix('grp:subg:');
-    let q = sb().from('group_subgroups').delete().eq('name', name);
+    let q = sb().from('group_subgroups').delete().eq('name', name).eq('is_main', false);
     q = groupInstanceId ? q.eq('group_instance_id', groupInstanceId) : q.eq('group_id', groupId).is('group_instance_id', null);
     const {error} = await q;
     if (error) throw error;
+  },
+  // Метка главной ('') подгруппы. label='' → вернуть к «Основная» (удалить метку).
+  async setMainSubgroupLabel(groupInstanceId, groupId, label) {
+    invalidateCachePrefix('grp:subg:');
+    let del = sb().from('group_subgroups').delete().eq('is_main', true);
+    del = groupInstanceId ? del.eq('group_instance_id', groupInstanceId) : del.eq('group_id', groupId).is('group_instance_id', null);
+    await del;
+    if (!label) return;
+    const {error} = await sb().from('group_subgroups')
+      .insert({group_instance_id: groupInstanceId||null, group_id: groupInstanceId?null:groupId, name: label, is_main: true});
+    if (error && error.code!=='23505') throw error;
+  },
+  // Переименовать обычную подгруппу: меняем имя в group_subgroups + во всех записях детей и занятий
+  async renameGroupSubgroup(groupInstanceId, groupId, oldName, newName) {
+    invalidateCachePrefix('grp:');
+    const matchSub = q => groupInstanceId ? q.eq('group_instance_id', groupInstanceId) : q.eq('group_id', groupId).is('group_instance_id', null);
+    await matchSub(sb().from('group_subgroups').update({name:newName}).eq('name', oldName).eq('is_main', false));
+    // Дети: по инстансу или по группе
+    let cq = sb().from('group_clients').update({subgroup:newName}).eq('subgroup', oldName);
+    cq = groupInstanceId ? cq.eq('group_instance_id', groupInstanceId) : cq.eq('group_id', groupId);
+    await cq;
+    // Отметки занятий (история «кто проводил») — только при инстансе
+    if (groupInstanceId) {
+      await sb().from('group_sessions').update({subgroup:newName})
+        .eq('subgroup', oldName).eq('group_instance_id', groupInstanceId);
+    }
   },
   // Отметки «кто проводил» последнего занятия ДО указанной даты (для «повторить прошлое»)
   async getLastConductedBefore(groupInstanceId, beforeDate) {
