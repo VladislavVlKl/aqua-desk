@@ -191,12 +191,20 @@ function applyDutyShift(branchId) {
 }
 function wireDutyShift(branchId) {
   refreshDutyShiftOptions(branchId);
+  const sel = document.getElementById('duty-shift');
+  // Смена филиала: если выбранная смена осталась доступной — пересчитать время под филиал.
   document.getElementById(branchId)?.addEventListener('change', () => {
-    refreshDutyShiftOptions(branchId); applyDutyShift(branchId);
-  });
-  document.getElementById('duty-start')?.addEventListener('change', () => {
+    const cur = sel?.value;
     refreshDutyShiftOptions(branchId);
-    if (document.getElementById('duty-shift')?.value) applyDutyShift(branchId);
+    if (cur && sel.value === cur) applyDutyShift(branchId);
+  });
+  // Ручная правка времени → честно переключаем селект на «Ручной ввод».
+  // (applyDutyShift меняет .value программно — событие change не летит, селект не сбрасывается.)
+  ['duty-start','duty-end'].forEach(id => {
+    document.getElementById(id)?.addEventListener('change', () => {
+      if (sel) sel.value = '';
+      refreshDutyShiftOptions(branchId);
+    });
   });
 }
 // ============================================================
@@ -438,7 +446,7 @@ function renderTrainerShell(tab) {
       <div><div class="app-title">🏋️ AquaDesk</div>
         <div class="app-sub">${STATE.profile.fio}</div></div>
     <div style="display:flex;gap:6px;align-items:center">
-      <button class="btn-icon" id="note-badge" onclick="switchTab('clients')" style="position:relative">📝</button>
+      <button class="btn-icon" id="note-badge" onclick="renderOverdueNotesModal(window._overdueMap, window._clientsList)" style="position:relative">📝</button>
       <button class="btn-icon" onclick="openSchedule()">📅</button>
       <button class="btn-icon" onclick="renderHelpModal()">?</button>
       <button class="btn-icon" onclick="renderTrainerEditProfile()">👤</button>
@@ -479,19 +487,13 @@ async function checkNoteBadge() {
   try {
     const overdueMap = await DB.getOverdueNotesBatch(STATE.profile.id);
     const pending = Object.values(overdueMap).reduce((s,n)=>s+n, 0);
+    window._overdueMap = overdueMap;
     const badge = document.getElementById('note-badge');
     if (badge) {
-      if (pending > 0) {
-        window._overdueMap = overdueMap;
-        badge.innerHTML = `📝<span style="position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;border-radius:50%;font-size:9px;width:16px;height:16px;line-height:16px;text-align:center;display:inline-block">${pending}</span>`;
-        badge.onclick = () => {
-          if (window._clientsList?.length) renderOverdueNotesModal(window._overdueMap, window._clientsList);
-          else switchTab('clients');
-        };
-      } else {
-        badge.innerHTML = '📝';
-        badge.onclick = () => switchTab('clients');
-      }
+      badge.innerHTML = pending > 0
+        ? `📝<span style="position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;border-radius:50%;font-size:9px;width:16px;height:16px;line-height:16px;text-align:center;display:inline-block">${pending}</span>`
+        : '📝';
+      badge.onclick = () => renderOverdueNotesModal(window._overdueMap, window._clientsList);
       badge.style.cssText = 'display:inline-flex;position:relative';
     }
   } catch(e) { /* тихо */ }
@@ -509,9 +511,10 @@ async function renderHomeTab() {
     return d!==null&&d<=SUBSCRIPTION_WARN_DAYS&&d>=0;
   });
   const duties   = await DB.getDuties(STATE.profile.id,now.getFullYear(),now.getMonth()+1);
-  const defStart = [now.getFullYear(),String(now.getMonth()+1).padStart(2,'0'),
-    String(now.getDate()).padStart(2,'0')].join('-')+'T07:00';
-  const defEnd   = now.toISOString().slice(0,16);
+  const _p2 = n => String(n).padStart(2,'0');
+  const _ymd = `${now.getFullYear()}-${_p2(now.getMonth()+1)}-${_p2(now.getDate())}`;
+  const defStart = `${_ymd}T07:00`;
+  const defEnd   = `${_ymd}T${_p2(now.getHours())}:00`;
 
   $('#tab-content').innerHTML=`<div class="tab-pad">
 
@@ -803,15 +806,20 @@ async function renderClientsTab() {
   }
 }
 
-function renderOverdueNotesModal(overdueMap, clients) {
+async function renderOverdueNotesModal(overdueMap, clients) {
+  overdueMap = overdueMap || window._overdueMap || {};
+  if (!clients?.length)
+    clients = window._clientsList?.length ? window._clientsList : await DB.getClients(STATE.profile.id);
+  window._clientsList = clients;
   const clientMap = Object.fromEntries((clients||[]).map(c=>[c.id, c]));
-  const entries = Object.entries(overdueMap||{}).filter(([,n])=>n>0);
-  if (!entries.length) return;
+  const entries = Object.entries(overdueMap).filter(([,n])=>n>0);
   const m = el('div','modal-overlay');
   m.innerHTML=`<div class="modal">
-    <div class="modal-header"><h3>📝 Незакрытые конспекты</h3>
+    <div class="modal-header"><h3>📝 Конспекты</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
-    <p class="hint" style="margin-bottom:12px">Нажмите на клиента чтобы написать конспект:</p>
+    ${!entries.length
+      ? `<div class="empty-state" style="padding:24px 8px;text-align:center">✅<p>Все конспекты закрыты.<br>Незакрытых нет.</p></div>`
+      : `<p class="hint" style="margin-bottom:12px">Нажмите на клиента чтобы написать конспект:</p>
     <div id="overdue-notes-list" style="display:flex;flex-direction:column;gap:8px">
       ${entries.map(([clientId, count])=>{
         const c = clientMap[clientId];
@@ -835,7 +843,7 @@ function renderOverdueNotesModal(overdueMap, clients) {
           </div>
         </div>`;
       }).join('')}
-    </div>
+    </div>`}
   </div>`;
   document.body.appendChild(m);
 }
@@ -1930,9 +1938,10 @@ async function doConfirmCancel(slotId,date) {
 async function renderDutyTab() {
   const branches=STATE.profile.branches||[];
   const now=new Date();
-  const defStart=[now.getFullYear(),String(now.getMonth()+1).padStart(2,'0'),
-    String(now.getDate()).padStart(2,'0')].join('-')+'T07:00';
-  const defEnd=now.toISOString().slice(0,16);
+  const _p2=n=>String(n).padStart(2,'0');
+  const _ymd=`${now.getFullYear()}-${_p2(now.getMonth()+1)}-${_p2(now.getDate())}`;
+  const defStart=`${_ymd}T07:00`;
+  const defEnd=`${_ymd}T${_p2(now.getHours())}:00`;
   const duties=await DB.getDuties(STATE.profile.id,now.getFullYear(),now.getMonth()+1);
 
   $('#tab-content').innerHTML=`<div class="tab-pad">
