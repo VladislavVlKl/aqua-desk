@@ -3804,6 +3804,7 @@ function refreshGroupScreen(groupId) {
   if (g._screen==='children') return renderGroupChildrenScreen(groupId);
   if (g._screen==='session')  return renderGroupSessionScreen(groupId);
   if (g._screen==='history')  return renderGroupHistoryScreen(groupId, g.historyMonth);
+  if (g._screen==='subgroups') return openSubgroupManager(groupId, g._subgroupFrom);
   return renderGroupDetail(groupId);
 }
 
@@ -3875,12 +3876,14 @@ function renderGroupSessionScreenHtml() {
   const headcount = subClients.filter(c=>g.attMap[c.id]).length;
   const cm = g.conductedMap[sub]||{};
   const hasSubs = g.subgroups.length > 0;
-  const segHtml = hasSubs ? `
-    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
-      ${['', ...g.subgroups].map(s=>`<button class="btn btn-sm"
+  const segHtml = `
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+      ${hasSubs ? ['', ...g.subgroups].map(s=>`<button class="btn btn-sm"
         style="font-size:12px;${s===sub?'background:var(--accent);color:#fff':'background:var(--card);border:1px solid var(--border)'}"
-        onclick="switchSessionSubgroup('${encodeURIComponent(s)}')">${s||'Основная'}</button>`).join('')}
-    </div>` : '';
+        onclick="switchSessionSubgroup('${encodeURIComponent(s)}')">${s||'Основная'}</button>`).join('') : ''}
+      <button class="btn btn-sm" style="font-size:12px;background:var(--card);border:1px solid var(--border)${hasSubs?';margin-left:auto':''}"
+        onclick="openSubgroupManager('${g.groupId}','session')">👥 Подгруппы</button>
+    </div>`;
 
   const uniqMembers = _uniqMembers(g.members);
   const stationCards = uniqMembers.length ? CONDUCTED_ROLES.map(role=>{
@@ -4034,37 +4037,14 @@ function _childCardHtml(c) {
 
 function renderGroupChildrenScreenHtml() {
   const g = window._gd; if (!g) return;
-  const hasSubs = g.subgroups.length > 0;
-  let listHtml;
-  if (!g.clients.length) {
-    listHtml = '<p class="hint">Детей пока нет</p>';
-  } else if (!hasSubs) {
-    listHtml = g.clients.map(_childCardHtml).join('');
-  } else {
-    // Аккордеоны «подгруппа · N детей»; раскрытие локально, без перезагрузки
-    const bySub = {};
-    g.clients.forEach(c=>{ const s = c.subgroup||''; (bySub[s] ||= []).push(c); });
-    listHtml = ['', ...g.subgroups].map((s,i)=>{
-      const kids = bySub[s]||[];
-      const open = (g._openSubs?.[s]) !== false; // по умолчанию раскрыто
-      return `<div style="margin-bottom:8px">
-        <div onclick="toggleSubgroupAccordion(${i},'${encodeURIComponent(s)}')"
-          style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:var(--card);border:1px solid var(--border);border-radius:10px;cursor:pointer">
-          <span style="font-weight:600;font-size:14px">${s||'Основная'} · ${kids.length} дет.</span>
-          <span id="sub-arr-${i}" style="color:var(--hint)">${open?'▾':'▸'}</span>
-        </div>
-        <div id="sub-acc-${i}" style="${open?'':'display:none;'}padding-top:6px">
-          ${kids.map(_childCardHtml).join('')||'<p class="hint" style="padding:4px 6px">Пока пусто — переведите детей через меню ребёнка</p>'}
-        </div>
-      </div>`;
-    }).join('');
-  }
+  // ОДИН общий список без деления по подгруппам (подгруппа правится в меню ребёнка / менеджере подгрупп)
+  const listHtml = g.clients.length ? g.clients.map(_childCardHtml).join('') : '<p class="hint">Детей пока нет</p>';
   setScreen(`<div class="app-header">
     ${backBtn()}
     <div class="app-title">Список детей</div>
     <div style="display:flex;gap:6px">
       <button class="btn btn-sm" style="font-size:12px;background:var(--card);border:1px solid var(--border)"
-        onclick="promptAddSubgroup()">+ подгруппа</button>
+        onclick="openSubgroupManager('${g.groupId}','children')">👥 Подгруппы</button>
       <button class="btn btn-sm btn-primary" style="font-size:12px"
         onclick="renderAddGroupClientModal('${g.groupId}')">+ Ребёнок</button>
     </div>
@@ -4074,15 +4054,76 @@ function renderGroupChildrenScreenHtml() {
   </div></div>`);
 }
 
-function toggleSubgroupAccordion(idx, sEnc) {
-  const g = window._gd;
-  const body = document.getElementById(`sub-acc-${idx}`);
-  if (!body) return;
-  const nowOpen = body.style.display==='none';
-  body.style.display = nowOpen ? '' : 'none';
-  const arr = document.getElementById(`sub-arr-${idx}`);
-  if (arr) arr.textContent = nowOpen ? '▾' : '▸';
-  if (g) (g._openSubs ||= {})[decodeURIComponent(sEnc)] = nowOpen;
+// ═══ МЕНЕДЖЕР ПОДГРУПП — общий для «Список детей» и «Занятие сегодня» ═══
+// Создать подгруппу + раскидать детей. Данные персистентны (group_subgroups + group_clients.subgroup),
+// поэтому правки видны на обоих экранах и не конфликтуют.
+async function openSubgroupManager(groupId, from='children') {
+  const g = await ensureGd(groupId); if (!g) return;
+  g._subgroupFrom = from;
+  g._screen = 'subgroups';
+  // Свежие дети + подгруппы
+  loading('Загрузка подгрупп...');
+  try {
+    const [clients, dbSubgroups] = await Promise.all([
+      g.instanceId ? DB.getGroupClientsByInstance(g.instanceId) : DB.getGroupClients(g.groupId),
+      DB.getGroupSubgroups(g.instanceId, g.groupId),
+    ]);
+    g.clients = clients;
+    g.dbSubgroups = dbSubgroups||[];
+    g.subgroups = [...new Set([...(dbSubgroups||[]), ...clients.map(c=>c.subgroup||'').filter(Boolean)])].sort();
+    renderSubgroupManagerHtml();
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+function _subgroupBack(g) {
+  return g._subgroupFrom==='session'
+    ? ()=>renderGroupSessionScreen(g.groupId)
+    : ()=>renderGroupChildrenScreen(g.groupId);
+}
+function renderSubgroupManagerHtml() {
+  const g = window._gd; if (!g) return;
+  setupBack(_subgroupBack(g));
+  navPush(_subgroupBack(g));
+  const subOptions = (cur) => ['', ...g.subgroups]
+    .map(s=>`<option value="${encodeURIComponent(s)}" ${s===(cur||'')?'selected':''}>${s||'Основная'}</option>`).join('');
+  const subsLine = _subgroupCountsLine(g);
+  const childRows = g.clients.length ? g.clients.map(c=>`
+    <div class="staff-card" style="align-items:center;justify-content:space-between;gap:8px">
+      <span style="font-size:14px;min-width:0;overflow:hidden;text-overflow:ellipsis">${c.name}</span>
+      <select onchange="quickAssignSubgroup('${c.id}',this.value)"
+        style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:6px 8px;color:var(--text);font-size:13px;flex-shrink:0">
+        ${subOptions(c.subgroup)}
+      </select>
+    </div>`).join('') : '<p class="hint">Детей пока нет</p>';
+  setScreen(`<div class="app-header">
+    ${backBtn()}
+    <div class="app-title">Подгруппы</div>
+    <button class="btn btn-sm btn-primary" style="font-size:12px" onclick="promptAddSubgroup()">+ подгруппа</button>
+  </div>
+  <div class="tab-content"><div class="tab-pad">
+    <div id="subg-counts" class="staff-card" style="margin-bottom:12px;font-size:12px;color:var(--hint)">${subsLine||'Подгрупп нет'}</div>
+    <div style="font-size:13px;font-weight:600;margin-bottom:8px">Кто в какой подгруппе</div>
+    <div style="display:flex;flex-direction:column;gap:8px">${childRows}</div>
+    <p class="hint" style="margin-top:10px">«Основная» = без подгруппы. Изменения сразу видны в «Сегодня» и «Список детей».</p>
+  </div></div>`);
+}
+function _subgroupCountsLine(g) {
+  const counts = {};
+  g.clients.forEach(c=>{ const s=c.subgroup||''; counts[s]=(counts[s]||0)+1; });
+  return ['', ...g.subgroups].map(s=>`${s||'Основная'} · ${counts[s]||0}`).join('  ·  ');
+}
+async function quickAssignSubgroup(childId, encSub) {
+  const g = window._gd; if (!g) return;
+  const sub = decodeURIComponent(encSub);
+  if (_pending.has(`qsub_${childId}`)) return;
+  _pending.add(`qsub_${childId}`);
+  try {
+    await DB.updateGroupClient(childId, {subgroup: sub});
+    const c = g.clients.find(x=>String(x.id)===String(childId)); if (c) c.subgroup = sub;
+    // Обновляем только строку-сводку счётчиков — без перерисовки (не сбрасывает скролл)
+    const el = document.getElementById('subg-counts');
+    if (el) el.innerHTML = _subgroupCountsLine(g)||'Подгрупп нет';
+  } catch(e) { toast('Ошибка сохранения','error'); console.error(e); }
+  finally { _pending.delete(`qsub_${childId}`); }
 }
 
 // Создание подгруппы = появление опции в списках (дети добавляются/переводятся с этим subgroup)
@@ -4115,7 +4156,8 @@ async function doAddSubgroup() {
     g.subgroups = [...new Set([...g.subgroups, name])].sort();
     document.querySelector('.modal-overlay')?.remove();
     toast(`Подгруппа «${name}» добавлена — переведите в неё детей`,'success');
-    if (g._screen==='children') renderGroupChildrenScreenHtml();
+    if (g._screen==='subgroups') renderSubgroupManagerHtml();
+    else if (g._screen==='children') renderGroupChildrenScreenHtml();
     else if (g._screen==='session') renderGroupSessionScreenHtml();
   } catch(e) { toast('Ошибка сохранения подгруппы','error'); console.error(e); }
   finally { _pending.delete('addsubg'); }
