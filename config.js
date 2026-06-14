@@ -57,8 +57,8 @@ const SLOT_COLORS = {
 // (напр. Chekhov Bukhara) → только ручной ввод.
 const DUTY_SHIFTS = {
   'Chekhov Light': {
-    weekday: { morning:['07:00','13:00'], day:['13:00','18:00'], evening:['18:00','23:00'] },
-    weekend: { morning:['09:00','15:30'],                        evening:['15:30','22:00'] },
+    weekday: { morning:['07:00','13:00'], lunch:['13:00','18:00'], evening:['18:00','23:00'] },
+    weekend: { morning:['09:00','15:30'],                          evening:['15:30','22:00'] },
   },
   'Chekhov Sport': {
     weekday: { morning:['07:00','12:00'], day:['12:00','17:00'], evening:['17:00','23:00'] },
@@ -69,8 +69,8 @@ const DUTY_SHIFTS = {
     weekend: { morning:['09:00','12:00'], day:['12:00','17:00'], evening:['17:00','21:00'] },
   },
 };
-const SHIFT_ORDER  = ['morning','day','evening'];
-const SHIFT_LABELS = { morning:'Утренняя', day:'Дневная', evening:'Вечерняя' };
+const SHIFT_ORDER  = ['morning','day','lunch','evening'];
+const SHIFT_LABELS = { morning:'Утренняя', day:'Дневная', lunch:'Обеденная', evening:'Вечерняя' };
 
 const EVENT_TYPES = {
   competition:   '🏆 Соревнование',
