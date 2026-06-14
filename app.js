@@ -3970,7 +3970,7 @@ function renderGroupSessionScreenHtml() {
         style="font-size:12px;${s===sub?'background:var(--accent);color:#fff':'background:var(--card);border:1px solid var(--border)'}"
         onclick="switchSessionSubgroup('${encodeURIComponent(s)}')">${subLabel(s)}</button>`).join('') : ''}
       <button class="btn btn-sm" style="font-size:12px;background:var(--card);border:1px solid var(--border)${hasSubs?';margin-left:auto':''}"
-        onclick="openSubgroupManager('${g.groupId}','session')">👥 Подгруппы</button>
+        onclick="openSubgroupManager('${g.groupId}','session')">${hasSubs?'👥 Подгруппы':'➕ Подгруппа'}</button>
     </div>`;
 
   const uniqMembers = _uniqMembers(g.members);
