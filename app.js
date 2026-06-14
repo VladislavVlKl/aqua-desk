@@ -3511,6 +3511,29 @@ async function loadExtraBranchGroups() {
   } catch(e) { console.error(e); }
 }
 
+// Защита от назначения группы на «мёртвый» профиль (дубль / не привязан к Telegram).
+// Нормализация ФИО без учёта порядка слов: «Сафина Джураева» == «Джураева Сафина».
+function _normFio(s) { return (s||'').trim().toLowerCase().replace(/\s+/g,' ').split(' ').sort().join(' '); }
+// Строит <option>'ы тренеров с пометками: «⚠️ не в Telegram» и «дубль?».
+function _trainerOptionsWithFlags(trainers) {
+  const counts = {};
+  trainers.forEach(t => { const k=_normFio(t.fio); counts[k]=(counts[k]||0)+1; });
+  return trainers.map(t => {
+    const flags = [];
+    if (!t.tg_id) flags.push('⚠️ не в Telegram');
+    if (counts[_normFio(t.fio)] > 1) flags.push('дубль?');
+    const suffix = flags.length ? ` — ${flags.join(', ')}` : '';
+    return `<option value="${t.id}" data-unclaimed="${t.tg_id?'':'1'}">${t.fio}${suffix}</option>`;
+  }).join('');
+}
+// Подтверждение, если выбран непривязанный профиль (тренер не увидит группу).
+function _confirmUnclaimedTrainer(selectId) {
+  const opt = document.querySelector(`#${selectId} option:checked`);
+  if (opt?.dataset.unclaimed === '1')
+    return confirm('⚠️ Этот профиль не привязан к Telegram — тренер не увидит группу (возможно, это дубль профиля).\n\nВсё равно назначить?');
+  return true;
+}
+
 async function renderSeniorAssignForm() {
   const form = document.getElementById('senior-assign-form'); if (!form) return;
   try {
@@ -3522,7 +3545,7 @@ async function renderSeniorAssignForm() {
       Promise.all(branches.map(b=>DB.getActiveGroupsByBranch(b))),
     ]);
     const myTrainers = [...allTrainers, ...allSeniors].filter(t=>
-      (t.branches||[]).some(b=>branches.includes(b))
+      !t.is_archived && (t.branches||[]).some(b=>branches.includes(b))
     );
     // Конкретные активные группы филиалов старшего (строки trainer_groups)
     const activeGroups = activeGroupsArr.flat();
@@ -3531,7 +3554,7 @@ async function renderSeniorAssignForm() {
       const label = `${g.group_types?.name||'Группа'} · ${g.branch}${g.profiles?.fio?' — '+g.profiles.fio:''}${g.role?' ('+g.role+')':''}`;
       return `<option value="${g.id}" data-type="${g.group_types?.type||''}">${label}</option>`;
     }).join('');
-    const trainerOpts = `<option value="">— выберите —</option>${myTrainers.map(t=>`<option value="${t.id}">${t.fio}</option>`).join('')}`;
+    const trainerOpts = `<option value="">— выберите —</option>${_trainerOptionsWithFlags(myTrainers)}`;
     const gtOpts = gts.map(g=>`<option value="${g.id}" data-type="${g.type}" data-name="${g.name}">${g.name}</option>`).join('');
     const branchOpts = branches.map(b=>`<option>${b}</option>`).join('');
 
@@ -3598,6 +3621,7 @@ async function doSeniorAssignGroup() {
   const rateType    = isAdult ? 'headcount' : 'percent';
   const rateValue   = isAdult ? 0 : (parseFloat(document.getElementById('sa-rate')?.value)||40);
   if (!trainerId||!groupTypeId||!branch) return toast('Заполните все поля','error');
+  if (!_confirmUnclaimedTrainer('sa-trainer')) return;
   try {
     await DB.addTrainerGroup(trainerId, groupTypeId, branch, todayStr(), rateType, rateValue, null);
     DB.auditLog('group_assign', STATE.profile.id, STATE.profile.fio, trainerId, 'trainer_group',
@@ -3619,6 +3643,7 @@ async function doSeniorAssignSecond() {
   const groupId   = document.getElementById('sa2-group')?.value;
   const trainerId = parseInt(document.getElementById('sa2-trainer')?.value);
   if (!groupId||!trainerId) return toast('Выберите группу и тренера','error');
+  if (!_confirmUnclaimedTrainer('sa2-trainer')) return;
   // Берём параметры у выбранной КОНКРЕТНОЙ группы — как в админском doAddSecondTrainer
   const g = window._saGroups?.[String(groupId)];
   if (!g) return toast('Группа не найдена, обновите страницу','error');
@@ -5371,6 +5396,12 @@ async function doAddTrainer() {
   const brs=[...document.querySelectorAll('.nt-branch-cb:checked')].map(cb=>cb.value);
   if (!fio)        return toast('Введите ФИО','error');
   if (!brs.length) return toast('Выберите хотя бы один филиал','error');
+  // Защита от дубля профиля (как было с Сафиной Джураевой): ищем по ФИО без учёта порядка слов
+  try {
+    const existing = await cached('profiles',()=>DB.getAllProfiles());
+    const dup = (existing||[]).find(p=>!p.is_archived && _normFio(p.fio)===_normFio(fio));
+    if (dup && !confirm(`⚠️ Сотрудник «${dup.fio}» уже есть. Создавать дубликат?\n\nЕсли это тот же человек — не создавайте, а отредактируйте существующий профиль.`)) return;
+  } catch(_) { /* проверка дубля не критична */ }
   try { await DB.addTrainer(fio,brs,role); invalidateCache('profiles'); document.querySelector('.modal-overlay')?.remove(); toast('✅','success'); loadStaffList(); }
   catch(e) { toast('Ошибка: '+(e?.message||String(e)),'error'); console.error(e); }
 }
@@ -6316,7 +6347,7 @@ async function renderAddSecondTrainerModal(groupTypeId, groupNameEnc, branch, gr
       DB.getProfilesByRole('trainer'),
       DB.getProfilesByRole('senior_trainer'),
     ]);
-    const allT = [...trainers, ...seniors];
+    const allT = [...trainers, ...seniors].filter(t=>!t.is_archived);
     const m = el('div','modal-overlay');
     m.innerHTML=`<div class="modal">
       <div class="modal-header"><h3>Второй тренер — ${groupName}</h3>
@@ -6325,7 +6356,7 @@ async function renderAddSecondTrainerModal(groupTypeId, groupNameEnc, branch, gr
       <div class="form-group"><label>Тренер</label>
         <select id="st2-trainer">
           <option value="">— выберите —</option>
-          ${allT.map(t=>`<option value="${t.id}">${t.fio}</option>`).join('')}
+          ${_trainerOptionsWithFlags(allT)}
         </select></div>
       ${isArtSwim?`<div class="form-group"><label>Роль</label>
         <select id="st2-role">
@@ -6362,6 +6393,7 @@ async function doAddSecondTrainer(groupTypeId, branch, groupType) {
   const rateValue  = isAdult ? 0 : (parseFloat(document.getElementById('st2-rate')?.value)||75000);
   const instanceId = document.getElementById('st2-instance-id')?.value||null;
   if (!trainerId) return toast('Выберите тренера','error');
+  if (!_confirmUnclaimedTrainer('st2-trainer')) return;
   try {
     await DB.addTrainerGroup(trainerId, groupTypeId, branch, todayStr(), rateType, rateValue, role||null, instanceId||null);
     document.querySelector('.modal-overlay')?.remove();
@@ -6378,13 +6410,13 @@ async function renderAssignGroupForm() {
       DB.getProfilesByRole('trainer'),DB.getProfilesByRole('senior_trainer'),
       DB.getGroupTypes(),DB.getBranches(),
     ]);
-    const allT=[...trainers,...seniors];
+    const allT=[...trainers,...seniors].filter(t=>!t.is_archived);
     window._agGts = gts;
     form.innerHTML=`
       <div class="form-group"><label>Тренер</label>
         <select id="ag-trainer">
           <option value="">— выберите —</option>
-          ${allT.map(t=>`<option value="${t.id}">${t.fio}</option>`).join('')}
+          ${_trainerOptionsWithFlags(allT)}
         </select></div>
       <div class="form-group"><label>Тип группы</label>
         <select id="ag-type" onchange="onAgTypeChange(this)">
@@ -6444,6 +6476,7 @@ async function doAssignGroup() {
   const role        = document.getElementById('ag-role')?.value||null;
   if (!trainerId||!groupTypeId||!branch) return toast('Заполните все поля','error');
   if (!trainerId || trainerId===0) return toast('Выберите тренера','error');
+  if (!_confirmUnclaimedTrainer('ag-trainer')) return;
   try {
     await DB.addTrainerGroup(trainerId,groupTypeId,branch,start,rateType,rateValue,role);
     toast('✅ Назначено','success');
