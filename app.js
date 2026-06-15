@@ -4944,30 +4944,46 @@ function _anMoney(year, month, branch) {
   return cached(`an_money_${branch||'all'}_${year}_${month}`, async () => {
     const pr   = await calcMonthPayroll(branch, year, month);
     const data = pr.raw;
-    const childRev = await DB.getAnGroupRevenue(year, month, branch).catch(()=>[]);
+    const [childRev, subsRev] = await Promise.all([
+      DB.getAnGroupRevenue(year, month, branch).catch(()=>[]),
+      DB.getAnSubsRevenue(year, month, branch).catch(()=>[]),
+    ]);
     const fioMap = {}; (data.profiles||[]).forEach(p=>{ fioMap[p.id]=p.fio; });
-    const rev = {1:0,2:0,3:0,drop:0,child:0};
+    const rev = {a1:0,a2:0,a3:0,drop:0,childSub:0,childGroup:0};
     const revByTrainer = {};
+    const addRT = (id,v)=>{ revByTrainer[id]=(revByTrainer[id]||0)+v; };
+    let adultPtCount = 0;
+    // ПТ: разовые/пробные → PT_PRICES (все); взрослые регулярные → PT_PRICES;
+    // детские регулярные ПТ в выручку НЕ идут (она с продажи абонемента, ниже).
     (data.workouts||[]).forEach(w=>{
       const paid = !w.is_debt || w.debt_confirmed_at;
       if (!paid) return;
-      const v = w.is_drop_in ? PT_PRICES[w.drop_in_category||1] : PT_PRICES[w.category_at_moment];
-      if (w.is_drop_in) rev.drop += v; else rev[w.category_at_moment] += v;
-      revByTrainer[w.trainer_id] = (revByTrainer[w.trainer_id]||0) + v;
+      if (w.is_drop_in) {
+        const v=PT_PRICES[w.drop_in_category||1]; rev.drop+=v; addRT(w.trainer_id,v);
+      } else if (!isChild(w.clients?.age)) {
+        const v=PT_PRICES[w.category_at_moment]; rev['a'+w.category_at_moment]+=v; addRT(w.trainer_id,v); adultPtCount++;
+      }
     });
-    // Взрослые группы в выручку НЕ входят: услуга включена во взрослый абонемент,
-    // ФОТ платится по посещениям (учтён в calcMonthPayroll), отдельной выручки нет.
+    // Пробные тренировки → PT_PRICES (разовые/пробные)
+    (data.trialSessions||[]).forEach(t=>{ const v=PT_PRICES[t.category]||0; rev.drop+=v; addRT(t.trainer_id,v); });
+    // Детские абонементы, проданные за месяц → цена пакета (не за занятие).
+    (subsRev||[]).forEach(s=>{
+      if (!isChild(s.clients?.age)) return;
+      const cat = s.clients?.category;
+      const price = CHILD_SUB_PRICES[s.initial_balance]?.[cat] ?? (PT_PRICES[cat]||0)*(s.initial_balance||0);
+      rev.childSub += price; addRT(s.trainer_id, price);
+    });
+    // Взрослые группы в выручку НЕ входят (услуга во взрослом абонементе; ФОТ — по посещениям).
     // Детские группы: каждый оплаченный клиент-месяц = GROUP_CHILD_PRICE.
-    rev.child = childRev.filter(r=>r.paid).length * GROUP_CHILD_PRICE;
-    const ptCount   = (data.workouts||[]).filter(w=>!w.is_drop_in && (!w.is_debt||w.debt_confirmed_at)).length;
-    const ptRevenue = rev[1]+rev[2]+rev[3];
-    const totalRev  = ptRevenue+rev.drop+rev.child;
+    rev.childGroup = childRev.filter(r=>r.paid).length * GROUP_CHILD_PRICE;
+    const ptRevenue = rev.a1+rev.a2+rev.a3;
+    const totalRev  = ptRevenue+rev.drop+rev.childSub+rev.childGroup;
     const topTrainers = Object.entries(revByTrainer)
       .map(([id,v])=>({fio:fioMap[id]||'—', sum:v}))
       .sort((a,b)=>b.sum-a.sum).slice(0,3);
     return {
-      rev, totalRev, ptRevenue, ptCount,
-      avgCheck: ptCount ? Math.round(ptRevenue/ptCount) : 0,
+      rev, totalRev, ptRevenue,
+      avgCheck: adultPtCount ? Math.round(ptRevenue/adultPtCount) : 0,
       ratio:    totalRev ? Math.round(pr.totalFot/totalRev*100) : 0,
       fot: pr.totalFot, fotRows: pr.rows, topTrainers,
     };
@@ -5216,9 +5232,10 @@ async function renderAnalyticsMoneyHub(year, month, branch) {
   try {
     const d=await _anMoney(year,month,branch);
     const types=[
-      {l:'ПТ кат.1', v:d.rev[1]}, {l:'ПТ кат.2', v:d.rev[2]}, {l:'ПТ кат.3', v:d.rev[3]},
-      {l:'Группы детские', v:d.rev.child},
-      {l:'Разовые', v:d.rev.drop},
+      {l:'ПТ взр. кат.1', v:d.rev.a1}, {l:'ПТ взр. кат.2', v:d.rev.a2}, {l:'ПТ взр. кат.3', v:d.rev.a3},
+      {l:'Абонементы детей', v:d.rev.childSub},
+      {l:'Разовые / пробные', v:d.rev.drop},
+      {l:'Группы детские', v:d.rev.childGroup},
     ];
     const maxT=Math.max(1,...types.map(t=>t.v));
     document.getElementById('ah-body').innerHTML=`

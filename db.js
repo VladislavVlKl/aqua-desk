@@ -1809,6 +1809,19 @@ async unassignTrainerGroup(id) {
     return { clients: cl.data || [], subscriptions: subs.data || [] };
   },
 
+  // Проданные абонементы за месяц (для выручки детских ПТ — по цене пакета).
+  async getAnSubsRevenue(year, month, branch=null) {
+    const fromDay = `${year}-${String(month).padStart(2,'0')}-01`;
+    const toDay   = new Date(year, month, 1).toISOString().slice(0,10);
+    const { data, error } = await sb().from('subscriptions')
+      .select('start_date,initial_balance,trainer_id,clients(age,category),profiles!trainer_id(branches)')
+      .gte('start_date', fromDay).lt('start_date', toDay);
+    if (error) throw error;
+    let rows = data || [];
+    if (branch) rows = rows.filter(r => (r.profiles?.branches||[]).includes(branch));
+    return rows;
+  },
+
   // Тренировки за месяц (тепловая карта, распределение по дням/тренерам).
   async getAnWorkouts(year, month, branch=null) {
     const from = new Date(year, month-1, 1).toISOString();
