@@ -4909,6 +4909,17 @@ function _anRange(year, month) {
   return { from, to, fromDay, toDay, pFromDay, pToDay };
 }
 
+// Подобрать купленный пакет под (возможно нестандартный) баланс абонемента.
+// Нестандартные размеры = перенос остатка + купленный пакет, поэтому берём
+// наибольший стандартный размер ≤ баланса по возрастной группе и категории.
+// Дети: 50/25/10 (5 не заведён); взрослые: 10/5/1. → { qty, price }.
+function _pkgMatch(child, balance, cat) {
+  const tiers = child ? [50,25,10] : [10,5,1];
+  const tbl   = child ? CHILD_SUB_PRICES : ADULT_SUB_PRICES;
+  for (const t of tiers) if (balance >= t) return { qty:t, price: tbl[t]?.[cat] };
+  return { qty:null, price:undefined };
+}
+
 // ФОТ по тренерам за месяц — общая функция поверх существующих
 // DB.getSummary + calcSalary (логику ЗП НЕ дублируем).
 async function calcMonthPayroll(branch, year, month) {
@@ -4969,23 +4980,23 @@ function _anMoney(year, month, branch) {
       if (!paid) return;
       if (w.is_drop_in) { const v=PT_PRICES[w.drop_in_category||1]; rev.drop+=v; addRT(w.trainer_id,v); return; }
       const cat=w.clients?.category||w.category_at_moment;
-      const tbl=isChild(w.clients?.age)?CHILD_SUB_PRICES:ADULT_SUB_PRICES;
+      const child=isChild(w.clients?.age);
       const qty=qtyFor(w.client_id, String(w.workout_date).slice(0,10));
-      const pkg=tbl[qty]?.[cat];
-      accrualReg += (pkg && qty) ? pkg/qty : (PT_PRICES[cat]||0);
+      const m=_pkgMatch(child, qty, cat);
+      accrualReg += (m.price && m.qty) ? m.price/m.qty : (PT_PRICES[cat]||0);
     });
     (data.trialSessions||[]).forEach(t=>{ const v=PT_PRICES[t.category]||0; rev.drop+=v; addRT(t.trainer_id,v); });
 
-    // СПОСОБ А (основной, по продаже): абонементы, проданные за месяц, по цене пакета (скидки учтены).
-    // Неизвестный пакет (детский 5, взрослый 25) — пока пропускаем.
+    // СПОСОБ А (основной, по продаже): абонементы, проданные за месяц, по цене купленного
+    // пакета (нестандартный баланс снапится к стандартному пакету через _pkgMatch).
+    // Баланс ниже минимального пакета (дети <10, взрослые <1) — только остаток, пропускаем.
     let subsCounted = 0;
     (subsRev||[]).forEach(s=>{
-      const cat = s.clients?.category, qty = s.initial_balance;
-      const child = isChild(s.clients?.age);
-      const price = (child ? CHILD_SUB_PRICES : ADULT_SUB_PRICES)[qty]?.[cat];
-      if (!price) return;
-      if (child) rev.childSub += price; else rev.adultSub += price;
-      addRT(s.trainer_id, price); subsCounted++;
+      const cat = s.clients?.category, child = isChild(s.clients?.age);
+      const m = _pkgMatch(child, s.initial_balance, cat);
+      if (!m.price) return;
+      if (child) rev.childSub += m.price; else rev.adultSub += m.price;
+      addRT(s.trainer_id, m.price); subsCounted++;
     });
     // Взрослые группы в выручку НЕ входят (услуга во взрослом абонементе; ФОТ — по посещениям).
     // Детские группы: каждый оплаченный клиент-месяц = GROUP_CHILD_PRICE.
