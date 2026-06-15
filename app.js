@@ -4946,7 +4946,7 @@ function _anMoney(year, month, branch) {
     const data = pr.raw;
     const childRev = await DB.getAnGroupRevenue(year, month, branch).catch(()=>[]);
     const fioMap = {}; (data.profiles||[]).forEach(p=>{ fioMap[p.id]=p.fio; });
-    const rev = {1:0,2:0,3:0,drop:0,adult:0,child:0};
+    const rev = {1:0,2:0,3:0,drop:0,child:0};
     const revByTrainer = {};
     (data.workouts||[]).forEach(w=>{
       const paid = !w.is_debt || w.debt_confirmed_at;
@@ -4955,17 +4955,13 @@ function _anMoney(year, month, branch) {
       if (w.is_drop_in) rev.drop += v; else rev[w.category_at_moment] += v;
       revByTrainer[w.trainer_id] = (revByTrainer[w.trainer_id]||0) + v;
     });
-    (data.groupSessions||[]).forEach(gs=>{
-      if (gs.group_types?.billing_model==='headcount') {
-        const r = getAdultGroupRate(gs.headcount);
-        rev.adult += r;
-        revByTrainer[gs.trainer_id] = (revByTrainer[gs.trainer_id]||0) + r;
-      }
-    });
-    rev.child = childRev.filter(r=>r.paid).reduce((s,r)=>s+Number(r.amount||0),0);
+    // Взрослые группы в выручку НЕ входят: услуга включена во взрослый абонемент,
+    // ФОТ платится по посещениям (учтён в calcMonthPayroll), отдельной выручки нет.
+    // Детские группы: каждый оплаченный клиент-месяц = GROUP_CHILD_PRICE.
+    rev.child = childRev.filter(r=>r.paid).length * GROUP_CHILD_PRICE;
     const ptCount   = (data.workouts||[]).filter(w=>!w.is_drop_in && (!w.is_debt||w.debt_confirmed_at)).length;
     const ptRevenue = rev[1]+rev[2]+rev[3];
-    const totalRev  = ptRevenue+rev.drop+rev.adult+rev.child;
+    const totalRev  = ptRevenue+rev.drop+rev.child;
     const topTrainers = Object.entries(revByTrainer)
       .map(([id,v])=>({fio:fioMap[id]||'—', sum:v}))
       .sort((a,b)=>b.sum-a.sum).slice(0,3);
@@ -5221,7 +5217,7 @@ async function renderAnalyticsMoneyHub(year, month, branch) {
     const d=await _anMoney(year,month,branch);
     const types=[
       {l:'ПТ кат.1', v:d.rev[1]}, {l:'ПТ кат.2', v:d.rev[2]}, {l:'ПТ кат.3', v:d.rev[3]},
-      {l:'Группы детские', v:d.rev.child}, {l:'Группы взрослые', v:d.rev.adult},
+      {l:'Группы детские', v:d.rev.child},
       {l:'Разовые', v:d.rev.drop},
     ];
     const maxT=Math.max(1,...types.map(t=>t.v));
