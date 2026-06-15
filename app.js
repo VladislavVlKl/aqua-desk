@@ -4949,41 +4949,37 @@ function _anMoney(year, month, branch) {
       DB.getAnSubsRevenue(year, month, branch).catch(()=>[]),
     ]);
     const fioMap = {}; (data.profiles||[]).forEach(p=>{ fioMap[p.id]=p.fio; });
-    const rev = {a1:0,a2:0,a3:0,drop:0,childSub:0,childGroup:0};
+    const rev = {adultSub:0, childSub:0, drop:0, childGroup:0};
     const revByTrainer = {};
     const addRT = (id,v)=>{ revByTrainer[id]=(revByTrainer[id]||0)+v; };
-    let adultPtCount = 0;
-    // ПТ: разовые/пробные → PT_PRICES (все); взрослые регулярные → PT_PRICES;
-    // детские регулярные ПТ в выручку НЕ идут (она с продажи абонемента, ниже).
+    // Разовые / пробные → PT_PRICES (все возрасты)
     (data.workouts||[]).forEach(w=>{
       const paid = !w.is_debt || w.debt_confirmed_at;
-      if (!paid) return;
-      if (w.is_drop_in) {
-        const v=PT_PRICES[w.drop_in_category||1]; rev.drop+=v; addRT(w.trainer_id,v);
-      } else if (!isChild(w.clients?.age)) {
-        const v=PT_PRICES[w.category_at_moment]; rev['a'+w.category_at_moment]+=v; addRT(w.trainer_id,v); adultPtCount++;
-      }
+      if (!paid || !w.is_drop_in) return;
+      const v=PT_PRICES[w.drop_in_category||1]; rev.drop+=v; addRT(w.trainer_id,v);
     });
-    // Пробные тренировки → PT_PRICES (разовые/пробные)
     (data.trialSessions||[]).forEach(t=>{ const v=PT_PRICES[t.category]||0; rev.drop+=v; addRT(t.trainer_id,v); });
-    // Детские абонементы, проданные за месяц → цена пакета (не за занятие).
+    // Регулярные ПТ → выручка с ПРОДАЖИ абонемента за месяц по цене пакета (скидки 5/10 учтены).
+    // Неизвестный пакет (детский 5, взрослый 25 и т.п.) — пока пропускаем.
+    let subsCounted = 0;
     (subsRev||[]).forEach(s=>{
-      if (!isChild(s.clients?.age)) return;
-      const cat = s.clients?.category;
-      const price = CHILD_SUB_PRICES[s.initial_balance]?.[cat] ?? (PT_PRICES[cat]||0)*(s.initial_balance||0);
-      rev.childSub += price; addRT(s.trainer_id, price);
+      const cat = s.clients?.category, qty = s.initial_balance;
+      const child = isChild(s.clients?.age);
+      const price = (child ? CHILD_SUB_PRICES : ADULT_SUB_PRICES)[qty]?.[cat];
+      if (!price) return;
+      if (child) rev.childSub += price; else rev.adultSub += price;
+      addRT(s.trainer_id, price); subsCounted++;
     });
     // Взрослые группы в выручку НЕ входят (услуга во взрослом абонементе; ФОТ — по посещениям).
     // Детские группы: каждый оплаченный клиент-месяц = GROUP_CHILD_PRICE.
     rev.childGroup = childRev.filter(r=>r.paid).length * GROUP_CHILD_PRICE;
-    const ptRevenue = rev.a1+rev.a2+rev.a3;
-    const totalRev  = ptRevenue+rev.drop+rev.childSub+rev.childGroup;
+    const totalRev = rev.adultSub+rev.childSub+rev.drop+rev.childGroup;
     const topTrainers = Object.entries(revByTrainer)
       .map(([id,v])=>({fio:fioMap[id]||'—', sum:v}))
       .sort((a,b)=>b.sum-a.sum).slice(0,3);
     return {
-      rev, totalRev, ptRevenue,
-      avgCheck: adultPtCount ? Math.round(ptRevenue/adultPtCount) : 0,
+      rev, totalRev,
+      avgCheck: subsCounted ? Math.round((rev.adultSub+rev.childSub)/subsCounted) : 0,
       ratio:    totalRev ? Math.round(pr.totalFot/totalRev*100) : 0,
       fot: pr.totalFot, fotRows: pr.rows, topTrainers,
     };
@@ -5174,7 +5170,7 @@ async function _fillMoneyCard(y,m,b) {
       <div class="aov-row"><span>Выручка</span><b>${fmt(d.totalRev)}</b></div>
       <div class="aov-row"><span>ФОТ</span><b>${fmt(d.fot)}</b></div>
       <div class="aov-row"><span>ФОТ/выручка</span><b class="${_ratioClass(d.ratio)}">${d.ratio}%</b></div>
-      <div class="aov-row"><span>Ср. чек ПТ</span><b>${fmt(d.avgCheck)}</b></div>
+      <div class="aov-row"><span>Ср. чек абон.</span><b>${fmt(d.avgCheck)}</b></div>
       <span class="aov-arrow">›</span>`;
   } catch(e){ console.error(e); el.innerHTML=`<h5>💰 Деньги и ФОТ</h5><p class="hint">⚠️ Ошибка загрузки</p>`; }
 }
@@ -5232,10 +5228,10 @@ async function renderAnalyticsMoneyHub(year, month, branch) {
   try {
     const d=await _anMoney(year,month,branch);
     const types=[
-      {l:'ПТ взр. кат.1', v:d.rev.a1}, {l:'ПТ взр. кат.2', v:d.rev.a2}, {l:'ПТ взр. кат.3', v:d.rev.a3},
-      {l:'Абонементы детей', v:d.rev.childSub},
-      {l:'Разовые / пробные', v:d.rev.drop},
-      {l:'Группы детские', v:d.rev.childGroup},
+      {l:'Абонементы взрослые', v:d.rev.adultSub},
+      {l:'Абонементы детские',  v:d.rev.childSub},
+      {l:'Разовые / пробные',   v:d.rev.drop},
+      {l:'Группы детские',       v:d.rev.childGroup},
     ];
     const maxT=Math.max(1,...types.map(t=>t.v));
     document.getElementById('ah-body').innerHTML=`
