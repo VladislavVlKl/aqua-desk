@@ -7563,16 +7563,21 @@ async function renderAdminControl() {
   $('#tab-content').innerHTML=`<div class="tab-pad"><h3>Контроль</h3>
     <div class="center-screen"><div class="spinner"></div></div></div>`;
   try {
-    const data=await DB.getControlData();
     const now=new Date(); const y=now.getFullYear(),mo=now.getMonth()+1;
     const from=new Date(y,mo-1,1).toISOString(),to=new Date(y,mo,1).toISOString();
-    const {data:activeIds}=await sb().from('workouts').select('trainer_id').gte('workout_date',from).lt('workout_date',to);
-    const activeSet=new Set((activeIds||[]).map(x=>x.trainer_id));
+    // Все запросы независимы — грузим параллельно (было 8 последовательных await → таб долго грузился)
+    const [data, activeRes, activityStats, allTrials, lateRequests, workoutDelReqs, deleteReqs, sessions] = await Promise.all([
+      DB.getControlData(),
+      sb().from('workouts').select('trainer_id').gte('workout_date',from).lt('workout_date',to),
+      DB.getTrainersActivityStats(y, mo).catch(()=>[]),
+      DB.getAllTrialSessions(y, mo, null).catch(()=>[]),
+      DB.getPendingLateRequests(null).catch(()=>[]),
+      DB.getAllWorkoutDeleteRequests().catch(()=>[]),
+      DB.getAllDeleteRequests().catch(()=>[]),
+      DB.getRecentSessions(30).catch(()=>[]),
+    ]);
+    const activeSet=new Set((activeRes?.data||[]).map(x=>x.trainer_id));
     const inactive=data.inactiveTrainers.filter(t=>!activeSet.has(t.id));
-    // Загружаем статистику активности тренеров
-    const activityStats = await DB.getTrainersActivityStats(y, mo).catch(()=>[]);
-    // Пробные тренировки за месяц
-    const allTrials = await DB.getAllTrialSessions(y, mo, null).catch(()=>[]);
     const sections=[];
     if (data.expiringClients.length) sections.push(`<div class="control-section">
       <div class="control-title warn">⚠️ Абонементы истекают (${data.expiringClients.length})</div>
@@ -7605,7 +7610,6 @@ async function renderAdminControl() {
         <div class="ci-sub">${(t.branches||[]).join(', ')}</div>
       </div>`).join('')}</div>`);
     // Запросы на поздние тренировки
-    const lateRequests = await DB.getPendingLateRequests(null).catch(()=>[]);
     if (lateRequests.length) sections.unshift(`<div class="control-section">
       <div class="control-title danger">⏰ Запросы на поздние тренировки (${lateRequests.length})</div>
       ${lateRequests.map(r=>`<div class="control-item">
@@ -7675,7 +7679,6 @@ async function renderAdminControl() {
       </div>`);
     }
     // Запросы на удаление ПТ
-    const workoutDelReqs = await DB.getAllWorkoutDeleteRequests().catch(()=>[]);
     if (workoutDelReqs.length) sections.unshift(`<div class="control-section">
       <div class="control-title danger">🗑 Запросы на удаление ПТ (${workoutDelReqs.length})</div>
       ${workoutDelReqs.map(r=>`<div class="control-item">
@@ -7689,7 +7692,6 @@ async function renderAdminControl() {
       </div>`).join('')}
     </div>`);
     // Add delete requests
-    const deleteReqs = await DB.getAllDeleteRequests().catch(()=>[]);
     if (deleteReqs.length) sections.unshift(`<div class="control-section">
       <div class="control-title danger">🗑 Запросы на удаление (${deleteReqs.length})</div>
       ${deleteReqs.map(r=>`<div class="control-item">
@@ -7705,7 +7707,6 @@ async function renderAdminControl() {
       </div>`).join('')}
     </div>`);
     // Последние входы в систему
-    const sessions = await DB.getRecentSessions(30).catch(()=>[]);
     if (sessions.length) {
       const rows = sessions.map(s=>{
         const dt = new Date(s.opened_at);

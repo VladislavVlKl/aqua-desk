@@ -19,7 +19,7 @@ const XL = {
 // ── Ячейки ───────────────────────────────────
 function tc(v, s={}) { return { v: String(v??''), t:'s', s }; }
 function nc(v, s={}) { return { v: Number(v)||0,  t:'n', s }; }
-function mc(v, s={}) { return { v: Number(v)||0,  t:'n', z:'# ##0', s }; } // деньги с пробелом
+function mc(v, s={}) { return { v: Number(v)||0,  t:'n', z:'#,##0', s }; } // деньги, группировка по 3 разряда (в ru-локали = пробел: 2 500 000)
 
 // ── Стили ────────────────────────────────────
 function thinBorder() {
