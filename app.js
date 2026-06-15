@@ -5133,7 +5133,12 @@ function _anControl(year, month, branch) {
 }
 
 // ── Цвета и хелперы ──
-function _ratioClass(r) { return r<=42 ? 'r-green' : r<=50 ? 'r-yellow' : 'r-red'; }
+// Норма ФОТ/Выручка = 37–42%. Вне нормы — отклонение (жёлтый), далеко — аномалия (красный).
+function _ratioClass(r) {
+  if (r>=37 && r<=42) return 'r-green';
+  if (r>=30 && r<=50) return 'r-yellow';
+  return 'r-red';
+}
 function _heatStyle(v, max) {
   if (!v) return 'background:var(--card)';
   const op = 0.18 + 0.72*(v/(max||1));
@@ -5203,10 +5208,10 @@ async function _fillMoneyCard(y,m,b) {
   try {
     const d=await _anMoney(y,m,b);
     el.innerHTML=`<h5>💰 Деньги и ФОТ</h5>
-      <div class="aov-row"><span>Выручка</span><b>${fmt(d.totalRev)}</b></div>
+      <div class="aov-row"><span>Выручка</span><b>${fmt(d.accrualRev)}</b></div>
+      <div class="aov-row"><span>Продажи</span><b>${fmt(d.totalRev)}</b></div>
       <div class="aov-row"><span>ФОТ</span><b>${fmt(d.fot)}</b></div>
-      <div class="aov-row"><span>ФОТ/выручка</span><b class="${_ratioClass(d.ratio)}">${d.ratio}%</b></div>
-      <div class="aov-row"><span>Ср. чек абон.</span><b>${fmt(d.avgCheck)}</b></div>
+      <div class="aov-row"><span>ФОТ/выручка</span><b class="${_ratioClass(d.accrualRatio)}">${d.accrualRatio}%</b></div>
       <span class="aov-arrow">›</span>`;
   } catch(e){ console.error(e); el.innerHTML=`<h5>💰 Деньги и ФОТ</h5><p class="hint">⚠️ Ошибка загрузки</p>`; }
 }
@@ -5271,7 +5276,7 @@ async function renderAnalyticsMoneyHub(year, month, branch) {
     ];
     const maxT=Math.max(1,...types.map(t=>t.v));
     document.getElementById('ah-body').innerHTML=`
-      <div class="ah-section"><div class="ah-h">Выручка по типам</div>
+      <div class="ah-section"><div class="ah-h">Продажи за месяц по типам</div>
         ${types.map(t=>`<div class="ah-bar-row">
           <span class="ah-bar-lbl">${t.l}</span>
           <div class="ah-bar-track"><div class="ah-bar-fill" style="width:${Math.round(t.v/maxT*100)}%"></div></div>
@@ -5293,15 +5298,15 @@ async function renderAnalyticsMoneyHub(year, month, branch) {
         </table></div>`:'<p class="hint">Нет данных за этот период</p>'}
       </div>
 
-      <div class="ah-section"><div class="ah-h">ФОТ / Выручка (по продаже)</div>
-        <div class="ah-ratio ${_ratioClass(d.ratio)}">${d.ratio}%</div>
-        <p class="hint" style="text-align:center">Норма: 37–42%. Текущее значение: ${d.ratio}%</p>
+      <div class="ah-section"><div class="ah-h">ФОТ / Выручка (по начислению)</div>
+        <div class="ah-ratio ${_ratioClass(d.accrualRatio)}">${d.accrualRatio}%</div>
+        <p class="hint" style="text-align:center">Норма: 37–42%. Выручка (начисление): ${fmt(d.accrualRev)}</p>
       </div>
 
-      <div class="ah-section"><div class="ah-h">Альтернатива: по начислению</div>
-        <div class="ah-bar-row"><span class="ah-bar-lbl">Выручка (accrual)</span><div class="ah-bar-track"></div><span class="ah-bar-val">${fmt(d.accrualRev)}</span></div>
-        <div class="ah-bar-row"><span class="ah-bar-lbl">ФОТ / Выручка</span><div class="ah-bar-track"></div><span class="ah-bar-val ${_ratioClass(d.accrualRatio)}">${d.accrualRatio}%</span></div>
-        <p class="hint">Абонементы «размазаны» по проведённым занятиям месяца (цена пакета ÷ кол-во). Основной показатель выше — по продаже.</p>
+      <div class="ah-section"><div class="ah-h">Справка: по продаже (касса)</div>
+        <div class="ah-bar-row"><span class="ah-bar-lbl">Продажи за месяц</span><div class="ah-bar-track"></div><span class="ah-bar-val">${fmt(d.totalRev)}</span></div>
+        <div class="ah-bar-row"><span class="ah-bar-lbl">ФОТ / Продажи</span><div class="ah-bar-track"></div><span class="ah-bar-val">${d.ratio}%</span></div>
+        <p class="hint">«По продаже» = полная цена абонементов, проданных в этом месяце (кэш). % низкий, т.к. пакеты оплачивают вперёд, а ФОТ — за проведённые занятия. Для KPI ФОТ/Выручка смотри «по начислению» выше.</p>
       </div>
 
       ${d.topTrainers.length?`<div class="ah-section"><div class="ah-h">Топ-3 тренера по выручке</div>
