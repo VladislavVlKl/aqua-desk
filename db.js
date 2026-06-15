@@ -1784,6 +1784,70 @@ async unassignTrainerGroup(id) {
     };
   },
 
+  // ─── АНАЛИТИКА КООРДИНАТОРА (Overview + хабы) ──
+  // Выручка детских групп за месяц (оплаты). branch — через join trainer_groups.
+  async getAnGroupRevenue(year, month, branch=null) {
+    const monthDay = `${year}-${String(month).padStart(2,'0')}-01`;
+    const { data, error } = await sb().from('group_payments')
+      .select('amount,paid,group_id,trainer_groups(branch)').eq('month', monthDay);
+    if (error) throw error;
+    let rows = data || [];
+    if (branch) rows = rows.filter(r => r.trainer_groups?.branch === branch);
+    return rows;
+  },
+
+  // Клиенты + все абонементы (хаб «Клиентская база»). Фильтр по филиалу — в JS по branches тренера.
+  async getAnClients() {
+    const [cl, subs] = await Promise.all([
+      sb().from('clients').select(
+        'id,fio,balance,age,is_archived,subscription_start,subscription_end,freeze_start,freeze_end,trainer_id,profiles!trainer_id(fio,branches)'),
+      sb().from('subscriptions').select(
+        'client_id,trainer_id,start_date,end_date,initial_balance,is_active,closing_note'),
+    ]);
+    if (cl.error)   throw cl.error;
+    if (subs.error) throw subs.error;
+    return { clients: cl.data || [], subscriptions: subs.data || [] };
+  },
+
+  // Тренировки за месяц (тепловая карта, распределение по дням/тренерам).
+  async getAnWorkouts(year, month, branch=null) {
+    const from = new Date(year, month-1, 1).toISOString();
+    const to   = new Date(year, month,   1).toISOString();
+    let q = sb().from('workouts')
+      .select('trainer_id,workout_date,is_drop_in,is_debt,debt_confirmed_at,branch,profiles!trainer_id(fio)')
+      .gte('workout_date', from).lt('workout_date', to)
+      .eq('pending_confirmation', false).is('substitute_for', null);
+    if (branch) q = q.eq('branch', branch);
+    const { data, error } = await q;
+    if (error) throw error; return data || [];
+  },
+
+  // Данные для хаба «Контроль»: конспекты, поздние внесения, удаления ПТ, активность.
+  async getAnControl(year, month, branch=null) {
+    const from = new Date(year, month-1, 1).toISOString();
+    const to   = new Date(year, month,   1).toISOString();
+    let notesQ = sb().from('session_notes')
+      .select('trainer_id,created_at,deadline,workouts!inner(branch,workout_date)')
+      .gte('workouts.workout_date', from).lt('workouts.workout_date', to);
+    if (branch) notesQ = notesQ.eq('workouts.branch', branch);
+    let lateQ = sb().from('late_workout_requests')
+      .select('trainer_id,client_id,workout_date,status,created_at,branch,clients(fio),profiles!trainer_id(fio)')
+      .gte('created_at', from).lt('created_at', to);
+    if (branch) lateQ = lateQ.eq('branch', branch);
+    let delQ = sb().from('workout_delete_requests')
+      .select('trainer_id,client_name,workout_date,status,created_at,branch,profiles!trainer_id(fio)')
+      .gte('created_at', from).lt('created_at', to);
+    if (branch) delQ = delQ.eq('branch', branch);
+    let auditQ = sb().from('audit_log').select('created_at,branch,action')
+      .gte('created_at', from).lt('created_at', to);
+    if (branch) auditQ = auditQ.eq('branch', branch);
+    const [notes, late, dels, audit] = await Promise.all([notesQ, lateQ, delQ, auditQ]);
+    return {
+      notes: notes.data || [], late: late.data || [],
+      dels:  dels.data  || [], audit: audit.data || [],
+    };
+  },
+
   // ─── УВЕДОМЛЕНИЯ ─────────────────────────────
   async getNotificationRules() {
     const {data,error} = await sb().from('notification_rules').select('*').order('id');

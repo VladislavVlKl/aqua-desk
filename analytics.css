@@ -80,3 +80,95 @@
 .sched-date-num { font-size:11px;font-weight:400;color:var(--hint); }
 .sub-confirm-row { padding:8px 0;border-bottom:1px solid var(--border); }
 .sub-confirm-row:last-child { border-bottom:none; }
+
+/* ─── АНАЛИТИКА: Overview + хабы ─────────────── */
+.r-green  { color:var(--success); }
+.r-yellow { color:#f59e0b; }
+.r-red    { color:var(--danger); }
+
+/* Overview — сетка 2×2 */
+.aov-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+@media (max-width:380px){ .aov-grid { grid-template-columns:1fr; } }
+.aov-card {
+  position:relative; background:var(--card); border:1px solid var(--border);
+  border-radius:14px; padding:14px; cursor:pointer; min-height:150px;
+  transition:transform .12s, border-color .12s;
+}
+.aov-card:active { transform:scale(.98); border-color:var(--accent); }
+.aov-card h5 { font-size:13px; font-weight:700; margin:0 0 10px; color:var(--text); }
+.aov-row { display:flex; justify-content:space-between; align-items:baseline; gap:6px; margin-bottom:6px; font-size:12px; color:var(--hint); }
+.aov-row b { font-size:15px; font-weight:700; color:var(--text); }
+.aov-arrow { position:absolute; right:12px; bottom:8px; color:var(--hint); font-size:18px; }
+
+/* Мини-тепловая карта в карточке загрузки (7×4) */
+.aov-mini-heat { display:grid; grid-template-columns:repeat(7,1fr); grid-auto-rows:9px; gap:2px; margin:2px 0 10px; }
+.aov-heat-cell { border-radius:2px; }
+
+/* Скелетон */
+.an-skel-line { height:14px; border-radius:6px; margin-bottom:10px;
+  background:linear-gradient(90deg,var(--card) 25%,var(--border) 50%,var(--card) 75%);
+  background-size:200% 100%; animation:an-shimmer 1.4s infinite; }
+.an-skel-line:first-child { width:55%; height:16px; }
+@keyframes an-shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+
+/* Хабы */
+.ah-head { display:flex; align-items:center; gap:8px; }
+.ah-head h3 { margin:0; }
+.ah-section { margin-top:18px; }
+.ah-h { font-size:13px; font-weight:600; text-transform:uppercase; letter-spacing:.5px; color:var(--hint); margin-bottom:10px; }
+
+/* Горизонтальные бары */
+.ah-bar-row { display:flex; align-items:center; gap:8px; margin-bottom:7px; }
+.ah-bar-lbl { font-size:12px; width:96px; flex-shrink:0; color:var(--text); }
+.ah-bar-track { flex:1; height:8px; background:var(--border); border-radius:4px; overflow:hidden; }
+.ah-bar-fill { height:100%; background:var(--accent); border-radius:4px; transition:width .3s; }
+.ah-bar-val { font-size:12px; font-weight:700; width:74px; text-align:right; flex-shrink:0; color:var(--text); }
+
+/* Таблицы хабов */
+.ah-table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; border:1px solid var(--border); border-radius:10px; }
+.ah-table { width:100%; border-collapse:collapse; font-size:13px; }
+.ah-table th, .ah-table td { padding:8px 10px; text-align:right; white-space:nowrap; }
+.ah-table th:first-child, .ah-table td:first-child { text-align:left; }
+.ah-table thead th { position:sticky; top:0; background:var(--bg2); color:var(--hint); font-size:11px; font-weight:600; }
+.ah-table tbody tr:nth-child(even) { background:var(--card); }
+.ah-table tfoot td { border-top:1px solid var(--border); }
+.ah-total { font-weight:700; color:var(--accent); }
+.ah-row-yellow { background:rgba(245,158,11,.12) !important; }
+.ah-row-red    { background:rgba(239,68,68,.12) !important; }
+
+/* Большой процент ФОТ/выручка */
+.ah-ratio { font-size:46px; font-weight:800; text-align:center; line-height:1; margin:4px 0 8px; }
+
+/* Топ-3 */
+.ah-top3 { display:flex; gap:8px; }
+.ah-top-card { flex:1; background:var(--card); border:1px solid var(--border); border-radius:12px; padding:12px 8px; text-align:center; }
+.ah-top-rank { font-size:22px; }
+.ah-top-fio { font-size:12px; margin:4px 0; min-height:30px; }
+.ah-top-sum { font-size:13px; font-weight:700; color:var(--accent); }
+
+/* Плитки клиентской базы */
+.ah-tiles { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.ah-tile { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:14px; text-align:center; }
+.ah-tile-v { font-size:26px; font-weight:800; line-height:1; }
+.ah-tile-l { font-size:11px; color:var(--hint); margin-top:5px; }
+
+/* Списки */
+.ah-li { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:9px 0; border-bottom:1px solid var(--border); font-size:13px; }
+.ah-li:last-child { border-bottom:none; }
+.ah-li .hint { font-size:11px; }
+.ah-badge { font-size:12px; font-weight:700; padding:2px 8px; border-radius:8px; background:var(--card); }
+.ah-twocol { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+
+/* Полная тепловая карта */
+.heat-scroll { overflow-x:auto; -webkit-overflow-scrolling:touch; padding-bottom:4px; }
+.heat-grid { display:grid; gap:2px; }
+.heat-cell { width:26px; height:26px; display:flex; align-items:center; justify-content:center; font-size:10px; border-radius:3px; }
+.heat-corner { width:32px; }
+.heat-hdr, .heat-day { color:var(--hint); font-weight:600; background:transparent; }
+.heat-day { width:32px; }
+.heat-legend { display:flex; align-items:center; gap:8px; margin-top:8px; font-size:11px; color:var(--hint); }
+.heat-legend-bar { flex:1; height:8px; border-radius:4px; background:linear-gradient(90deg,var(--card),rgba(124,58,237,.9)); }
+
+/* Бар-чарт активности */
+.ah-actchart { display:flex; align-items:flex-end; gap:3px; height:80px; padding-top:4px; }
+.ah-actbar { flex:1; min-width:3px; background:var(--accent); border-radius:2px 2px 0 0; min-height:2px; }
