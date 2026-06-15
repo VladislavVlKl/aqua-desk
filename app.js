@@ -4909,14 +4909,19 @@ function _anRange(year, month) {
   return { from, to, fromDay, toDay, pFromDay, pToDay };
 }
 
-// Подобрать купленный пакет под (возможно нестандартный) баланс абонемента.
-// Нестандартные размеры = перенос остатка + купленный пакет, поэтому берём
-// наибольший стандартный размер ≤ баланса по возрастной группе и категории.
-// Дети: 50/25/10 (5 не заведён); взрослые: 10/5/1. → { qty, price }.
+// Подобрать купленный пакет под (возможно нестандартный) баланс абонемента → { qty, price }.
+// Дети: докупать/переносить НЕЛЬЗЯ — баланс только убывает, неиспользованное сгорает.
+//   Поэтому купленный пакет = ближайший стандартный ≥ баланса (округление ВВЕРХ),
+//   10/25/50 (5 не заведён); баланс >50 — аномалия, потолок 50.
+// Взрослые: платят за занятия и могут накапливать → наибольший стандартный ≤ баланса
+//   (баланс = купленный пакет + перенесённый остаток), 10/5/1.
 function _pkgMatch(child, balance, cat) {
-  const tiers = child ? [50,25,10] : [10,5,1];
-  const tbl   = child ? CHILD_SUB_PRICES : ADULT_SUB_PRICES;
-  for (const t of tiers) if (balance >= t) return { qty:t, price: tbl[t]?.[cat] };
+  if (!balance || balance <= 0) return { qty:null, price:undefined };
+  if (child) {
+    for (const t of [10,25,50]) if (balance <= t) return { qty:t, price: CHILD_SUB_PRICES[t]?.[cat] };
+    return { qty:50, price: CHILD_SUB_PRICES[50]?.[cat] }; // >50 — аномалия
+  }
+  for (const t of [10,5,1]) if (balance >= t) return { qty:t, price: ADULT_SUB_PRICES[t]?.[cat] };
   return { qty:null, price:undefined };
 }
 
@@ -4988,8 +4993,8 @@ function _anMoney(year, month, branch) {
     (data.trialSessions||[]).forEach(t=>{ const v=PT_PRICES[t.category]||0; rev.drop+=v; addRT(t.trainer_id,v); });
 
     // СПОСОБ А (основной, по продаже): абонементы, проданные за месяц, по цене купленного
-    // пакета (нестандартный баланс снапится к стандартному пакету через _pkgMatch).
-    // Баланс ниже минимального пакета (дети <10, взрослые <1) — только остаток, пропускаем.
+    // пакета (нестандартный баланс приводится к пакету через _pkgMatch: дети — вверх,
+    // взрослые — вниз). Баланс ≤ 0 — пустой абонемент, пропускаем.
     let subsCounted = 0;
     (subsRev||[]).forEach(s=>{
       const cat = s.clients?.category, child = isChild(s.clients?.age);
