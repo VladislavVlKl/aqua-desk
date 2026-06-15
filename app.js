@@ -67,12 +67,21 @@ let _pinBlockedUntil = 0;
 
 // ── КЕШ (5 минут) ────────────────────────────
 const _cache = {};
+const _cacheInflight = {};   // key → Promise: дедуп параллельных запросов с одним ключом
 async function cached(key, fn, ttl=300000) {
   const now = Date.now();
   if (_cache[key] && now - _cache[key].ts < ttl) return _cache[key].val;
-  const val = await fn();
-  _cache[key] = {val, ts: now};
-  return val;
+  // Запрос с этим ключом уже летит — ждём его, не запускаем дубль.
+  // (без этого 4 карточки Overview трижды дёргали один getAnWorkouts)
+  if (_cacheInflight[key]) return _cacheInflight[key];
+  const p = (async () => {
+    const val = await fn();
+    _cache[key] = {val, ts: Date.now()};
+    return val;
+  })();
+  _cacheInflight[key] = p;
+  try { return await p; }
+  finally { delete _cacheInflight[key]; }   // при reject ключ освобождается → следующий вызов повторит
 }
 function invalidateCache(...keys) {
   keys.forEach(k => delete _cache[k]);
@@ -222,6 +231,13 @@ function openInBrowser(url) {
 }
 function loading(txt='Загрузка...') {
   setScreen(`<div class="center-screen"><div class="spinner"></div><p>${txt}</p></div>`);
+}
+// Открыть это же приложение в обычном браузере (больше экран для работы координатора).
+// Браузерный режим штатный: init() читает tgid из ?tgid=. Вход всё равно за PIN.
+function openSelfInBrowser() {
+  if (!STATE.tgId) { toast('Не удалось определить ID','error'); return; }
+  const url = location.origin + location.pathname + '?tgid=' + encodeURIComponent(STATE.tgId);
+  openInBrowser(url);
 }
 function toast(msg, type='info') {
   const t=el('div',`toast toast-${type}`,msg);
@@ -4636,6 +4652,7 @@ function renderAdminApp(initialTab='summary') {
     <div><div class="app-title">👑 Координатор</div>
       <div class="app-sub">${STATE.profile.fio}</div></div>
     <div style="display:flex;gap:6px;align-items:center">
+      <button class="btn-icon" onclick="openSelfInBrowser()" title="Открыть в браузере (больше экран)">🖥</button>
       <button class="btn-icon" onclick="openSchedule()">📅</button>
       <button class="btn-icon" onclick="renderHelpModal()">?</button>
       <button class="btn-icon" id="notif-bell" onclick="renderInAppNotifications()" style="position:relative">🔔<span id="notif-count" style="display:none;position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;border-radius:50%;font-size:9px;width:16px;height:16px;line-height:16px;text-align:center"></span></button>
@@ -4655,6 +4672,9 @@ function renderAdminApp(initialTab='summary') {
   setTimeout(checkInAppNotifications, 2000);
 }
 function adminTab(tab) {
+  // Сброс навигации хаба/глубокого экрана: иначе нативная «назад» Telegram остаётся
+  // висеть со старым колбэком после ухода из хаба через нижнюю навигацию.
+  setupBack(null); STATE._backFn = null;
   $$('.nav-btn').forEach((b,i)=>b.classList.toggle('active',
     ['summary','analytics','clients','staff','groups','control','more'][i]===tab));
   if (tab==='summary')       renderAdminSummary();
@@ -4956,6 +4976,12 @@ async function calcMonthPayroll(branch, year, month) {
 }
 
 // ── Загрузчики данных (кешируются, переиспользуются Overview-карточками и хабами) ──
+// Воркауты за месяц нужны сразу трём загрузчикам (Деньги/Загрузка/Контроль).
+// Общий ключ + in-flight дедуп в cached() → один запрос вместо трёх параллельных.
+function _anWs(year, month, branch) {
+  return cached(`an_ws_${branch||'all'}_${year}_${month}`,
+    () => DB.getAnWorkouts(year, month, branch), 300000);
+}
 function _anMoney(year, month, branch) {
   return cached(`an_money_${branch||'all'}_${year}_${month}`, async () => {
     const pr   = await calcMonthPayroll(branch, year, month);
@@ -4963,7 +4989,7 @@ function _anMoney(year, month, branch) {
     const [childRev, subsRev, ws, allSubs] = await Promise.all([
       DB.getAnGroupRevenue(year, month, branch).catch(()=>[]),
       DB.getAnSubsRevenue(year, month, branch).catch(()=>[]),
-      DB.getAnWorkouts(year, month, branch).catch(()=>[]),
+      _anWs(year, month, branch).catch(()=>[]),
       DB.getAnAllSubs(year, month).catch(()=>[]),
     ]);
     const fioMap = {}; (data.profiles||[]).forEach(p=>{ fioMap[p.id]=p.fio; });
@@ -5077,7 +5103,7 @@ function _anClients(year, month, branch) {
 
 function _anLoad(year, month, branch) {
   return cached(`an_load_${branch||'all'}_${year}_${month}`, async () => {
-    const ws = await DB.getAnWorkouts(year, month, branch);
+    const ws = await _anWs(year, month, branch);
     const grid = {};                       // 'dow-hour' → count (dow 0=Пн)
     const byDay = [0,0,0,0,0,0,0];
     const byHour = {};
@@ -5105,7 +5131,7 @@ function _anControl(year, month, branch) {
   return cached(`an_control_${branch||'all'}_${year}_${month}`, async () => {
     const [ctl, ws] = await Promise.all([
       DB.getAnControl(year, month, branch),
-      DB.getAnWorkouts(year, month, branch),
+      _anWs(year, month, branch),
     ]);
     const byTrainer = {};
     const get = (id,fio) => (byTrainer[id] = byTrainer[id] || {fio:fio||'—', pt:0, notes:0, overdue:0});
