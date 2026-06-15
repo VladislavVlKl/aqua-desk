@@ -4944,23 +4944,40 @@ function _anMoney(year, month, branch) {
   return cached(`an_money_${branch||'all'}_${year}_${month}`, async () => {
     const pr   = await calcMonthPayroll(branch, year, month);
     const data = pr.raw;
-    const [childRev, subsRev] = await Promise.all([
+    const [childRev, subsRev, ws, allSubs] = await Promise.all([
       DB.getAnGroupRevenue(year, month, branch).catch(()=>[]),
       DB.getAnSubsRevenue(year, month, branch).catch(()=>[]),
+      DB.getAnWorkouts(year, month, branch).catch(()=>[]),
+      DB.getAnAllSubs(year, month).catch(()=>[]),
     ]);
     const fioMap = {}; (data.profiles||[]).forEach(p=>{ fioMap[p.id]=p.fio; });
     const rev = {adultSub:0, childSub:0, drop:0, childGroup:0};
     const revByTrainer = {};
     const addRT = (id,v)=>{ revByTrainer[id]=(revByTrainer[id]||0)+v; };
-    // Разовые / пробные → PT_PRICES (все возрасты)
-    (data.workouts||[]).forEach(w=>{
+
+    // Карта абонементов клиента (для accrual: размер пакета на дату занятия)
+    const subMap = {};
+    allSubs.forEach(s=>{ (subMap[s.client_id]=subMap[s.client_id]||[]).push(s); });
+    Object.values(subMap).forEach(a=>a.sort((x,y)=>(y.start_date||'').localeCompare(x.start_date||'')));
+    const qtyFor = (cid,date)=>{ const a=subMap[cid]||[]; const s=a.find(x=>(x.start_date||'')<=date)||a[a.length-1]; return s?.initial_balance; };
+
+    // Проведённые ПТ: разовые/пробные → PT_PRICES (одинаково в обоих способах);
+    // обычные ПТ копим для способа Б (accrual) = цена пакета ÷ кол-во.
+    let accrualReg = 0;
+    (ws||[]).forEach(w=>{
       const paid = !w.is_debt || w.debt_confirmed_at;
-      if (!paid || !w.is_drop_in) return;
-      const v=PT_PRICES[w.drop_in_category||1]; rev.drop+=v; addRT(w.trainer_id,v);
+      if (!paid) return;
+      if (w.is_drop_in) { const v=PT_PRICES[w.drop_in_category||1]; rev.drop+=v; addRT(w.trainer_id,v); return; }
+      const cat=w.clients?.category||w.category_at_moment;
+      const tbl=isChild(w.clients?.age)?CHILD_SUB_PRICES:ADULT_SUB_PRICES;
+      const qty=qtyFor(w.client_id, String(w.workout_date).slice(0,10));
+      const pkg=tbl[qty]?.[cat];
+      accrualReg += (pkg && qty) ? pkg/qty : (PT_PRICES[cat]||0);
     });
     (data.trialSessions||[]).forEach(t=>{ const v=PT_PRICES[t.category]||0; rev.drop+=v; addRT(t.trainer_id,v); });
-    // Регулярные ПТ → выручка с ПРОДАЖИ абонемента за месяц по цене пакета (скидки 5/10 учтены).
-    // Неизвестный пакет (детский 5, взрослый 25 и т.п.) — пока пропускаем.
+
+    // СПОСОБ А (основной, по продаже): абонементы, проданные за месяц, по цене пакета (скидки учтены).
+    // Неизвестный пакет (детский 5, взрослый 25) — пока пропускаем.
     let subsCounted = 0;
     (subsRev||[]).forEach(s=>{
       const cat = s.clients?.category, qty = s.initial_balance;
@@ -4973,14 +4990,17 @@ function _anMoney(year, month, branch) {
     // Взрослые группы в выручку НЕ входят (услуга во взрослом абонементе; ФОТ — по посещениям).
     // Детские группы: каждый оплаченный клиент-месяц = GROUP_CHILD_PRICE.
     rev.childGroup = childRev.filter(r=>r.paid).length * GROUP_CHILD_PRICE;
-    const totalRev = rev.adultSub+rev.childSub+rev.drop+rev.childGroup;
+
+    const totalRev   = rev.adultSub+rev.childSub+rev.drop+rev.childGroup;   // А: по продаже
+    const accrualRev = Math.round(accrualReg)+rev.drop+rev.childGroup;      // Б: по начислению
     const topTrainers = Object.entries(revByTrainer)
       .map(([id,v])=>({fio:fioMap[id]||'—', sum:v}))
       .sort((a,b)=>b.sum-a.sum).slice(0,3);
     return {
-      rev, totalRev,
-      avgCheck: subsCounted ? Math.round((rev.adultSub+rev.childSub)/subsCounted) : 0,
-      ratio:    totalRev ? Math.round(pr.totalFot/totalRev*100) : 0,
+      rev, totalRev, accrualRev,
+      avgCheck:     subsCounted ? Math.round((rev.adultSub+rev.childSub)/subsCounted) : 0,
+      ratio:        totalRev   ? Math.round(pr.totalFot/totalRev*100)   : 0,
+      accrualRatio: accrualRev ? Math.round(pr.totalFot/accrualRev*100) : 0,
       fot: pr.totalFot, fotRows: pr.rows, topTrainers,
     };
   }, 300000);
@@ -5257,9 +5277,15 @@ async function renderAnalyticsMoneyHub(year, month, branch) {
         </table></div>`:'<p class="hint">Нет данных за этот период</p>'}
       </div>
 
-      <div class="ah-section"><div class="ah-h">ФОТ / Выручка</div>
+      <div class="ah-section"><div class="ah-h">ФОТ / Выручка (по продаже)</div>
         <div class="ah-ratio ${_ratioClass(d.ratio)}">${d.ratio}%</div>
         <p class="hint" style="text-align:center">Норма: 37–42%. Текущее значение: ${d.ratio}%</p>
+      </div>
+
+      <div class="ah-section"><div class="ah-h">Альтернатива: по начислению</div>
+        <div class="ah-bar-row"><span class="ah-bar-lbl">Выручка (accrual)</span><div class="ah-bar-track"></div><span class="ah-bar-val">${fmt(d.accrualRev)}</span></div>
+        <div class="ah-bar-row"><span class="ah-bar-lbl">ФОТ / Выручка</span><div class="ah-bar-track"></div><span class="ah-bar-val ${_ratioClass(d.accrualRatio)}">${d.accrualRatio}%</span></div>
+        <p class="hint">Абонементы «размазаны» по проведённым занятиям месяца (цена пакета ÷ кол-во). Основной показатель выше — по продаже.</p>
       </div>
 
       ${d.topTrainers.length?`<div class="ah-section"><div class="ah-h">Топ-3 тренера по выручке</div>

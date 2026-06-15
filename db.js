@@ -1822,16 +1822,27 @@ async unassignTrainerGroup(id) {
     return rows;
   },
 
-  // Тренировки за месяц (тепловая карта, распределение по дням/тренерам).
+  // Тренировки за месяц (тепловая карта, распределение, выручка по начислению).
   async getAnWorkouts(year, month, branch=null) {
     const from = new Date(year, month-1, 1).toISOString();
     const to   = new Date(year, month,   1).toISOString();
     let q = sb().from('workouts')
-      .select('trainer_id,workout_date,is_drop_in,is_debt,debt_confirmed_at,branch,profiles!trainer_id(fio)')
+      .select('trainer_id,client_id,category_at_moment,drop_in_category,workout_date,is_drop_in,is_debt,debt_confirmed_at,branch,profiles!trainer_id(fio),clients!client_id(age,category)')
       .gte('workout_date', from).lt('workout_date', to)
       .eq('pending_confirmation', false).is('substitute_for', null);
     if (branch) q = q.eq('branch', branch);
     const { data, error } = await q;
+    if (error) throw error; return data || [];
+  },
+
+  // Абонементы за окно ~8 мес до конца месяца — карта «размер пакета клиента на дату»
+  // для выручки по начислению (accrual).
+  async getAnAllSubs(year, month) {
+    const toDay = new Date(year, month,   1).toISOString().slice(0,10);
+    const loDay = new Date(year, month-9, 1).toISOString().slice(0,10);
+    const { data, error } = await sb().from('subscriptions')
+      .select('client_id,start_date,initial_balance')
+      .gte('start_date', loDay).lt('start_date', toDay);
     if (error) throw error; return data || [];
   },
 
