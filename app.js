@@ -4980,7 +4980,13 @@ async function loadAuditLog() {
 }
 
 async function renderAdminSessionNotes() {
-  setupBack(()=>{renderAdminApp('more');setupBack(null);});
+  // Экран переиспользуется панелью старшего тренера (renderSeniorMore) — возврат по роли,
+  // иначе «назад» уводит старшего на панель координатора.
+  setupBack(()=>{
+    if (curRole()==='senior_trainer') seniorTab('more');
+    else renderAdminApp('more');
+    setupBack(null);
+  });
   $('#tab-content').innerHTML=`<div class="tab-pad">
     <div class="section-header"><h3>📝 Конспекты и цели</h3></div>
     <div class="form-group" style="display:flex;gap:8px">
