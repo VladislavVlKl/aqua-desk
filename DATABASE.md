@@ -80,7 +80,7 @@ RLS включается автоматически на новых таблиц
 
 **profiles** — сотрудники
 ```
-id int PK · fio · pincode (хеш) · role (trainer|senior_trainer|admin|ceo)
+id int PK · fio · pincode (хеш) · role (trainer|senior_trainer|admin|ceo|reception)
 branches text[] · tg_id bigint · is_archived · phone · extra_roles text[]
 group_type_access int[] (зарезервировано, в коде не используется после отката)
 ```
@@ -113,7 +113,11 @@ is_active · closing_note · freeze_start/end
 id uuid PK · trainer_id · client_id · category_at_moment · branch · workout_date
 is_debt + debt_confirmed_at · is_drop_in + drop_in_category · substitute_for (id тренера) + substitute_rate
 pending_confirmation · notes
+reception_status (pending|confirmed|rejected) · reception_reason · reception_by (profiles.id) · reception_at
 ```
+> `pending_confirmation` — подтверждение ЗАМЕНЫ тренером-заменяемым (тренер→тренер, см. `logSubstituteWorkout`/`resolveSubstitute`). Не путать с ресепшеном.
+> `reception_status` — подтверждение списания РЕСЕПШЕНОМ (Шаг 1 интеграции с 1С). Новые ПТ создаются `pending`, ресепшн подтверждает (`confirmed`) или отклоняет (`rejected` + откат баланса). В ЗП тренера идёт только `confirmed`; `rejected` исключается. Замена попадает в очередь ресепшена только после подтверждения тренером Б (`pending_confirmation=false`). Индекс `idx_workouts_reception (branch, reception_status, workout_date)`.
+> ⚠️ **Гейт фичи — флаг `RECEPTION_SUBMIT_ENABLED` (config.js), не DB DEFAULT.** Колонка имеет `DEFAULT 'confirmed'`; статус `'pending'` ставит `db.js` (`logWorkouts`, `logSubstituteWorkout`, `approveLateRequest`, `addTrialSession`) **только при `RECEPTION_SUBMIT_ENABLED=true`**. Сейчас флаг `false`: панель ресепшена задеплоена, но новые ПТ остаются `confirmed` — у тренеров нет «ожидающего баланса». Активация = `RECEPTION_SUBMIT_ENABLED=true` + пуш, ручных операций с БД не требуется.
 
 **session_notes** — конспекты (дедлайн 48ч): `workout_id, client_id, trainer_id, subscription_id, accomplishments, next_task, session_number, deadline`
 
@@ -121,7 +125,8 @@ pending_confirmation · notes
 
 **client_transfers** — переводы между тренерами: `client_id, from_trainer_id, to_trainer_id, initiated_by, status, note, resolved_at`
 
-**trial_sessions** — пробные: `trainer_id, branch, session_date, first_name, last_name, phone, age, category`
+**trial_sessions** — пробные: `trainer_id, branch, session_date, first_name, last_name, phone, age, category, reception_status (pending|confirmed|rejected), reception_reason, reception_by, reception_at`
+> Пробные подтверждаются ресепшеном так же, как ПТ: проведена, но не оплачена → ресепшн отклоняет → в ЗП не идёт (только `confirmed` начисляется). Индекс `idx_trials_reception (branch, reception_status, session_date)`.
 
 ### Запросы (флоу одобрения)
 
@@ -213,3 +218,4 @@ leader_name + leader_fee_percent · group_instance_id uuid · days_of_week text[
 - `group_instance_id` — uuid, объединяющий trainer_groups, group_clients, group_attendance, group_payments одной физической группы
 - Долг: `workouts.is_debt = true`, подтверждение оплаты пишет `debt_confirmed_at`
 - Профили сотрудников не удаляем — только `is_archived = true` (иначе CASCADE снесёт клиентов)
+- Подтверждение ресепшеном (`workouts`/`trial_sessions.reception_status`): `pending` → `confirmed` | `rejected`. В ЗП тренера только `confirmed`. Старые записи бэкфилнуты в `confirmed`.

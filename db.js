@@ -190,7 +190,11 @@ const DB = {
 
   // ─── WORKOUTS ────────────────────────────────
   async logWorkouts(rows) {
-    const {data,error} = await sb().from('workouts').insert(rows).select();
+    // Все новые списания тренера уходят на подтверждение ресепшену (Шаг 1 → 1С),
+    // но только если фича включена (RECEPTION_SUBMIT_ENABLED). Иначе остаются
+    // confirmed по DB DEFAULT — у тренеров нет «ожидающего баланса».
+    const rows2 = RECEPTION_SUBMIT_ENABLED ? rows.map(r => ({reception_status:'pending', ...r})) : rows;
+    const {data,error} = await sb().from('workouts').insert(rows2).select();
     if (error) throw error;
     const nonDebtNonDropin = rows.filter(r=>!r.is_debt&&!r.is_drop_in);
     if (nonDebtNonDropin.length) {
@@ -242,7 +246,8 @@ const DB = {
     const {data,error} = await sb().from('trial_sessions')
       .insert({trainer_id:trainerId, branch, first_name:firstName.trim(),
                last_name:lastName?.trim()||null, phone:phone?.trim()||null,
-               age:age||null, category, session_date:new Date().toISOString()})
+               age:age||null, category, session_date:new Date().toISOString(),
+               ...(RECEPTION_SUBMIT_ENABLED ? {reception_status:'pending'} : {})})
       .select().single();
     if (error) throw error; return data;
   },
@@ -306,6 +311,8 @@ const DB = {
       category_at_moment: req.category,
       is_debt: false, is_drop_in: false,
       pending_confirmation: false,
+      // позднее списание тоже подтверждает ресепшн — если фича включена
+      ...(RECEPTION_SUBMIT_ENABLED ? {reception_status:'pending'} : {}),
     });
     if (we) throw we;
     // Списываем баланс клиента — ошибка пробрасывается наверх
@@ -1697,6 +1704,42 @@ async unassignTrainerGroup(id) {
     });
   },
 
+  /** Дети, которые ХОДИЛИ в этом месяце, но НЕ оплатили (сигнал ⚠️ тренеру) */
+  async getGroupUnpaidAttendees(trainerId, monthStr) {
+    try {
+      const nextD = new Date(monthStr); nextD.setMonth(nextD.getMonth()+1);
+      const toDay = nextD.toISOString().slice(0,10);
+      const {data:myTgs} = await sb().from('trainer_groups')
+        .select('id,group_instance_id,group_types(name,type)')
+        .eq('trainer_id',trainerId).is('subscription_end',null);
+      const childMy = (myTgs||[]).filter(t=>t.group_types?.type==='children');
+      const seen = new Set(), uniq = [];
+      for (const g of childMy) {
+        const k = g.group_instance_id || `g${g.id}`;
+        if (seen.has(k)) continue; seen.add(k); uniq.push(g);
+      }
+      const result = [];
+      for (const g of uniq) {
+        const inst = g.group_instance_id;
+        const children = inst ? await this.getGroupClientsByInstance(inst) : await this.getGroupClients(g.id);
+        if (!children.length) continue;
+        const childIds = children.map(c=>c.id);
+        const [{data:atts}, {data:pays}] = await Promise.all([
+          sb().from('group_attendance').select('group_client_id')
+            .eq('attended',true).gte('session_date',monthStr).lt('session_date',toDay)
+            .in('group_client_id',childIds),
+          sb().from('group_payments').select('group_client_id,paid')
+            .eq('month',monthStr).in('group_client_id',childIds),
+        ]);
+        const attendedIds = new Set((atts||[]).map(a=>a.group_client_id));
+        const paidIds = new Set((pays||[]).filter(p=>p.paid).map(p=>p.group_client_id));
+        const unpaid = children.filter(c=>attendedIds.has(c.id) && !paidIds.has(c.id));
+        if (unpaid.length) result.push({groupName:g.group_types?.name||'Группа', children:unpaid.map(c=>c.name)});
+      }
+      return result;
+    } catch(e) { console.error('[getGroupUnpaidAttendees]', e); return []; }
+  },
+
   async getTrainerDetail(trainerId, year, month) {
     const from    = new Date(year,month-1,1).toISOString();
     const to      = new Date(year,month,  1).toISOString();
@@ -1907,7 +1950,9 @@ async unassignTrainerGroup(id) {
       ...r,
       trainer_id:           toBTrainerId,
       substitute_for:       substituteForId,
-      pending_confirmation: true,
+      pending_confirmation: true,   // ждёт подтверждения тренера Б
+      // в очередь ресепшена попадёт после тренера Б — только если фича включена
+      ...(RECEPTION_SUBMIT_ENABLED ? {reception_status:'pending'} : {}),
     }));
     const {data,error} = await sb().from('workouts').insert(subRows).select();
     if (error) throw error;
@@ -1981,6 +2026,244 @@ async unassignTrainerGroup(id) {
     const {error} = await sb().from('clients')
       .update({trainer_id:toTrainerId}).eq('id',clientId);
     if (error) throw error;
+  },
+
+  // ─── РЕСЕПШН: ПОДТВЕРЖДЕНИЕ СПИСАНИЙ (Шаг 1 интеграции с 1С) ───
+  // workouts/trial_sessions.reception_status: pending → confirmed | rejected.
+  // Замена (pending_confirmation=true) попадает в очередь только после тренера Б.
+  _dayRange(dateStr) {
+    return [`${dateStr}T00:00:00+05:00`, `${dateStr}T23:59:59+05:00`];
+  },
+
+  /** Очередь pending филиала за день: ПТ + пробные */
+  async getReceptionPending(branch, dateStr) {
+    const [from, to] = this._dayRange(dateStr);
+    const wq = sb().from('workouts')
+      .select('*, clients(fio,age), profiles!trainer_id(fio)')
+      .eq('branch', branch).eq('reception_status','pending').eq('pending_confirmation', false)
+      .gte('workout_date', from).lte('workout_date', to)
+      .order('workout_date',{ascending:true});
+    const tq = sb().from('trial_sessions')
+      .select('*, profiles!trainer_id(fio)')
+      .eq('branch', branch).eq('reception_status','pending')
+      .gte('session_date', from).lte('session_date', to)
+      .order('session_date',{ascending:true});
+    const [w, t] = await Promise.all([wq, tq]);
+    if (w.error) throw w.error; if (t.error) throw t.error;
+    return { workouts: w.data||[], trials: t.data||[] };
+  },
+
+  /** Количество pending за день (для бейджа) */
+  async getReceptionPendingCount(branch, dateStr) {
+    const [from, to] = this._dayRange(dateStr);
+    const wq = sb().from('workouts').select('id',{count:'exact',head:true})
+      .eq('branch',branch).eq('reception_status','pending').eq('pending_confirmation',false)
+      .gte('workout_date',from).lte('workout_date',to);
+    const tq = sb().from('trial_sessions').select('id',{count:'exact',head:true})
+      .eq('branch',branch).eq('reception_status','pending')
+      .gte('session_date',from).lte('session_date',to);
+    const [w, t] = await Promise.all([wq, tq]);
+    return (w.count||0) + (t.count||0);
+  },
+
+  /** Подтвердить ПТ */
+  async confirmWorkout(id, receptionId) {
+    const {error} = await sb().from('workouts')
+      .update({reception_status:'confirmed', reception_by:receptionId, reception_at:new Date().toISOString()})
+      .eq('id',id).eq('reception_status','pending');
+    if (error) throw error;
+  },
+
+  /** Отклонить ПТ — статус rejected + откат баланса по типу */
+  async rejectWorkout(id, receptionId, reasonCode) {
+    const {data:w, error:ge} = await sb().from('workouts')
+      .select('id,client_id,is_debt,is_drop_in,reception_status').eq('id',id).single();
+    if (ge) throw ge;
+    if (w.reception_status!=='pending') return;  // уже обработана
+    const {error} = await sb().from('workouts')
+      .update({reception_status:'rejected', reception_reason:reasonCode||null,
+               reception_by:receptionId, reception_at:new Date().toISOString()})
+      .eq('id',id).eq('reception_status','pending');
+    if (error) throw error;
+    // Обычная ПТ (и подтверждённая замена) списывала баланс → вернуть +1.
+    // Долг/разовое баланс не трогали.
+    if (!w.is_debt && !w.is_drop_in) {
+      await sb().rpc('increment_balance', {client_id: w.client_id, delta: +1});
+    }
+    // Разовое ребёнка пометило drop_in_used → сбросить
+    if (w.is_drop_in) {
+      const {data:cl} = await sb().from('clients').select('age,drop_in_used').eq('id',w.client_id).single();
+      if (cl && isChild(cl.age) && cl.drop_in_used)
+        await sb().from('clients').update({drop_in_used:false}).eq('id',w.client_id);
+    }
+  },
+
+  /** Подтвердить пробную */
+  async confirmTrial(id, receptionId) {
+    const {error} = await sb().from('trial_sessions')
+      .update({reception_status:'confirmed', reception_by:receptionId, reception_at:new Date().toISOString()})
+      .eq('id',id).eq('reception_status','pending');
+    if (error) throw error;
+  },
+
+  /** Отклонить пробную — баланс не трогает */
+  async rejectTrial(id, receptionId, reasonCode) {
+    const {error} = await sb().from('trial_sessions')
+      .update({reception_status:'rejected', reception_reason:reasonCode||null,
+               reception_by:receptionId, reception_at:new Date().toISOString()})
+      .eq('id',id).eq('reception_status','pending');
+    if (error) throw error;
+  },
+
+  /** Подтвердить всё за день (ПТ + пробные) */
+  async confirmAllReception(branch, dateStr, receptionId) {
+    const [from, to] = this._dayRange(dateStr);
+    const ts = new Date().toISOString();
+    const {error:we} = await sb().from('workouts')
+      .update({reception_status:'confirmed', reception_by:receptionId, reception_at:ts})
+      .eq('branch',branch).eq('reception_status','pending').eq('pending_confirmation',false)
+      .gte('workout_date',from).lte('workout_date',to);
+    if (we) throw we;
+    const {error:te} = await sb().from('trial_sessions')
+      .update({reception_status:'confirmed', reception_by:receptionId, reception_at:ts})
+      .eq('branch',branch).eq('reception_status','pending')
+      .gte('session_date',from).lte('session_date',to);
+    if (te) throw te;
+  },
+
+  /** Отклонённые за период (по дате решения reception_at) */
+  async getReceptionRejected(branch, fromDate, toDate) {
+    const from = `${fromDate}T00:00:00+05:00`, to = `${toDate}T23:59:59+05:00`;
+    const wq = sb().from('workouts')
+      .select('*, clients(fio), profiles!trainer_id(fio)')
+      .eq('branch',branch).eq('reception_status','rejected')
+      .gte('reception_at',from).lte('reception_at',to)
+      .order('reception_at',{ascending:false});
+    const tq = sb().from('trial_sessions')
+      .select('*, profiles!trainer_id(fio)')
+      .eq('branch',branch).eq('reception_status','rejected')
+      .gte('reception_at',from).lte('reception_at',to)
+      .order('reception_at',{ascending:false});
+    const [w, t] = await Promise.all([wq, tq]);
+    if (w.error) throw w.error; if (t.error) throw t.error;
+    return { workouts:w.data||[], trials:t.data||[] };
+  },
+
+  /** Подтверждённые за период (вкладка «История») */
+  async getReceptionConfirmed(branch, fromDate, toDate) {
+    const from = `${fromDate}T00:00:00+05:00`, to = `${toDate}T23:59:59+05:00`;
+    const wq = sb().from('workouts')
+      .select('*, clients(fio), profiles!trainer_id(fio)')
+      .eq('branch',branch).eq('reception_status','confirmed')
+      .gte('reception_at',from).lte('reception_at',to)
+      .order('reception_at',{ascending:false}).limit(300);
+    const tq = sb().from('trial_sessions')
+      .select('*, profiles!trainer_id(fio)')
+      .eq('branch',branch).eq('reception_status','confirmed')
+      .gte('reception_at',from).lte('reception_at',to)
+      .order('reception_at',{ascending:false}).limit(300);
+    const [w, t] = await Promise.all([wq, tq]);
+    if (w.error) throw w.error; if (t.error) throw t.error;
+    return { workouts:w.data||[], trials:t.data||[] };
+  },
+
+  /** Все висящие pending филиала (для эскалации в «Контроле» координатора) */
+  async getReceptionHanging(branch) {
+    let wq = sb().from('workouts')
+      .select('id,branch,workout_date,trainer_id,profiles!trainer_id(fio)')
+      .eq('reception_status','pending').eq('pending_confirmation',false)
+      .order('workout_date',{ascending:true});
+    if (branch) wq = wq.eq('branch',branch);
+    const {data,error} = await wq;
+    if (error) throw error; return data||[];
+  },
+
+  /** Статистика подтверждено/отклонено по тренерам за месяц (для «Контроля») */
+  async getReceptionStats(branch, year, month) {
+    const from = new Date(year,month-1,1).toISOString();
+    const to   = new Date(year,month,  1).toISOString();
+    let q = sb().from('workouts')
+      .select('trainer_id, reception_status, reception_reason, profiles!trainer_id(fio)')
+      .gte('workout_date',from).lt('workout_date',to);
+    if (branch) q = q.eq('branch',branch);
+    const {data,error} = await q;
+    if (error) throw error; return data||[];
+  },
+
+  /** Детские группы филиала с оплатами за месяц (вкладка «Группы» ресепшена) */
+  async getReceptionGroups(branch, month) {
+    const groups = await this.getActiveGroupsByBranch(branch);
+    const child = groups.filter(g=>g.group_types?.type==='children');
+    const seen = new Set(), uniq = [];
+    for (const g of child) {
+      const key = g.group_instance_id || `g${g.id}`;
+      if (seen.has(key)) continue; seen.add(key); uniq.push(g);
+    }
+    const result = [];
+    for (const g of uniq) {
+      const inst = g.group_instance_id;
+      const [children, payments] = await Promise.all([
+        inst ? this.getGroupClientsByInstance(inst) : this.getGroupClients(g.id),
+        inst ? this.getGroupPaymentsByInstance(inst, month) : this.getGroupPayments(g.id, month),
+      ]);
+      const payMap = Object.fromEntries(payments.map(p=>[p.group_client_id, p]));
+      result.push({
+        groupId: g.id, instanceId: inst,
+        name: g.group_types?.name||'Группа', trainer: g.profiles?.fio||'',
+        children: children.map(c=>({
+          id: c.id, name: c.name,
+          monthly_price: c.monthly_price||0,
+          paid: !!payMap[c.id]?.paid,
+          amount: payMap[c.id]?.amount || c.monthly_price || 0,
+        })),
+      });
+    }
+    return result;
+  },
+
+  /** Получатели-ресепшн филиала */
+  async getReceptionProfiles(branch) {
+    let q = sb().from('profiles').select('id,tg_id,fio')
+      .eq('role','reception').eq('is_archived',false);
+    if (branch) q = q.contains('branches',[branch]);
+    const {data,error} = await q;
+    if (error) throw error; return data||[];
+  },
+
+  /** Уведомление «конец дня» ресепшену (дедуп по rule_key за сутки) */
+  async queueReceptionEodOnce(branch, dateStr, count, createdBy) {
+    const ruleKey = `reception_eod:${branch}:${dateStr}`;
+    const {data:exists} = await sb().from('notifications_queue')
+      .select('id').eq('rule_key',ruleKey).limit(1);
+    if (exists && exists.length) return 0;  // уже поставлено сегодня
+    const recs = await this.getReceptionProfiles(branch);
+    if (!recs.length) return 0;
+    const rows = recs.filter(r=>r.tg_id).map(r=>({
+      recipient_tg_id: r.tg_id,
+      recipient_name:  r.fio,
+      message: `🔔 Осталось ${count} неподтверждённых списаний за сегодня (${branch}).`,
+      scheduled_for: new Date().toISOString(),
+      created_by: createdBy||null,
+      status: 'pending',
+      rule_key: ruleKey,
+    }));
+    if (!rows.length) return 0;
+    const {error} = await sb().from('notifications_queue').insert(rows);
+    if (error) throw error; return rows.length;
+  },
+
+  /** Уведомление тренеру об отклонении его списания */
+  async notifyTrainerRejected(trainerId, clientName, dateStr, reasonLabel) {
+    const {data:tr} = await sb().from('profiles').select('tg_id,fio').eq('id',trainerId).maybeSingle();
+    if (!tr?.tg_id) return;
+    await sb().from('notifications_queue').insert({
+      recipient_tg_id: tr.tg_id,
+      recipient_name:  tr.fio,
+      message: `❌ Ресепшн отклонил списание: ${clientName} · ${dateStr}. Причина: ${reasonLabel}. Баланс возвращён.`,
+      scheduled_for: new Date().toISOString(),
+      status: 'pending',
+      rule_key: 'reception_reject',
+    });
   },
 };
 

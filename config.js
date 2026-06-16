@@ -56,6 +56,20 @@ const EDIT_WINDOW_MIN        = 30;
 const MAX_BACKDATE_HOURS     = 48;
 const SUBSCRIPTION_WARN_DAYS = 7;
 const NOTE_DEADLINE_HOURS    = 48;
+// Флаг включения отправки списаний на подтверждение ресепшену.
+// false — панель ресепшена в проде есть, но новые ПТ НЕ уходят в pending (остаются
+// confirmed), у тренеров не появляется «ожидающий баланс». Переключить в true +
+// задеплоить — фича активируется, ПТ начинают уходить на ресепшн. Единственный гейт.
+const RECEPTION_SUBMIT_ENABLED = false;
+const RECEPTION_EOD_HOUR     = 21;  // час «конца дня»: напоминание ресепшену о висящих pending
+const RECEPTION_ESCALATE_HRS = 24;  // pending старше → эскалация в «Контроле» координатора
+
+// Причины отклонения списания ресепшеном (код → подпись)
+const RECEPTION_REJECT_REASONS = {
+  not_found: 'Не нашли клиента в базе',
+  sub_ended: 'Закончился абонемент',
+  questions: 'Есть вопросы по списанию',
+};
 
 // ─── СПРАВОЧНИКИ ─────────────────────────────
 const DAYS_SHORT = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];

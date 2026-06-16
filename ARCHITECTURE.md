@@ -34,6 +34,8 @@ index.html → Telegram.WebApp.ready() → init()
       ├── role=admin          → renderAdminApp()
       ├── role=senior_trainer → renderSeniorApp()
       ├── role=ceo            → renderCeoApp()
+      ├── role=reception      → renderReceptionApp()
+      ├── role=manager        → renderManagerApp()
       └── else                → renderTrainerApp()
 ```
 
@@ -58,6 +60,8 @@ index.html → Telegram.WebApp.ready() → init()
 
 ```
 CORE:STATE / CORE:UTILS / CORE:UI / CORE:INIT — состояние, утилиты, навигация, init
+DEV                 — дев-переключатель ролей (isDev/DEV_TG_ID, devSwitchRole, _devWrapDB);
+                      только координатор-владелец, флаг STATE._devRole, БД не трогается
 AUTH                — регистрация, PIN, claim_profile
 TRAINER:SHELL       — renderTrainerApp, renderTrainerShell, switchTab
 TRAINER:HOME        — главная: дежурство, счётчики, значок конспектов
@@ -73,6 +77,8 @@ CLIENT:EXPORT       — Excel-экспорты
 SENIOR / SENIOR:GROUPS / SENIOR:REPORT — панель старшего тренера
 ADMIN:SHELL/CONTROL/ANALYTICS/CLIENTS/SALARY/STAFF/BRANCHES/GROUPS/TECH — координатор
 CEO                 — дашборд, ЗП-сводка, группы, операционка, планы
+RECEPTION           — панель ресепшена: подтверждение списаний (Шаг 1 → 1С)
+MANAGER             — renderManagerApp, read-only панель управляющего (один филиал)
 SHARED:DELETE       — запросы на удаление клиентов (тренер → координатор)
 SHARED:PROFILE / SHARED:NOTIFICATIONS / SHARED:GROUP_MODALS
 ```
@@ -140,10 +146,36 @@ try { ... } finally { _pending.delete(key); }
 Контроль (audit log, сессии, конспекты, поздние запросы, запросы на удаление),
 Тех. часть (оборудование, поломки, закупки, счета, хлор, планы).
 
+### Ресепшн (renderReceptionApp)
+Подтверждение списаний ПТ (Шаг 1 интеграции с 1С). Видит только свой филиал (`branches[0]`).
+| Вкладка | Функции |
+|---|---|
+| Подтвердить | очередь pending за день (ПТ + пробные), ✓/✗ по каждой, «Подтвердить всё», бейдж-счётчик |
+| Отклонённые | отклонённые за месяц с причинами (🔴 «вопросы по списанию») |
+| Группы | детские группы филиала, отметка оплаты за месяц (`group_payments.paid`) |
+| История | подтверждённые за месяц |
+
+Списание тренера создаётся `reception_status='pending'` (DEFAULT в БД). Ресепшн `confirm` → в ЗП;
+`reject` → откат баланса (`increment_balance +1` для обычных ПТ; сброс `drop_in_used` для разовых детей)
++ уведомление тренеру. Замена попадает в очередь только после подтверждения тренером Б
+(`pending_confirmation=false`). Напоминания: бейдж / конец дня 21:00 (`RECEPTION_EOD_HOUR`) →
+`notifications_queue` / эскалация >24ч (`RECEPTION_ESCALATE_HRS`) в «Контроле» координатора.
+ЗП тренера (TRAINER:REPORT) делит ПТ на «Подтверждено» (confirmed) и «В ожидании» (pending, серым);
+rejected исключён. ⚠️ по группам «ходит, но не платит» (`getGroupUnpaidAttendees`).
+
 ### CEO (renderCeoApp)
 Дашборд (выручка/ПТ/дежурства/группы по филиалам), Аналитика (выручка по типам и тренерам,
 ФОТ/выручка, средний чек, активная база/новые/отток, ср. остаток ПТ, тепловая карта загруженности
 по слотам; выручка ПТ — расчётная по `PT_PRICES` из config.js), ЗП-сводка, группы (просмотр), операционка, планы.
+
+### Управляющий (renderManagerApp)
+Директор филиала. **Один филиал (`branches[0]`) + строго read-only** — никаких действий записи.
+Вкладки: Аналитика (отдельная read-only копия оболочки с залоченным филиалом — переиспользует
+загрузчики `_fill*Card` и хабы координатора), Персонал (тренеры филиала + показатели за месяц,
+карточка тренера), Группы (активные группы + карточка с составом/оплатами/должниками),
+Техчасть (оборудование/поломки/закупки/счета/хлор/планы — списками), ЗП (сводка поимённо через
+`renderSummaryTable(.,.,.,false)` + ФОТ/выручка + экспорт). Все запросы — те же `DB.*` чтения, что
+у координатора; дублируется только слой отображения. В шапке — пометка «👁 Просмотр».
 
 ### Группы
 - Детские: дети, посещаемость, оплата за месяц, должники, заметки прогресса, экспорт ЗП
