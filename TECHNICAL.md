@@ -10,14 +10,16 @@
 ```
 ┌─────────────────────────────────────────────┐
 │            Telegram Mini App                │
+│         frontend/ (GitHub Pages)            │
 │                                             │
 │  index.html                                 │
-│    ├── config.js     (константы, тарифы)    │
-│    ├── db.js         (DB.* + calcSalary)    │
-│    ├── app.js        (UI + бизнес-логика)   │
-│    ├── export.js     (Excel-выгрузки)       │
-│    ├── tutorial.js   (онбординг + enterApp) │
-│    └── notifications-ui.js                  │
+│    ├── js/config.js  (константы, тарифы)    │
+│    ├── js/db.js      (DB.* + calcSalary)    │
+│    ├── js/app.js     (UI + бизнес-логика)   │
+│    ├── js/export.js  (Excel-выгрузки)       │
+│    ├── js/tutorial.js(онбординг + enterApp) │
+│    └── js/notifications-ui.js               │
+│  css/ (style, analytics, tutorial, notif.)  │
 │                                             │
 │  schedule.html  (отдельная публичная стр.)  │
 └───────────────────────┬─────────────────────┘
@@ -29,10 +31,15 @@
 │  PostgreSQL + Row Level Security (RLS)      │
 │  Auth: через tg_id (не Supabase Auth)       │
 │  Storage: не используется                   │
-│  Edge Functions: не используются            │
+│  Edge Functions: telegram-auth (active);    │
+│       sync-to-sheets (в репо, не задеплоена)│
 │  RPC: verify_pin, change_pin,               │
-│       claim_profile, get_profile_by_tg_id   │
+│       claim_profile, get_profile_by_tg_id,  │
+│       increment_balance, rename_branch      │
 └─────────────────────────────────────────────┘
+
+Фоновые джобы (GitHub Actions, не в браузере):
+backend/jobs/remind.js · backend/jobs/process-queue.js
 ```
 
 **Деплой:** GitHub Pages (автодеплой при push в `main`)  
@@ -343,7 +350,7 @@ async function renderMyFeature() {
 | 🟡 | `group_trainer_payouts.group_id` = `trainer_groups.id` — при Art Swim каждый тренер имеет свой набор клиентов, totalPaid может быть 0 у второго тренера | Обсудить модель данных |
 | 🟡 | Нет напоминания координатору об утверждении ЗП | При росте команды |
 | 🟡 | CLAUDE.md устаревает — обновлять при крупных изменениях | Регулярно |
-| 🟢 | app.js ~5500 строк — монолит | При рефакторинге |
+| 🟢 | app.js ~10 600 строк — монолит | При рефакторинге |
 
 ---
 
