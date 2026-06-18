@@ -2651,6 +2651,37 @@ async function doConfirmDebt(wid,cid) {
   try{await DB.confirmDebt(wid,cid);toast('✅ Долг закрыт','success');renderReportTab();}
   catch(e){console.error(e);toast('Ошибка','error');}
 }
+
+// Списание ПТ из общего пакета (зал+бассейн) — тренер вносит, сколько клиент отходил в ТЗ
+function renderGymDeductModal(clientId, fioEnc, balance) {
+  const fio = decodeURIComponent(fioEnc);
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header">
+      <h3>➖ Списать в ТЗ</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button>
+    </div>
+    <p class="hint" style="margin-bottom:12px">${fio} — общий пакет зал+бассейн.<br>Текущий остаток: <strong>${balance} ПТ</strong>. Укажите, сколько клиент отходил в зале.</p>
+    <div class="form-group">
+      <label>Сколько ПТ списать (зал)</label>
+      <input type="number" id="gym-deduct-n" min="1" max="${balance}" value="1" inputmode="numeric">
+    </div>
+    <button class="btn btn-primary btn-full" id="btn-gym-deduct"
+      onclick="doGymDeduct('${clientId}')">Списать</button>
+  </div>`;
+  document.body.appendChild(m);
+}
+async function doGymDeduct(clientId) {
+  const n = parseInt($('#gym-deduct-n')?.value);
+  if (!n || n < 1) return toast('Укажите количество','error');
+  const btn = $('#btn-gym-deduct'); if (btn) btn.disabled = true;
+  try {
+    const r = await DB.deductGymSessions(clientId, n, STATE.profile);
+    document.querySelector('.modal-overlay')?.remove();
+    toast(`✅ Списано в ТЗ: ${r.deducted} ПТ · остаток ${r.after}`,'success');
+    renderClientProfile(clientId);
+  } catch(e){ console.error(e); toast('Ошибка','error'); if(btn) btn.disabled=false; }
+}
 async function doDeleteWorkout(id) {
   if(!confirm('Удалить запись?'))return;
   try{
@@ -2987,6 +3018,9 @@ async function renderClientProfile(clientId, backTab='home') {
             ${canEdit&&!client.is_archived&&(balanceZero||subExpired)?`<button class="btn btn-sm btn-primary"
               onclick="renderBuyPackageModal('${clientId}',${isChildClient},${client.balance||0})">
               🛒 Новый пакет</button>`:''}
+            ${canEdit&&!client.is_archived&&!isChildClient&&(client.balance||0)>0?`<button class="btn btn-sm" style="background:rgba(245,158,11,.15);color:#f59e0b;border:1px solid rgba(245,158,11,.3)"
+              onclick="renderGymDeductModal('${clientId}','${encodeURIComponent(client.fio)}',${client.balance||0})">
+              ➖ Списать в ТЗ</button>`:''}
             <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
               onclick="renderClientReportModal('${clientId}')">
               📊 Отчёт</button>

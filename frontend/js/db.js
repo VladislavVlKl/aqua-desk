@@ -187,6 +187,21 @@ const DB = {
     }
     return data;
   },
+  // Списание ПТ из общего (зал+бассейн) пакета взрослого: тренер вносит, сколько
+  // клиент отходил в ТЗ. Баланс уменьшается, остаток не уходит ниже 0. Пишем в audit_log.
+  async deductGymSessions(clientId, count, actor) {
+    const n = Math.max(1, parseInt(count) || 0);
+    const {data:cl} = await sb().from('clients')
+      .select('balance,fio').eq('id',clientId).single();
+    const before = cl?.balance || 0;
+    const after = Math.max(0, before - n);
+    const {error} = await sb().from('clients').update({balance:after}).eq('id',clientId);
+    if (error) throw error;
+    await DB.auditLog('gym_deduct', actor?.id, actor?.fio, clientId, 'client',
+      {count:n, balance_before:before, balance_after:after, fio:cl?.fio}, actor?.branch);
+    invalidateCache('clients');
+    return {before, after, deducted: before - after};
+  },
 
   // ─── WORKOUTS ────────────────────────────────
   async logWorkouts(rows) {
