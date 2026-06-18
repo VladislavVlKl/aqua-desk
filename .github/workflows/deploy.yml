@@ -30,7 +30,7 @@ jobs:
       - name: Prepare site files
         run: |
           mkdir -p _site
-          rsync -a --exclude='.git' --exclude='.github' --exclude='.claude' --exclude='.agents' --exclude='_site' . _site/
+          rsync -a frontend/ _site/
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

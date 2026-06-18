@@ -19,7 +19,8 @@ description: >
 Прогони `node --check` по всем JS-файлам:
 
 ```bash
-for f in app.js db.js config.js export.js tutorial.js notifications-ui.js; do
+# Браузерные JS в frontend/js/ + node-джобы в корне (remind.js, process-queue.js)
+for f in frontend/js/app.js frontend/js/db.js frontend/js/config.js frontend/js/export.js frontend/js/tutorial.js frontend/js/notifications-ui.js remind.js process-queue.js; do
   node --check /Users/vladislavklimov/aqua-desk/$f && echo "✅ $f OK" || echo "❌ $f ОШИБКА"
 done
 ```
