@@ -8,6 +8,13 @@ function sb() {
   return _sb;
 }
 
+// Фильтр запроса по филиалу: строка → один филиал (.eq), массив → несколько (.in),
+// null/'' /[] → без фильтра. Обратно совместимо со старыми вызовами (строка).
+function _brFilter(q, branch) {
+  if (Array.isArray(branch)) return branch.length ? q.in('branch', branch) : q;
+  return branch ? q.eq('branch', branch) : q;
+}
+
 const DB = {
 
   // ─── SESSION LOG ────────────────────────────
@@ -2149,16 +2156,18 @@ async unassignTrainerGroup(id) {
   /** Отклонённые за период (по дате решения reception_at) */
   async getReceptionRejected(branch, fromDate, toDate) {
     const from = `${fromDate}T00:00:00+05:00`, to = `${toDate}T23:59:59+05:00`;
-    const wq = sb().from('workouts')
+    let wq = sb().from('workouts')
       .select('*, clients(fio), profiles!trainer_id(fio)')
-      .eq('branch',branch).eq('reception_status','rejected')
+      .eq('reception_status','rejected')
       .gte('reception_at',from).lte('reception_at',to)
       .order('reception_at',{ascending:false});
-    const tq = sb().from('trial_sessions')
+    wq = _brFilter(wq, branch);
+    let tq = sb().from('trial_sessions')
       .select('*, profiles!trainer_id(fio)')
-      .eq('branch',branch).eq('reception_status','rejected')
+      .eq('reception_status','rejected')
       .gte('reception_at',from).lte('reception_at',to)
       .order('reception_at',{ascending:false});
+    tq = _brFilter(tq, branch);
     const [w, t] = await Promise.all([wq, tq]);
     if (w.error) throw w.error; if (t.error) throw t.error;
     return { workouts:w.data||[], trials:t.data||[] };
@@ -2188,7 +2197,7 @@ async unassignTrainerGroup(id) {
       .select('id,branch,workout_date,trainer_id,profiles!trainer_id(fio)')
       .eq('reception_status','pending').eq('pending_confirmation',false)
       .order('workout_date',{ascending:true});
-    if (branch) wq = wq.eq('branch',branch);
+    wq = _brFilter(wq, branch);
     const {data,error} = await wq;
     if (error) throw error; return data||[];
   },
@@ -2200,7 +2209,7 @@ async unassignTrainerGroup(id) {
     let q = sb().from('workouts')
       .select('trainer_id, reception_status, reception_reason, profiles!trainer_id(fio)')
       .gte('workout_date',from).lt('workout_date',to);
-    if (branch) q = q.eq('branch',branch);
+    q = _brFilter(q, branch);
     const {data,error} = await q;
     if (error) throw error; return data||[];
   },

@@ -710,13 +710,13 @@ async function renderHomeTab() {
         </label>
       </div>
       <div id="wk-substitute-wrap" style="display:none;margin-top:10px">
-        <div class="form-group"><label>ФИО тренера Б <span class="required">*</span></label>
-          <input id="wk-sub-fio" type="text" placeholder="Иванов Иван Иванович"
-            list="trainers-datalist" autocomplete="off">
-          <datalist id="trainers-datalist">
+        <div class="form-group"><label>Тренер Б <span class="required">*</span></label>
+          <select id="wk-sub-trainer">
+            <option value="">— выберите тренера —</option>
             ${(await cached('profiles',()=>DB.getAllProfiles())).filter(p=>p.role!=='admin'&&p.id!==STATE.profile.id)
-              .map(p=>`<option value="${p.fio}">`).join('')}
-          </datalist>
+              .sort((a,b)=>a.fio.localeCompare(b.fio,'ru'))
+              .map(p=>`<option value="${p.id}">${p.fio}</option>`).join('')}
+          </select>
         </div>
         <p class="hint">Тренер получит уведомление для подтверждения. ЗП пойдёт ему.</p>
       </div>
@@ -1220,12 +1220,8 @@ async function _doLogWorkoutInner() {
   const isSubstitute = document.getElementById('wk-substitute')?.checked||false;
   let subTrainerId = null;
   if (isSubstitute) {
-    const subFio = document.getElementById('wk-sub-fio')?.value.trim();
-    if (!subFio) return toast('Введите ФИО тренера для замены','error');
-    const allP = await cached('profiles',()=>DB.getAllProfiles());
-    const found = allP.find(p=>p.fio.toLowerCase()===subFio.toLowerCase());
-    if (!found) return toast(`Тренер «${subFio}» не найден`,'error');
-    subTrainerId = found.id;
+    subTrainerId = document.getElementById('wk-sub-trainer')?.value || '';
+    if (!subTrainerId) return toast('Выберите тренера для замены','error');
   }
 
   const rows=dates.map(d=>({
@@ -2784,15 +2780,20 @@ async function doResolveTransfer(transferId, clientId, toTrainerId, confirmed) {
 }
 
 // Модал: передать клиента (для тренера)
-function renderTransferClientModal(clientId, clientFio, fromTrainerId) {
+async function renderTransferClientModal(clientId, clientFio, fromTrainerId) {
+  const profiles = (await cached('profiles',()=>DB.getAllProfiles()))
+    .filter(p=>p.role!=='admin'&&p.id!==STATE.profile.id)
+    .sort((a,b)=>a.fio.localeCompare(b.fio,'ru'));
   const m=el('div','modal-overlay');
   m.innerHTML=`<div class="modal">
     <div class="modal-header"><h3>Передать клиента</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <p class="hint" style="margin-bottom:12px">Клиент: <b>${clientFio}</b></p>
-    <div class="form-group"><label>ФИО тренера <span class="required">*</span></label>
-      <input id="transfer-fio" type="text" placeholder="Иванов Иван Иванович"
-        list="trainers-datalist-t" autocomplete="off">
+    <div class="form-group"><label>Тренер <span class="required">*</span></label>
+      <select id="transfer-trainer">
+        <option value="">— выберите тренера —</option>
+        ${profiles.map(p=>`<option value="${p.id}">${p.fio}</option>`).join('')}
+      </select>
     </div>
     <div class="form-group"><label>Примечание (необязательно)</label>
       <textarea id="transfer-note" rows="2" placeholder="Причина передачи"></textarea>
@@ -2804,14 +2805,11 @@ function renderTransferClientModal(clientId, clientFio, fromTrainerId) {
 }
 
 async function doInitiateTransfer(clientId, fromTrainerId) {
-  const fio  = document.getElementById('transfer-fio')?.value.trim();
+  const toId = document.getElementById('transfer-trainer')?.value || '';
   const note = document.getElementById('transfer-note')?.value.trim()||'';
-  if (!fio) return toast('Введите ФИО тренера','error');
-  const profiles = await cached('profiles',()=>DB.getAllProfiles());
-  const found = profiles.find(p=>p.fio.toLowerCase()===fio.toLowerCase());
-  if (!found) return toast(`Тренер «${fio}» не найден`,'error');
+  if (!toId) return toast('Выберите тренера','error');
   try {
-    await DB.initiateTransfer(clientId, fromTrainerId, found.id, STATE.profile.id, note);
+    await DB.initiateTransfer(clientId, fromTrainerId, toId, STATE.profile.id, note);
     document.querySelector('.modal-overlay')?.remove();
     toast('✅ Запрос отправлен — тренер увидит его в Отчёте','success');
     switchTab('clients');
@@ -4891,6 +4889,8 @@ async function renderAdminMore() {
         onclick="renderCoordinatorSchedule()">📅 Расписание</button>
       <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);text-align:left;padding:14px 16px;border-radius:12px"
         onclick="renderAdminSessionNotes()">📝 Конспекты и цели</button>
+      <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);text-align:left;padding:14px 16px;border-radius:12px"
+        onclick="renderAdminMonitoring()">📋 Мониторинг</button>
       <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);text-align:left;padding:14px 16px;border-radius:12px"
         onclick="renderAuditLog()">🗂 Реестр действий</button>
     </div>
@@ -7753,37 +7753,136 @@ function onRateTypeChange(sel) {
 // ============================================================
 // SECTION: ADMIN:CONTROL — renderAdminControl, audit log, сессии, конспекты, поздние запросы
 // ============================================================
+// ── КОНТРОЛЬ: очередь действий (inbox координатора) ──
+// Наблюдательные метрики вынесены в renderAdminMonitoring («Ещё»).
 async function renderAdminControl(force=false) {
-  $('#tab-content').innerHTML=`<div class="tab-pad"><h3>Контроль</h3>
+  $('#tab-content').innerHTML=`<div class="tab-pad">
+    <div class="section-header"><h3>Контроль</h3>
+      <button class="btn-icon" onclick="renderAdminControl(true)" title="Обновить">🔄</button></div>
     <div class="center-screen"><div class="spinner"></div></div></div>`;
   try {
     const now=new Date(); const y=now.getFullYear(),mo=now.getMonth()+1;
-    // Кеш payload вкладки на 60с — повторные открытия мгновенные. force=true (после
-    // одобрений/отклонений) сбрасывает кеш, чтобы списки были свежими.
+    const _p2=x=>String(x).padStart(2,'0');
+    const branches = STATE.profile.branches||null;   // мультифилиал координатора
     const cacheKey=`adm_control_${y}_${mo}`;
     if (force) invalidateCache(cacheKey);
     const D = await cached(cacheKey, async () => {
+      const monthFrom=`${y}-${_p2(mo)}-01`, monthTo=`${y}-${_p2(mo)}-${_p2(now.getDate())}`;
+      const [lateRequests, workoutDelReqs, deleteReqs, recHanging, recRejected] = await Promise.all([
+        DB.getPendingLateRequests(null).catch(()=>[]),
+        DB.getAllWorkoutDeleteRequests().catch(()=>[]),
+        DB.getAllDeleteRequests().catch(()=>[]),
+        DB.getReceptionHanging(branches).catch(()=>[]),
+        DB.getReceptionRejected(branches, monthFrom, monthTo).catch(()=>({workouts:[],trials:[]})),
+      ]);
+      return {lateRequests, workoutDelReqs, deleteReqs, recHanging, recRejected};
+    }, 60000);
+    const {lateRequests, workoutDelReqs, deleteReqs, recHanging, recRejected} = D;
+    const sections=[];
+    // 🛎 Висящие подтверждения ресепшн (эскалация >24ч)
+    if (recHanging.length) {
+      const escThreshold = Date.now() - RECEPTION_ESCALATE_HRS*3600000;
+      const overdue = recHanging.filter(w=>new Date(w.workout_date).getTime() < escThreshold);
+      const ageStr = (d)=>{ const h=Math.floor((Date.now()-new Date(d))/3600000); return h<24?`${h} ч`:`${Math.floor(h/24)} дн.`; };
+      sections.push(`<div class="control-section">
+        <div class="control-title ${overdue.length?'danger':'warn'}">🛎 Висящие подтверждения ресепшн (${recHanging.length}${overdue.length?` · ⏰ ${overdue.length} > ${RECEPTION_ESCALATE_HRS}ч`:''})</div>
+        ${recHanging.slice(0,30).map(w=>{
+          const esc=new Date(w.workout_date).getTime()<escThreshold;
+          return `<div class="control-item" ${esc?'style="border-left:3px solid var(--danger)"':''}>
+            <div class="ci-main">${w.profiles?.fio||'?'} <span class="hint">${w.branch||''}</span></div>
+            <div class="ci-sub">${fmtDT(w.workout_date)} · висит ${ageStr(w.workout_date)}${esc?' ⏰':''}</div>
+          </div>`;
+        }).join('')}
+      </div>`);
+    }
+    // 🔴 Отклонённые «вопросы по списанию» (сигнал расхождений)
+    const recQuestions=[
+      ...(recRejected.workouts||[]).filter(w=>w.reception_reason==='questions').map(w=>({fio:w.clients?.fio||'?',trainer:w.profiles?.fio||'?',ts:w.reception_at})),
+      ...(recRejected.trials||[]).filter(t=>t.reception_reason==='questions').map(t=>({fio:`${t.first_name}${t.last_name?' '+t.last_name:''}`,trainer:t.profiles?.fio||'?',ts:t.reception_at})),
+    ].sort((a,b)=>new Date(b.ts)-new Date(a.ts));
+    if (recQuestions.length) sections.push(`<div class="control-section">
+      <div class="control-title danger">🔴 Отклонено: вопросы по списанию (${recQuestions.length})</div>
+      ${recQuestions.map(q=>`<div class="control-item">
+        <div class="ci-main">${q.fio} <span class="hint">← ${q.trainer}</span></div>
+        <div class="ci-sub">отклонено ${fmtDT(q.ts)}</div>
+      </div>`).join('')}
+    </div>`);
+    // ⏰ Запросы на поздние тренировки
+    if (lateRequests.length) sections.push(`<div class="control-section">
+      <div class="control-title danger">⏰ Запросы на поздние тренировки (${lateRequests.length})</div>
+      ${lateRequests.map(r=>`<div class="control-item">
+        <div class="ci-main"><b>${r.clients?.fio||'?'}</b> · кат.${r.category} · ${r.profiles?.fio||'?'}</div>
+        <div class="ci-sub">📅 ${fmtDT(r.workout_date)} · ${r.branch}</div>
+        <div class="ci-sub" style="margin-top:4px;color:var(--text)">💬 ${r.reason}</div>
+        <div style="display:flex;gap:6px;margin-top:8px">
+          <button class="btn btn-sm btn-primary" onclick="doApproveLateRequest(${r.id})">✓ Одобрить</button>
+          <button class="btn btn-sm btn-danger" onclick="doRejectLateRequest(${r.id})">✗ Отклонить</button>
+        </div>
+      </div>`).join('')}
+    </div>`);
+    // 🗑 Запросы на удаление ПТ
+    if (workoutDelReqs.length) sections.push(`<div class="control-section">
+      <div class="control-title danger">🗑 Запросы на удаление ПТ (${workoutDelReqs.length})</div>
+      ${workoutDelReqs.map(r=>`<div class="control-item">
+        <div class="ci-main">${r.client_name||'—'} · ${fmtDate(r.workout_date)}</div>
+        <div class="ci-sub">Тренер: ${r.profiles?.fio||'?'} · ${r.branch||''}</div>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <button class="btn btn-sm btn-danger" onclick="doApproveWorkoutDelete('${r.id}','${r.workout_id}')">Удалить</button>
+          <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
+            onclick="doRejectWorkoutDelete('${r.id}')">Отклонить</button>
+        </div>
+      </div>`).join('')}
+    </div>`);
+    // 🗑 Запросы на удаление клиента
+    if (deleteReqs.length) sections.push(`<div class="control-section">
+      <div class="control-title danger">🗑 Запросы на удаление (${deleteReqs.length})</div>
+      ${deleteReqs.map(r=>`<div class="control-item">
+        <div class="ci-main">${r.client_name} <span class="hint">← ${r.profiles?.fio||'?'}</span></div>
+        <div class="ci-sub" style="font-size:11px;color:var(--text-secondary)">
+          Запрос: ${fmtDate(r.created_at)}${r.clients?.balance!=null?' · Баланс: '+r.clients.balance:''}${r.clients?.subscription_end?' · Абон до: '+fmtDate(r.clients.subscription_end):''}
+        </div>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <button class="btn btn-sm btn-danger" onclick="doApproveDelete('${r.id}','${r.client_id}','${encodeURIComponent(r.client_name||'')}')">Удалить</button>
+          <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
+            onclick="doRejectDelete('${r.id}')">Отклонить</button>
+        </div>
+      </div>`).join('')}
+    </div>`);
+
+    $('#tab-content').innerHTML=`<div class="tab-pad">
+      <div class="section-header"><h3>Контроль</h3>
+        <button class="btn-icon" onclick="renderAdminControl(true)" title="Обновить">🔄</button></div>
+      <p class="hint" style="margin-bottom:16px">На ${todayStr()} · очередь действий</p>
+      ${sections.length?sections.join(''):'<div class="empty-state">✅<p>Очередь пуста</p></div>'}
+    </div>`;
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+
+// ── МОНИТОРИНГ: наблюдательные метрики координатора (открывается из «Ещё») ──
+async function renderAdminMonitoring(force=false) {
+  setupBack(()=>{renderAdminApp('more');setupBack(null);});
+  $('#tab-content').innerHTML=`<div class="tab-pad">
+    <div class="ah-head">${backBtn()}<h3>📋 Мониторинг</h3>
+      <button class="btn-icon" onclick="renderAdminMonitoring(true)" title="Обновить" style="margin-left:auto">🔄</button></div>
+    <div class="center-screen"><div class="spinner"></div></div></div>`;
+  try {
+    const now=new Date(); const y=now.getFullYear(),mo=now.getMonth()+1;
+    const branches = STATE.profile.branches||null;   // мультифилиал координатора
+    const cacheKey=`adm_monitor_${y}_${mo}`;
+    if (force) invalidateCache(cacheKey);
+    const D = await cached(cacheKey, async () => {
       const from=new Date(y,mo-1,1).toISOString(),to=new Date(y,mo,1).toISOString();
-      const adminBranch = STATE.profile.branches?.[0]||null;
-      const _p2=x=>String(x).padStart(2,'0');
-      const monthFrom=`${y}-${_p2(mo)}-01`, monthTo=`${now.getFullYear()}-${_p2(now.getMonth()+1)}-${_p2(now.getDate())}`;
-      // Все запросы независимы — грузим параллельно (было 8 последовательных await → таб долго грузился)
-      const [data, activeRes, activityStats, allTrials, lateRequests, workoutDelReqs, deleteReqs, sessions, recHanging, recStats, recRejected] = await Promise.all([
+      const [data, activeRes, activityStats, allTrials, sessions, recStats] = await Promise.all([
         DB.getControlData(),
         sb().from('workouts').select('trainer_id').gte('workout_date',from).lt('workout_date',to),
         DB.getTrainersActivityStats(y, mo).catch(()=>[]),
         DB.getAllTrialSessions(y, mo, null).catch(()=>[]),
-        DB.getPendingLateRequests(null).catch(()=>[]),
-        DB.getAllWorkoutDeleteRequests().catch(()=>[]),
-        DB.getAllDeleteRequests().catch(()=>[]),
         DB.getRecentSessions(30).catch(()=>[]),
-        DB.getReceptionHanging(adminBranch).catch(()=>[]),
-        DB.getReceptionStats(adminBranch, y, mo).catch(()=>[]),
-        DB.getReceptionRejected(adminBranch, monthFrom, monthTo).catch(()=>({workouts:[],trials:[]})),
+        DB.getReceptionStats(branches, y, mo).catch(()=>[]),
       ]);
-      return {data, activeRes, activityStats, allTrials, lateRequests, workoutDelReqs, deleteReqs, sessions, recHanging, recStats, recRejected};
+      return {data, activeRes, activityStats, allTrials, sessions, recStats};
     }, 60000);
-    const {data, activeRes, activityStats, allTrials, lateRequests, workoutDelReqs, deleteReqs, sessions, recHanging, recStats, recRejected} = D;
+    const {data, activeRes, activityStats, allTrials, sessions, recStats} = D;
     const activeSet=new Set((activeRes?.data||[]).map(x=>x.trainer_id));
     const inactive=data.inactiveTrainers.filter(t=>!activeSet.has(t.id));
     const sections=[];
@@ -7817,20 +7916,6 @@ async function renderAdminControl(force=false) {
         <div class="ci-main">${t.fio}</div>
         <div class="ci-sub">${(t.branches||[]).join(', ')}</div>
       </div>`).join('')}</div>`);
-    // Запросы на поздние тренировки
-    if (lateRequests.length) sections.unshift(`<div class="control-section">
-      <div class="control-title danger">⏰ Запросы на поздние тренировки (${lateRequests.length})</div>
-      ${lateRequests.map(r=>`<div class="control-item">
-        <div class="ci-main"><b>${r.clients?.fio||'?'}</b> · кат.${r.category} · ${r.profiles?.fio||'?'}</div>
-        <div class="ci-sub">📅 ${fmtDT(r.workout_date)} · ${r.branch}</div>
-        <div class="ci-sub" style="margin-top:4px;color:var(--text)">💬 ${r.reason}</div>
-        <div style="display:flex;gap:6px;margin-top:8px">
-          <button class="btn btn-sm btn-primary" onclick="doApproveLateRequest(${r.id})">✓ Одобрить</button>
-          <button class="btn btn-sm btn-danger" onclick="doRejectLateRequest(${r.id})">✗ Отклонить</button>
-        </div>
-      </div>`).join('')}
-    </div>`);
-
     // Пробные тренировки — алерт если >5 у одного тренера
     if (allTrials.length) {
       const trialByTrainer = {};
@@ -7849,7 +7934,6 @@ async function renderAdminControl(force=false) {
           </div>`).join('')}
         </div>`);
       }
-      // Все пробные — информационный блок
       sections.push(`<div class="control-section">
         <div class="control-title" style="background:rgba(139,92,246,.15);color:#7c3aed">🆕 Пробные за месяц (${allTrials.length})</div>
         ${allTrials.map(t=>`<div class="control-item">
@@ -7858,10 +7942,8 @@ async function renderAdminControl(force=false) {
         </div>`).join('')}
       </div>`);
     }
-
-    // Блок активности тренеров
+    // 📋 Активность тренеров
     if (activityStats.length) {
-      const withProblems = activityStats.filter(t=>t.overdueNotes>0||t.monthWorkouts===0);
       const allSorted = [...activityStats].sort((a,b)=>b.overdueNotes-a.overdueNotes||b.monthWorkouts-a.monthWorkouts);
       const daysSince = (dateStr) => {
         if (!dateStr) return '∞';
@@ -7871,7 +7953,6 @@ async function renderAdminControl(force=false) {
       sections.push(`<div class="control-section">
         <div class="control-title" style="background:rgba(99,102,241,.15);color:#6366f1">📋 Активность тренеров (${new Date(y,mo-1).toLocaleString('ru-RU',{month:'long'})})</div>
         ${allSorted.map(t=>{
-          const hasIssue = t.overdueNotes>0||t.monthWorkouts===0;
           const borderColor = t.overdueNotes>0?'var(--danger)':t.monthWorkouts===0?'var(--warn)':'var(--success)';
           return `<div class="control-item" style="border-left:3px solid ${borderColor}">
             <div class="ci-main" style="display:flex;justify-content:space-between;align-items:center">
@@ -7886,79 +7967,7 @@ async function renderAdminControl(force=false) {
         }).join('')}
       </div>`);
     }
-    // Запросы на удаление ПТ
-    if (workoutDelReqs.length) sections.unshift(`<div class="control-section">
-      <div class="control-title danger">🗑 Запросы на удаление ПТ (${workoutDelReqs.length})</div>
-      ${workoutDelReqs.map(r=>`<div class="control-item">
-        <div class="ci-main">${r.client_name||'—'} · ${fmtDate(r.workout_date)}</div>
-        <div class="ci-sub">Тренер: ${r.profiles?.fio||'?'} · ${r.branch||''}</div>
-        <div style="display:flex;gap:6px;margin-top:6px">
-          <button class="btn btn-sm btn-danger" onclick="doApproveWorkoutDelete('${r.id}','${r.workout_id}')">Удалить</button>
-          <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
-            onclick="doRejectWorkoutDelete('${r.id}')">Отклонить</button>
-        </div>
-      </div>`).join('')}
-    </div>`);
-    // Add delete requests
-    if (deleteReqs.length) sections.unshift(`<div class="control-section">
-      <div class="control-title danger">🗑 Запросы на удаление (${deleteReqs.length})</div>
-      ${deleteReqs.map(r=>`<div class="control-item">
-        <div class="ci-main">${r.client_name} <span class="hint">← ${r.profiles?.fio||'?'}</span></div>
-        <div class="ci-sub" style="font-size:11px;color:var(--text-secondary)">
-          Запрос: ${fmtDate(r.created_at)}${r.clients?.balance!=null?' · Баланс: '+r.clients.balance:''}${r.clients?.subscription_end?' · Абон до: '+fmtDate(r.clients.subscription_end):''}
-        </div>
-        <div style="display:flex;gap:6px;margin-top:6px">
-          <button class="btn btn-sm btn-danger" onclick="doApproveDelete('${r.id}','${r.client_id}','${encodeURIComponent(r.client_name||'')}')">Удалить</button>
-          <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
-            onclick="doRejectDelete('${r.id}')">Отклонить</button>
-        </div>
-      </div>`).join('')}
-    </div>`);
-    // Последние входы в систему
-    if (sessions.length) {
-      const rows = sessions.map(s=>{
-        const dt = new Date(s.opened_at);
-        const dtStr = dt.toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
-        const deviceIcon = s.device==='iOS'?'🍎':s.device==='Android'?'🤖':s.device==='Desktop'?'💻':'📱';
-        return `<div class="control-item">
-          <div class="ci-main">${s.fio||s.tg_id} <span class="hint">${s.role||''}</span></div>
-          <div class="ci-sub">${deviceIcon} ${s.device} · v${s.js_version||'?'} · ${dtStr}</div>
-        </div>`;
-      }).join('');
-      sections.push(`<div class="control-section">
-        <div class="control-title" style="background:rgba(16,185,129,.12);color:#10b981">🟢 Входы за последние 30 дней (${sessions.length})</div>
-        ${rows}
-      </div>`);
-    }
-    // ── РЕСЕПШН: висящие подтверждения (эскалация >24ч)
-    if (recHanging.length) {
-      const escThreshold = Date.now() - RECEPTION_ESCALATE_HRS*3600000;
-      const overdue = recHanging.filter(w=>new Date(w.workout_date).getTime() < escThreshold);
-      const ageStr = (d)=>{ const h=Math.floor((Date.now()-new Date(d))/3600000); return h<24?`${h} ч`:`${Math.floor(h/24)} дн.`; };
-      sections.unshift(`<div class="control-section">
-        <div class="control-title ${overdue.length?'danger':'warn'}">🛎 Висящие подтверждения ресепшн (${recHanging.length}${overdue.length?` · ⏰ ${overdue.length} > ${RECEPTION_ESCALATE_HRS}ч`:''})</div>
-        ${recHanging.slice(0,30).map(w=>{
-          const esc=new Date(w.workout_date).getTime()<escThreshold;
-          return `<div class="control-item" ${esc?'style="border-left:3px solid var(--danger)"':''}>
-            <div class="ci-main">${w.profiles?.fio||'?'} <span class="hint">${w.branch||''}</span></div>
-            <div class="ci-sub">${fmtDT(w.workout_date)} · висит ${ageStr(w.workout_date)}${esc?' ⏰':''}</div>
-          </div>`;
-        }).join('')}
-      </div>`);
-    }
-    // ── РЕСЕПШН: отклонённые «вопросы по списанию» (сигнал расхождений)
-    const recQuestions=[
-      ...(recRejected.workouts||[]).filter(w=>w.reception_reason==='questions').map(w=>({fio:w.clients?.fio||'?',trainer:w.profiles?.fio||'?',ts:w.reception_at})),
-      ...(recRejected.trials||[]).filter(t=>t.reception_reason==='questions').map(t=>({fio:`${t.first_name}${t.last_name?' '+t.last_name:''}`,trainer:t.profiles?.fio||'?',ts:t.reception_at})),
-    ].sort((a,b)=>new Date(b.ts)-new Date(a.ts));
-    if (recQuestions.length) sections.unshift(`<div class="control-section">
-      <div class="control-title danger">🔴 Отклонено: вопросы по списанию (${recQuestions.length})</div>
-      ${recQuestions.map(q=>`<div class="control-item">
-        <div class="ci-main">${q.fio} <span class="hint">← ${q.trainer}</span></div>
-        <div class="ci-sub">отклонено ${fmtDT(q.ts)}</div>
-      </div>`).join('')}
-    </div>`);
-    // ── РЕСЕПШН: % подтверждено/отклонено по тренерам
+    // 🛎 % подтверждено/отклонено по тренерам (ресепшн)
     if (recStats.length) {
       const byTr={};
       recStats.forEach(r=>{
@@ -7984,10 +7993,28 @@ async function renderAdminControl(force=false) {
         </div>`).join('')}
       </div>`);
     }
+    // 🟢 Входы за последние 30 дней
+    if (sessions.length) {
+      const rows = sessions.map(s=>{
+        const dt = new Date(s.opened_at);
+        const dtStr = dt.toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+        const deviceIcon = s.device==='iOS'?'🍎':s.device==='Android'?'🤖':s.device==='Desktop'?'💻':'📱';
+        return `<div class="control-item">
+          <div class="ci-main">${s.fio||s.tg_id} <span class="hint">${s.role||''}</span></div>
+          <div class="ci-sub">${deviceIcon} ${s.device} · v${s.js_version||'?'} · ${dtStr}</div>
+        </div>`;
+      }).join('');
+      sections.push(`<div class="control-section">
+        <div class="control-title" style="background:rgba(16,185,129,.12);color:#10b981">🟢 Входы за последние 30 дней (${sessions.length})</div>
+        ${rows}
+      </div>`);
+    }
 
     $('#tab-content').innerHTML=`<div class="tab-pad">
-      <h3>Контроль</h3><p class="hint" style="margin-bottom:16px">На ${todayStr()}</p>
-      ${sections.length?sections.join(''):'<div class="empty-state">✅<p>Проблем не обнаружено</p></div>'}
+      <div class="ah-head">${backBtn()}<h3>📋 Мониторинг</h3>
+        <button class="btn-icon" onclick="renderAdminMonitoring(true)" title="Обновить" style="margin-left:auto">🔄</button></div>
+      <p class="hint" style="margin-bottom:16px">На ${todayStr()}</p>
+      ${sections.length?sections.join(''):'<div class="empty-state">✅<p>Всё спокойно</p></div>'}
     </div>`;
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
