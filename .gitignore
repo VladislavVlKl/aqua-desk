@@ -1,0 +1,9 @@
+# macOS
+.DS_Store
+
+# Сборка GitHub Pages
+_site/
+
+# Локальные настройки/секреты
+.env
+.env.local
