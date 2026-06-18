@@ -13,15 +13,21 @@ frontend/          ← публикуется на GitHub Pages (корень с
 ├── schedule.html    отдельный экран расписания
 ├── js/              браузерные скрипты (подключаются в index.html)
 └── css/             стили
+backend/
+└── jobs/            node-джобы для GitHub Actions
+    ├── remind.js        напоминания тренерам (ежечасно)
+    └── process-queue.js разбор очереди уведомлений (каждые 5 мин)
+supabase/          ← БД-слой: миграции (источник правды) + Edge Functions.
+                     Остаётся в корне — стандартный путь Supabase CLI / branching.
 .github/workflows/ ← CI/CD (deploy, daily-reminder, process-queue)
-supabase/          ← миграции БД + Edge Functions
-remind.js          ← node-джоба напоминаний (Actions)
-process-queue.js   ← node-джоба разбора очереди уведомлений (Actions)
 docs/              ← паспорта, отчёты, выгрузки
 ```
 
 > Деплой публикует **только `frontend/`** (`rsync frontend/ _site/`). Браузерные файлы
 > грузятся относительными путями `js/…` и `css/…` от корня сайта.
+>
+> Воркфлоу `daily-reminder` / `process-queue` запускают `node backend/jobs/*.js`
+> (npm-зависимости ставятся в корень, node резолвит их вверх по дереву).
 
 ### frontend/js
 
