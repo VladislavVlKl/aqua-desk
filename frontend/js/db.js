@@ -969,7 +969,7 @@ async unassignTrainerGroup(id) {
   /** Повторяющиеся слоты тренера */
   async getRecurringSlots(trainerId) {
     const {data,error} = await sb().from('schedule_slots')
-      .select('*, clients(fio,category), group_types(name,type)')
+      .select('*, clients(fio,category,balance), group_types(name,type)')
       .eq('trainer_id',trainerId).eq('active',true)
       .is('specific_date',null)
       .order('day_of_week').order('start_time');
@@ -979,7 +979,7 @@ async unassignTrainerGroup(id) {
   /** Разовые слоты тренера для конкретной недели */
   async getOneTimeSlots(trainerId, weekStart, weekEnd) {
     const {data,error} = await sb().from('schedule_slots')
-      .select('*, clients(fio,category), group_types(name,type)')
+      .select('*, clients(fio,category,balance), group_types(name,type)')
       .eq('trainer_id',trainerId).eq('active',true)
       .not('specific_date','is',null)
       .gte('specific_date',weekStart)
@@ -1002,7 +1002,7 @@ async unassignTrainerGroup(id) {
   /** Все активные слоты — для обратной совместимости */
   async getSlots(trainerId) {
     const {data,error} = await sb().from('schedule_slots')
-      .select('*, clients(fio,category), group_types(name,type)')
+      .select('*, clients(fio,category,balance), group_types(name,type)')
       .eq('trainer_id',trainerId).eq('active',true)
       .is('specific_date',null)
       .order('day_of_week').order('start_time');

@@ -878,7 +878,7 @@ async function renderClientsTab() {
           <div class="cr-name" style="font-size:16px;font-weight:600">${dot}${c.is_archived?'<span style="font-size:11px;color:var(--hint);font-weight:400;margin-right:4px">[Архив]</span>':''}${dupBadge}${c.fio}</div>
           <div class="cr-meta" style="margin-top:2px;display:flex;flex-wrap:wrap;gap:4px;align-items:center">
             <span class="hi-cat cat-${c.category}" style="font-size:11px;padding:1px 7px;border-radius:8px;font-weight:600">Кат.${c.category}</span>
-            <span style="font-size:12px;color:var(--hint)">${c.balance} ПТ</span>
+            <span style="font-size:12px;${noBalance?'color:#ef4444;font-weight:600':'color:var(--hint)'}">${c.balance} ПТ</span>
             ${c.age?`<span style="font-size:12px;color:var(--hint)">${c.age} лет</span>`:''}
             ${isFrozen?`<span style="font-size:12px;color:#3b82f6">🧊 до ${c.freeze_end}</span>`:''}
             ${!isFrozen&&c.subscription_end?`<span style="font-size:12px;color:${exp?'#ef4444':warn?'#f59e0b':'var(--hint)'}">до ${c.subscription_end}</span>`:''}
@@ -1620,6 +1620,7 @@ async function loadScheduleWeek(offset) {
       const dateForDow = new Date(mon); dateForDow.setDate(mon.getDate()+s.day_of_week);
       const dateStr = dateForDow.toISOString().slice(0,10);
       if (cancelledSet.has(`${s.id}__${dateStr}`)) return; // отменён
+      if (s.slot_type==='pt' && (s.clients?.balance||0)<=0) return; // нулевой остаток ПТ
       const startH = parseInt(s.start_time.slice(0,2));
       const endH   = parseInt(s.end_time.slice(0,2));
       if (s.slot_type==='duty') {
@@ -1636,6 +1637,7 @@ async function loadScheduleWeek(offset) {
 
     // Разовые слоты
     oneTime.forEach(s=>{
+      if (s.slot_type==='pt' && (s.clients?.balance||0)<=0) return; // нулевой остаток ПТ
       const date = new Date(s.specific_date+'T12:00:00');
       const dow  = (date.getDay()+6)%7;
       const startH = parseInt(s.start_time.slice(0,2));
@@ -1923,10 +1925,12 @@ async function renderTodayTab() {
       s.slot_type!=='duty' && !s.confirmation
     );
 
-    const ptSlots=slots.filter(s=>s.slot_type==='pt');
+    // Скрываем ПТ-слоты клиентов с нулевым остатком (закрытые/истёкшие абонементы),
+    // кроме уже подтверждённых на сегодня — их оставляем, чтобы не «потерять» проведённую тренировку.
+    const ptSlots=slots.filter(s=>s.slot_type==='pt' && ((s.clients?.balance||0)>0 || s.confirmation));
     const grpSlots=slots.filter(s=>s.slot_type==='group');
     const dutySlots=slots.filter(s=>s.slot_type==='duty');
-    const pending=slots.filter(s=>!s.confirmation&&s.slot_type!=='duty').length;
+    const pending=[...ptSlots,...grpSlots].filter(s=>!s.confirmation).length;
     const todayEvents=events.filter(e=>fmtDate(e.start_time)===fmtDate(new Date()));
 
     // Сохраняем пропущенные в глобальной переменной для панели
@@ -1956,7 +1960,7 @@ async function renderTodayTab() {
           </div></div>`).join('')}`:''}
       ${ptSlots.length?`<h4>Персональные тренировки</h4>${ptSlots.map(s=>renderTodaySlot(s,date)).join('')}`:''}
       ${grpSlots.length?`<h4>Групповые занятия</h4>${grpSlots.map(s=>renderTodaySlot(s,date)).join('')}`:''}
-      ${!slots.length&&!todayEvents.length&&!missedSlots.length?'<div class="empty-state">📭<p>На сегодня ничего нет</p></div>':''}
+      ${!ptSlots.length&&!grpSlots.length&&!dutySlots.length&&!todayEvents.length&&!missedSlots.length?'<div class="empty-state">📭<p>На сегодня ничего нет</p></div>':''}
       ${todayWorkouts.length?`
       <h4 style="margin-top:20px">✅ Списано сегодня (${todayWorkouts.length})</h4>
       <div style="display:flex;flex-direction:column;gap:6px">
