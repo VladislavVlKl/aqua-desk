@@ -1976,8 +1976,15 @@ async unassignTrainerGroup(id) {
       // в очередь ресепшена попадёт после тренера Б — только если фича включена
       ...(RECEPTION_SUBMIT_ENABLED ? {reception_status:'pending'} : {}),
     }));
-    const {data,error} = await sb().from('workouts').insert(subRows).select();
+    const {data,error} = await sb().from('workouts').insert(subRows).select('*, clients(fio), a:profiles!substitute_for(fio)');
     if (error) throw error;
+    const w0 = data?.[0];
+    const cFio = w0?.clients?.fio || 'клиента';
+    const aFio = w0?.a?.fio || 'Тренер';
+    const n = data?.length || 1;
+    DB.enqueueTrainerNotification(toBTrainerId,
+      `⚡ ${aFio} записал(а) на вас замену${n>1?` (${n} тренировок)`:''}: ${cFio}. Подтвердите во вкладке «Отчёт».`,
+      'substitution');
     return data;
   },
 
@@ -2014,8 +2021,14 @@ async unassignTrainerGroup(id) {
     const {data,error} = await sb().from('client_transfers')
       .insert({client_id:clientId,from_trainer_id:fromId,to_trainer_id:toId,
                initiated_by:initiatedBy,status:'pending',note:note||null})
-      .select().single();
-    if (error) throw error; return data;
+      .select('*, clients(fio), from:profiles!from_trainer_id(fio)').single();
+    if (error) throw error;
+    const cFio = data?.clients?.fio || 'клиента';
+    const fromFio = data?.from?.fio || 'тренер';
+    DB.enqueueTrainerNotification(toId,
+      `👤 ${fromFio} передаёт вам клиента: ${cFio}.${note?` Комментарий: ${note}.`:''} Подтвердите во вкладке «Отчёт».`,
+      'client_transfer');
+    return data;
   },
 
   /** Входящие запросы на передачу (для тренера Б) */
@@ -2278,16 +2291,25 @@ async unassignTrainerGroup(id) {
 
   /** Уведомление тренеру об отклонении его списания */
   async notifyTrainerRejected(trainerId, clientName, dateStr, reasonLabel) {
-    const {data:tr} = await sb().from('profiles').select('tg_id,fio').eq('id',trainerId).maybeSingle();
-    if (!tr?.tg_id) return;
-    await sb().from('notifications_queue').insert({
-      recipient_tg_id: tr.tg_id,
-      recipient_name:  tr.fio,
-      message: `❌ Ресепшн отклонил списание: ${clientName} · ${dateStr}. Причина: ${reasonLabel}. Баланс возвращён.`,
-      scheduled_for: new Date().toISOString(),
-      status: 'pending',
-      rule_key: 'reception_reject',
-    });
+    return DB.enqueueTrainerNotification(trainerId,
+      `❌ Ресепшн отклонил списание: ${clientName} · ${dateStr}. Причина: ${reasonLabel}. Баланс возвращён.`,
+      'reception_reject');
+  },
+  // Положить уведомление тренеру в очередь → бейдж колокольчика + Telegram-пуш (воркер каждые 5 мин).
+  // Fire-and-forget: ошибка не должна валить основную операцию.
+  async enqueueTrainerNotification(trainerId, message, ruleKey) {
+    try {
+      const {data:tr} = await sb().from('profiles').select('tg_id,fio').eq('id',trainerId).maybeSingle();
+      if (!tr?.tg_id) return;
+      await sb().from('notifications_queue').insert({
+        recipient_tg_id: tr.tg_id,
+        recipient_name:  tr.fio,
+        message,
+        scheduled_for: new Date().toISOString(),
+        status: 'pending',
+        rule_key: ruleKey || 'system',
+      });
+    } catch(e) { console.error('[notify]', e); }
   },
 };
 
