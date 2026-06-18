@@ -2190,7 +2190,7 @@ async function doApproveLateRequest(id) {
   try {
     await DB.approveLateRequest(id, STATE.profile.id);
     toast('✅ Тренировка добавлена','success');
-    renderAdminControl();
+    renderAdminControl(true);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 async function doRejectLateRequest(id) {
@@ -2199,7 +2199,7 @@ async function doRejectLateRequest(id) {
   try {
     await DB.rejectLateRequest(id, STATE.profile.id, note);
     toast('Запрос отклонён','success');
-    renderAdminControl();
+    renderAdminControl(true);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 async function doApproveLateRequestSenior(id) {
@@ -5756,10 +5756,13 @@ async function loadAdminSummary(year,month,branch) {
   const body=document.getElementById('sum-body'); if (!body) return;
   body.innerHTML=`<div class="center-screen"><div class="spinner"></div></div>`;
   try {
-    const [data, allClients] = await Promise.all([
-      DB.getSummary(year,month,branch||null),
-      DB.getAllClients().catch(()=>[]),
-    ]);
+    // Кеш 90с: Сводка — стартовая вкладка, getSummary тяжёлый (~12 запросов).
+    // Сбрасывается в doSaveAdj при сохранении корректировки ЗП.
+    const [data, allClients] = await cached(`adm_summary_${branch||'all'}_${year}_${month}`, () =>
+      Promise.all([
+        DB.getSummary(year,month,branch||null),
+        DB.getAllClients().catch(()=>[]),
+      ]), 90000);
     const filteredClients = branch
       ? allClients.filter(c=>(c.profiles?.branches||[]).includes(branch))
       : allClients;
@@ -5951,7 +5954,7 @@ async function doSaveAdj(trainerId,year,month) {
   const bonus=parseInt(document.getElementById('adj-bonus')?.value||0);
   const penalty=parseInt(document.getElementById('adj-penalty')?.value||0);
   const notes=document.getElementById('adj-notes')?.value.trim()||'';
-  try { await DB.upsertAdjustment(trainerId,year,month,bonus,penalty,notes); toast('Сохранено ✅','success'); }
+  try { await DB.upsertAdjustment(trainerId,year,month,bonus,penalty,notes); invalidateCachePrefix('adm_summary'); toast('Сохранено ✅','success'); }
   catch(e) { console.error(e); toast('Ошибка','error'); }
 }
 
@@ -7716,29 +7719,37 @@ function onRateTypeChange(sel) {
 // ============================================================
 // SECTION: ADMIN:CONTROL — renderAdminControl, audit log, сессии, конспекты, поздние запросы
 // ============================================================
-async function renderAdminControl() {
+async function renderAdminControl(force=false) {
   $('#tab-content').innerHTML=`<div class="tab-pad"><h3>Контроль</h3>
     <div class="center-screen"><div class="spinner"></div></div></div>`;
   try {
     const now=new Date(); const y=now.getFullYear(),mo=now.getMonth()+1;
-    const from=new Date(y,mo-1,1).toISOString(),to=new Date(y,mo,1).toISOString();
-    const adminBranch = STATE.profile.branches?.[0]||null;
-    const _p2=x=>String(x).padStart(2,'0');
-    const monthFrom=`${y}-${_p2(mo)}-01`, monthTo=`${now.getFullYear()}-${_p2(now.getMonth()+1)}-${_p2(now.getDate())}`;
-    // Все запросы независимы — грузим параллельно (было 8 последовательных await → таб долго грузился)
-    const [data, activeRes, activityStats, allTrials, lateRequests, workoutDelReqs, deleteReqs, sessions, recHanging, recStats, recRejected] = await Promise.all([
-      DB.getControlData(),
-      sb().from('workouts').select('trainer_id').gte('workout_date',from).lt('workout_date',to),
-      DB.getTrainersActivityStats(y, mo).catch(()=>[]),
-      DB.getAllTrialSessions(y, mo, null).catch(()=>[]),
-      DB.getPendingLateRequests(null).catch(()=>[]),
-      DB.getAllWorkoutDeleteRequests().catch(()=>[]),
-      DB.getAllDeleteRequests().catch(()=>[]),
-      DB.getRecentSessions(30).catch(()=>[]),
-      DB.getReceptionHanging(adminBranch).catch(()=>[]),
-      DB.getReceptionStats(adminBranch, y, mo).catch(()=>[]),
-      DB.getReceptionRejected(adminBranch, monthFrom, monthTo).catch(()=>({workouts:[],trials:[]})),
-    ]);
+    // Кеш payload вкладки на 60с — повторные открытия мгновенные. force=true (после
+    // одобрений/отклонений) сбрасывает кеш, чтобы списки были свежими.
+    const cacheKey=`adm_control_${y}_${mo}`;
+    if (force) invalidateCache(cacheKey);
+    const D = await cached(cacheKey, async () => {
+      const from=new Date(y,mo-1,1).toISOString(),to=new Date(y,mo,1).toISOString();
+      const adminBranch = STATE.profile.branches?.[0]||null;
+      const _p2=x=>String(x).padStart(2,'0');
+      const monthFrom=`${y}-${_p2(mo)}-01`, monthTo=`${now.getFullYear()}-${_p2(now.getMonth()+1)}-${_p2(now.getDate())}`;
+      // Все запросы независимы — грузим параллельно (было 8 последовательных await → таб долго грузился)
+      const [data, activeRes, activityStats, allTrials, lateRequests, workoutDelReqs, deleteReqs, sessions, recHanging, recStats, recRejected] = await Promise.all([
+        DB.getControlData(),
+        sb().from('workouts').select('trainer_id').gte('workout_date',from).lt('workout_date',to),
+        DB.getTrainersActivityStats(y, mo).catch(()=>[]),
+        DB.getAllTrialSessions(y, mo, null).catch(()=>[]),
+        DB.getPendingLateRequests(null).catch(()=>[]),
+        DB.getAllWorkoutDeleteRequests().catch(()=>[]),
+        DB.getAllDeleteRequests().catch(()=>[]),
+        DB.getRecentSessions(30).catch(()=>[]),
+        DB.getReceptionHanging(adminBranch).catch(()=>[]),
+        DB.getReceptionStats(adminBranch, y, mo).catch(()=>[]),
+        DB.getReceptionRejected(adminBranch, monthFrom, monthTo).catch(()=>({workouts:[],trials:[]})),
+      ]);
+      return {data, activeRes, activityStats, allTrials, lateRequests, workoutDelReqs, deleteReqs, sessions, recHanging, recStats, recRejected};
+    }, 60000);
+    const {data, activeRes, activityStats, allTrials, lateRequests, workoutDelReqs, deleteReqs, sessions, recHanging, recStats, recRejected} = D;
     const activeSet=new Set((activeRes?.data||[]).map(x=>x.trainer_id));
     const inactive=data.inactiveTrainers.filter(t=>!activeSet.has(t.id));
     const sections=[];
@@ -9484,7 +9495,7 @@ async function doApproveWorkoutDelete(reqId, workoutId) {
   try {
     await DB.approveWorkoutDeleteRequest(reqId, workoutId);
     toast('Тренировка удалена','success');
-    adminTab('control');
+    invalidateCachePrefix('adm_control'); adminTab('control');
   } catch(e) { console.error(e); toast('Ошибка','error'); }
   finally { _pending.delete('wda_'+reqId); }
 }
@@ -9494,7 +9505,7 @@ async function doRejectWorkoutDelete(reqId) {
   try {
     await DB.rejectWorkoutDeleteRequest(reqId);
     toast('Запрос отклонён','success');
-    adminTab('control');
+    invalidateCachePrefix('adm_control'); adminTab('control');
   } catch(e) { console.error(e); toast('Ошибка','error'); }
   finally { _pending.delete('wdr2_'+reqId); }
 }
@@ -9530,7 +9541,7 @@ async function doApproveDelete(reqId, clientId, nameEnc) {
       DB.auditLog('client_delete', STATE.profile.id, STATE.profile.fio, clientId, 'client',
         { fio, force: false }, STATE.profile.branches?.[0]);
       toast('Клиент удалён','success');
-      adminTab('control');
+      invalidateCachePrefix('adm_control'); adminTab('control');
     }
   } catch(e) { _pending.delete('approve_'+reqId); toast('Ошибка','error'); console.error(e); }
 }
@@ -9544,7 +9555,7 @@ async function doForceDelete(reqId, clientId, nameEnc) {
     DB.auditLog('client_delete', STATE.profile.id, STATE.profile.fio, clientId, 'client',
       { fio: fioDecoded, force: true }, STATE.profile.branches?.[0]);
     toast('Клиент удалён вместе с историей','success');
-    adminTab('control');
+    invalidateCachePrefix('adm_control'); adminTab('control');
   } catch(e) { toast('Ошибка удаления','error'); console.error(e); }
   finally { _pending.delete('force_'+reqId); }
 }
@@ -9554,7 +9565,7 @@ async function doRejectDelete(reqId) {
   try {
     await DB.rejectDeleteRequest(reqId);
     toast('Запрос отклонён','success');
-    adminTab('control');
+    invalidateCachePrefix('adm_control'); adminTab('control');
   } catch(e) { toast('Ошибка','error'); console.error(e); }
   finally { _pending.delete('reject_'+reqId); }
 }
