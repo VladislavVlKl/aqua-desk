@@ -2427,7 +2427,8 @@ async function loadTrainerReport(year,month) {
   body.innerHTML=`<div class="center-screen"><div class="spinner"></div></div>`;
   try {
     const fromDay = `${year}-${String(month).padStart(2,'0')}-01`;
-    const [workouts,duties,trainerGroups,groupSessions,childAuto,groupSubstitutions,trialSessions]=await Promise.all([
+    // Все запросы независимы — грузим одним батчем (1 round-trip вместо 6 последовательных)
+    const [workouts,duties,trainerGroups,groupSessions,childAuto,groupSubstitutions,trialSessions,adjustment,unpaidGroups,pending,transfers,lateRequests]=await Promise.all([
       DB.getWorkouts(STATE.profile.id,year,month),
       DB.getDuties(STATE.profile.id,year,month),
       DB.getTrainerGroups(STATE.profile.id),
@@ -2435,8 +2436,12 @@ async function loadTrainerReport(year,month) {
       DB.getChildGroupsAutoSalary(STATE.profile.id, fromDay),
       sb().from('group_substitutions').select('*, trainer_groups(*, group_types(name))').eq('substitute_trainer_id',STATE.profile.id).gte('session_date',fromDay).lt('session_date',new Date(year,month,1).toISOString().slice(0,10)).then(r=>r.data||[]),
       DB.getTrialSessions(STATE.profile.id,year,month),
+      DB.getAdjustment(STATE.profile.id,year,month),
+      DB.getGroupUnpaidAttendees(STATE.profile.id, fromDay).catch(()=>[]),
+      DB.getPendingConfirmations(STATE.profile.id),
+      DB.getIncomingTransfers(STATE.profile.id),
+      DB.getMyLateRequests(STATE.profile.id).catch(()=>[]),
     ]);
-    const adjustment=await DB.getAdjustment(STATE.profile.id,year,month);
     // Ресепшн-статус: в ЗП идёт только confirmed; rejected исключается; pending — отдельной строкой.
     // Старые записи бэкфилнуты в confirmed → всё кроме 'pending'/'rejected' считаем confirmed.
     const wConfirmed = workouts.filter(w=>w.reception_status!=='pending'&&w.reception_status!=='rejected');
@@ -2447,14 +2452,8 @@ async function loadTrainerReport(year,month) {
     const salP=calcSalary({workouts:wPending,trialSessions:tPending,trainerId:STATE.profile.id});
     const pendingPtSum = salP.ptSum + salP.dropInSum + salP.trialSum + salP.ptSubSum;
     const pendingCnt = wPending.length + tPending.length;
-    // ⚠️ Дети, которые ходят, но не платят — ЗП тренеру по ним не начисляется
-    const unpaidGroups = await DB.getGroupUnpaidAttendees(STATE.profile.id, fromDay).catch(()=>[]);
-
-    // Ожидающие подтверждения (замены)
-    const pending = await DB.getPendingConfirmations(STATE.profile.id);
-    // Входящие запросы на передачу
-    const transfers = await DB.getIncomingTransfers(STATE.profile.id);
-
+    // ⚠️ unpaidGroups (дети ходят, но не платят), pending (замены), transfers (передачи)
+    // и lateRequests загружены выше в общем Promise.all
     body.innerHTML=`
       ${pending.length?`<div class="warn-banner" style="background:rgba(124,58,237,.1);border-color:rgba(124,58,237,.3);color:var(--text)">
         <b>⚡ ${pending.length} замен(а) ждут подтверждения</b>
@@ -2597,9 +2596,9 @@ async function loadTrainerReport(year,month) {
               👤 Профиль</button>
           </div>
         </div>`).join('')}
-      ${await DB.getMyLateRequests(STATE.profile.id).then(reqs=>reqs.length?`
+      ${lateRequests.length?`
         <h4 style="margin-top:16px">⏰ Мои запросы на поздние тренировки</h4>
-        ${reqs.map(r=>{
+        ${lateRequests.map(r=>{
           const statusBadge = r.status==='pending'
             ? '<span style="background:rgba(245,158,11,.2);color:#b45309;padding:2px 8px;border-radius:6px;font-size:11px">⏳ Ожидает</span>'
             : r.status==='approved'
@@ -2613,7 +2612,7 @@ async function loadTrainerReport(year,month) {
             </div>
             <div class="hi-sub">${fmtDT(r.workout_date)}${r.reject_note?` · ❌ ${r.reject_note}`:''}</div>
           </div>`;
-        }).join('')}`:'').catch(()=>'')}
+        }).join('')}`:''}
       ${trialSessions.length?`
         <h4 style="margin-top:16px">🆕 Пробные тренировки</h4>
         ${trialSessions.map(t=>`<div class="history-item">
