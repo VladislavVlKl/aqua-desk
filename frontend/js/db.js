@@ -991,23 +991,26 @@ async unassignTrainerGroup(id) {
   /** Повторяющиеся слоты тренера */
   async getRecurringSlots(trainerId) {
     const {data,error} = await sb().from('schedule_slots')
-      .select('*, clients(fio,category,balance), group_types(name,type)')
+      .select('*, clients(fio,category,balance,is_archived), group_types(name,type)')
       .eq('trainer_id',trainerId).eq('active',true)
       .is('specific_date',null)
       .order('day_of_week').order('start_time');
-    if (error) throw error; return data||[];
+    if (error) throw error;
+    // ПТ-слоты архивированных клиентов не показываем (групповые слоты — client_id null)
+    return (data||[]).filter(s=>!(s.client_id && s.clients?.is_archived));
   },
 
   /** Разовые слоты тренера для конкретной недели */
   async getOneTimeSlots(trainerId, weekStart, weekEnd) {
     const {data,error} = await sb().from('schedule_slots')
-      .select('*, clients(fio,category,balance), group_types(name,type)')
+      .select('*, clients(fio,category,balance,is_archived), group_types(name,type)')
       .eq('trainer_id',trainerId).eq('active',true)
       .not('specific_date','is',null)
       .gte('specific_date',weekStart)
       .lte('specific_date',weekEnd)
       .order('specific_date').order('start_time');
-    if (error) throw error; return data||[];
+    if (error) throw error;
+    return (data||[]).filter(s=>!(s.client_id && s.clients?.is_archived));
   },
 
   /** Отмены повторяющихся слотов за неделю */
@@ -1082,7 +1085,7 @@ async unassignTrainerGroup(id) {
 
     // Повторяющиеся слоты на этот день недели
     const {data:recurring, error:e1} = await sb().from('schedule_slots')
-      .select('*, clients(fio,balance,category,age,drop_in_used), group_types(name,type,billing_model)')
+      .select('*, clients(fio,balance,category,age,drop_in_used,is_archived), group_types(name,type,billing_model)')
       .eq('trainer_id',trainerId).eq('day_of_week',dow).eq('active',true)
       .is('specific_date',null)
       .order('start_time');
@@ -1090,7 +1093,7 @@ async unassignTrainerGroup(id) {
 
     // Разовые слоты именно на эту дату
     const {data:oneTime} = await sb().from('schedule_slots')
-      .select('*, clients(fio,balance,category,age,drop_in_used), group_types(name,type,billing_model)')
+      .select('*, clients(fio,balance,category,age,drop_in_used,is_archived), group_types(name,type,billing_model)')
       .eq('trainer_id',trainerId).eq('active',true)
       .eq('specific_date',dateStr)
       .order('start_time');
@@ -1116,6 +1119,7 @@ async unassignTrainerGroup(id) {
 
     return allSlots
       .filter(s=>!cancelledSet.has(s.id))
+      .filter(s=>!(s.client_id && s.clients?.is_archived))
       .map(s=>({...s, confirmation:confMap[s.id]||null}));
   },
   async upsertConfirmation(slotId, date, fields) {
