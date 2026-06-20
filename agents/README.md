@@ -9,7 +9,8 @@
 Оркестратор (orchestrator.md)
  ├──► Архитектор кода (code-architect.md)
  ├──► Архитектор БД   (db-architect.md)
- └──► DevOps          (devops.md)
+ ├──► DevOps          (devops.md)
+ └──► Дефендер        (defender.md)  — аудитор безопасности, фиксы отдаёт через HANDOFF
 ```
 
 ## Файлы
@@ -20,6 +21,7 @@
 | `code-architect.md` | Архитектор кода | `claude-fable-5` |
 | `db-architect.md` | Архитектор БД | `claude-fable-5` |
 | `devops.md` | DevOps | `claude-sonnet-4-6` |
+| `defender.md` | Дефендер (security) | `claude-opus-4-8` |
 
 Каждый `.md` — готовый системный промпт: содержимое файла целиком передаётся в параметр `system` при вызове API.
 
@@ -78,7 +80,8 @@ def ask(agent: str, messages: list[dict]) -> str:
     anchors = {"orchestrator": ["CLAUDE.md"],
                "code-architect": ["CLAUDE.md", "ARCHITECTURE.md"],
                "db-architect": ["CLAUDE.md", "DATABASE.md"],
-               "devops": ["CLAUDE.md"]}
+               "devops": ["CLAUDE.md"],
+               "defender": ["CLAUDE.md", "DATABASE.md", "ARCHITECTURE.md"]}
     ctx = "\n\n".join(f"<doc name=\"{f}\">\n{(root/f).read_text()}\n</doc>"
                       for f in anchors[agent] if (root/f).exists())
     # Системный блок статичен в пределах диалога → кешируем его.
