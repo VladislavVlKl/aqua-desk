@@ -31,14 +31,30 @@ docs/              ← паспорта, отчёты, выгрузки
 
 ### frontend/js
 
+UI/бизнес-логика (бывший монолит `app.js` ~10 600 строк) разбита на 6 модулей
+по ролям. Все — классические `<script>` в общем global scope; **порядок подключения
+в `index.html` критичен** (top-level код и bootstrap зависят от него):
+
+```
+app.js → app.trainer.js → app.admin.js → app.admin-ops.js → app.exec.js → app.shared.js
+```
+
 | Файл | Назначение |
 |---|---|
-| `app.js` | Весь UI и бизнес-логика (~10 600 строк) |
+| `app.js` | Ядро: STATE, утилиты, UI, INIT, AUTH + панели КЛИЕНТ и СТАРШИЙ (~2400 стр.) |
+| `app.trainer.js` | Панель тренера: TRAINER:* (home/clients/workouts/schedule/today/duties/events/report) |
+| `app.admin.js` | Координатор — управление: SHELL/ANALYTICS/CLIENTS/SALARY/STAFF/BRANCHES |
+| `app.admin-ops.js` | Координатор — операционка: GROUPS/CONTROL/TECH (top-level `window._glInstances`) |
+| `app.exec.js` | CEO / RECEPTION / MANAGER |
+| `app.shared.js` | SHARED:* (модалки удаления/профиля/уведомлений/групп) + bootstrap `DOMContentLoaded→init` |
 | `db.js` | Обёртки над Supabase (`DB.*`), ~2800 строк — единственная точка интеграции с Supabase |
 | `config.js` | Константы: тарифы `RATES`, пакеты `SUB_PACKAGES`, лимиты, `calcSubEnd` |
 | `export.js` | Экспорт Excel (xlsx-js-style) |
 | `tutorial.js` | Туториал + `enterApp` |
 | `notifications-ui.js` | Уведомления (UI) |
+
+> **Поиск по коду:** функции по-прежнему ищутся по `// SECTION:` — маркеры сохранены
+> внутри модулей. Чтобы найти секцию: `grep -rn "// SECTION: <ИМЯ>" frontend/js/`.
 
 ### frontend/css
 
