@@ -30,7 +30,7 @@ Telegram Web App для управления фитнес-центром с ба
 
 ## Стек
 
-- **Frontend**: Vanilla JS (ES2020), без фреймворков — `app.js` (~8000 строк) + `db.js` (обёртки Supabase)
+- **Frontend**: Vanilla JS (ES2020), без фреймворков. UI разбит на 6 модулей `frontend/js/app*.js` (порядок загрузки в `index.html` критичен, см. ARCHITECTURE.md) + `db.js` (обёртки Supabase)
 - **Backend**: Supabase (PostgreSQL + RLS + RPC)
 - **Деплой**: GitHub Pages, скилл `aquadesk-deploy`
 - **Вход**: Telegram Web App (`window.Telegram.WebApp.initDataUnsafe.user.id`)
