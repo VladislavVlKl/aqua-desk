@@ -141,7 +141,7 @@ try { ... } finally { _pending.delete(key); }
 Сбрасывать после записи: `invalidateCache('profiles')`, `invalidateCache('branches')`.
 
 ### Окна времени (config.js)
-- `MAX_BACKDATE_HOURS = 48` — ПТ можно внести задним числом максимум на 48ч, дальше — поздний запрос
+- `MAX_BACKDATE_HOURS = 72` — ПТ можно внести задним числом максимум на 72ч, дальше — поздний запрос
 - `NOTE_DEADLINE_HOURS = 48` — дедлайн конспекта
 - `EDIT_WINDOW_MIN = 30` — окно редактирования/удаления своей записи (`canEdit(createdAt)`)
 

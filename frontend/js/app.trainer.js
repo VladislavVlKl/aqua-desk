@@ -135,7 +135,7 @@ async function renderHomeTab() {
           <option value="dropin2">Разовое 2кт (${fmt(RATES.pt[2])} сум)</option>
           <option value="dropin3">Разовое 3кт (${fmt(RATES.pt[3])} сум)</option>
           <option value="trial">🆕 Пробная тренировка</option>
-          <option value="late_request">⏰ Старше 48ч — запросить одобрение</option>
+          <option value="late_request">⏰ Старше 72ч — запросить одобрение</option>
           <option value="debt">В долг</option>
         </select>
       </div>
@@ -441,7 +441,7 @@ async function saveInlineOverdueNote(clientId, btn) {
       DB.getOverdueNotes(clientId, STATE.profile.id),
       DB.getActiveSubscription(clientId),
     ]);
-    // Добавляем свежие тренировки (ещё не старше 48ч, не видны в БД-запросе)
+    // Добавляем свежие тренировки (ещё не старше 72ч, не видны в БД-запросе)
     const freshIds = window._freshNoteWorkouts?.[clientId] || [];
     const allIds = [...new Set([...overdueWorkouts.map(w=>w.id), ...freshIds])];
     for (const wId of allIds) {
@@ -656,7 +656,7 @@ async function _doLogWorkoutInner() {
     const t=document.getElementById(`wk-time-${i}`)?.value||'09:00';
     const v = d ? `${d}T${t}:00+05:00` : null;
     if (!v) return toast(`Введите дату для ПТ №${i+1}`,'error');
-    if (!isValidWorkoutDate(v)) return toast(`ПТ №${i+1}: можно вносить тренировки за последние 48 часов. Если тренировка была раньше — обратитесь к координатору.`,'error');
+    if (!isValidWorkoutDate(v)) return toast(`ПТ №${i+1}: можно вносить тренировки за последние 72 часа. Если тренировка была раньше — обратитесь к координатору.`,'error');
     dates.push(v);
   }
   // Блокирующие события
@@ -1582,7 +1582,7 @@ async function doLogDuty() {
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 
-// ── ПОЗДНИЕ ТРЕНИРОВКИ (>48ч) ─────────────────
+// ── ПОЗДНИЕ ТРЕНИРОВКИ (>72ч) ─────────────────
 async function renderLateRequestModal() {
   const clients = (await DB.getClients(STATE.profile.id)).filter(c=>!c.is_archived);
   if (!clients.length) return toast('Нет клиентов','error');
@@ -1620,9 +1620,9 @@ async function doSendLateRequest() {
   if (!dateVal)  return toast('Укажите дату тренировки','error');
   if (!reason)   return toast('Напишите причину','error');
   if (!branch)   return toast('Выберите филиал','error');
-  // Проверяем что дата действительно старше 48ч
-  if (Date.now() - new Date(dateVal).getTime() < 48*3600000)
-    return toast('Дата должна быть старше 48 часов. Обычные тренировки вносите стандартным способом.','error');
+  // Проверяем что дата действительно старше лимита (72ч) — иначе вносится обычным способом
+  if (Date.now() - new Date(dateVal).getTime() < MAX_BACKDATE_HOURS*3600000)
+    return toast(`Дата должна быть старше ${MAX_BACKDATE_HOURS} часов. Обычные тренировки вносите стандартным способом.`,'error');
   try {
     await DB.addLateRequest(STATE.profile.id, clientId, branch, new Date(dateVal).toISOString(), cat, reason);
     document.querySelector('.modal-overlay')?.remove();

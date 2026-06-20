@@ -53,7 +53,7 @@ const GROUP_CHILD_PRICE = 1000000;
 // ─── КОНСТАНТЫ ───────────────────────────────
 const CHILD_MAX_AGE          = 17;
 const EDIT_WINDOW_MIN        = 30;
-const MAX_BACKDATE_HOURS     = 48;
+const MAX_BACKDATE_HOURS     = 72;
 const SUBSCRIPTION_WARN_DAYS = 7;
 const NOTE_DEADLINE_HOURS    = 48;
 // Флаг включения отправки списаний на подтверждение ресепшену.
