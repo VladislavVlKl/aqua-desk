@@ -10,7 +10,7 @@
     {
       "name": "aquadesk",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "8766", "--directory", "/Users/vladislavklimov/aqua-desk"],
+      "runtimeArgs": ["-m", "http.server", "8766", "--directory", "/Users/vladislavklimov/aqua-desk/frontend"],
       "port": 8766
     }
   ]
