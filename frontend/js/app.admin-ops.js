@@ -1871,7 +1871,4 @@ async function deleteTechItem(type, id) {
     toast('Удалено','success'); loadTechSection();
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
-// ══════════════════════════════════════════════════════════════
-// СЕО ПАНЕЛЬ
-// ══════════════════════════════════════════════════════════════
 
