@@ -1157,13 +1157,20 @@ async function renderSeniorAnalytics() {
   try {
     const branches = STATE.profile.branches||[];
     // Показываем запросы по своим филиалам
-    const allReqs = await Promise.all(branches.map(b=>DB.getPendingLateRequests(b)));
+    const [allReqs, allCatReqs] = await Promise.all([
+      Promise.all(branches.map(b=>DB.getPendingLateRequests(b))),
+      Promise.all(branches.map(b=>DB.getPendingCategoryRecalcRequests(b))),
+    ]);
     const reqs = allReqs.flat().filter((r,i,a)=>a.findIndex(x=>x.id===r.id)===i); // дедупликация
+    const catReqs = allCatReqs.flat().filter((r,i,a)=>a.findIndex(x=>x.id===r.id)===i);
     const body = document.getElementById('late-body');
-    if (!reqs.length) {
+    if (!reqs.length && !catReqs.length) {
       body.innerHTML='<div class="empty-state">✅<p>Нет запросов на одобрение</p></div>'; return;
     }
-    body.innerHTML = reqs.map(r=>`<div class="staff-card" style="flex-direction:column;gap:8px">
+    const catHtml = catReqs.length ? `<h4 style="margin:4px 0 8px">🔄 Пересчёт категории (${catReqs.length})</h4>`
+      + catReqs.map(r=>catRecalcCardHtml(r,'senior')).join('') : '';
+    const lateHtml = reqs.length ? (catReqs.length?'<h4 style="margin:16px 0 8px">⏰ Поздние тренировки</h4>':'')
+      + reqs.map(r=>`<div class="staff-card" style="flex-direction:column;gap:8px">
       <div style="display:flex;justify-content:space-between;align-items:flex-start">
         <div>
           <div class="staff-fio">${r.clients?.fio||'?'} · кат.${r.category}</div>
@@ -1178,7 +1185,8 @@ async function renderSeniorAnalytics() {
         <button class="btn btn-sm btn-primary" style="flex:1" onclick="doApproveLateRequestSenior(${r.id})">✓ Одобрить</button>
         <button class="btn btn-sm btn-danger" style="flex:1" onclick="doRejectLateRequestSenior(${r.id})">✗ Отклонить</button>
       </div>
-    </div>`).join('');
+    </div>`).join('') : '';
+    body.innerHTML = catHtml + lateHtml;
   } catch(e) { document.getElementById('late-body').innerHTML='<p class="hint">Ошибка</p>'; console.error(e); }
 }
 

@@ -365,6 +365,61 @@ const DB = {
       .eq('id',requestId);
     if (error) throw error;
   },
+
+  // ─── ЗАПРОСЫ НА ПЕРЕСЧЁТ КАТЕГОРИИ ПРОШЛЫХ ПТ ──
+  // Тренер запрашивает → координатор/старший одобряет → category_at_moment обновляется.
+  async addCategoryRecalcRequest(trainerId, clientId, clientFio, branch, newCategory, scope, fromDate) {
+    // Дедуп: один pending на клиента
+    const {data:exist} = await sb().from('category_recalc_requests')
+      .select('id').eq('client_id',clientId).eq('status','pending').maybeSingle();
+    if (exist) { const e=new Error('already_pending'); throw e; }
+    const {data,error} = await sb().from('category_recalc_requests')
+      .insert({trainer_id:trainerId, client_id:clientId, client_fio:clientFio||null,
+               branch:branch||null, new_category:newCategory, scope, from_date:fromDate||null})
+      .select().single();
+    if (error) throw error; return data;
+  },
+  async getPendingCategoryRecalcRequests(branch) {
+    let q = sb().from('category_recalc_requests')
+      .select('*, profiles!trainer_id(fio,branches), clients(fio,category)')
+      .eq('status','pending').order('created_at',{ascending:false});
+    if (branch) q = q.eq('branch', branch);
+    const {data,error} = await q;
+    if (error) throw error; return data||[];
+  },
+  async getMyCategoryRecalcRequests(trainerId) {
+    const {data,error} = await sb().from('category_recalc_requests')
+      .select('*, clients(fio)')
+      .eq('trainer_id',trainerId).order('created_at',{ascending:false}).limit(20);
+    if (error) throw error; return data||[];
+  },
+  async approveCategoryRecalcRequest(requestId, reviewerId) {
+    const {data:req,error:re} = await sb().from('category_recalc_requests')
+      .select('*').eq('id',requestId).eq('status','pending').single();
+    if (re) throw re;
+    const n = await DB.recalcWorkoutsCategory(req.client_id, req.new_category, req.from_date);
+    const {error:ue} = await sb().from('category_recalc_requests')
+      .update({status:'approved', reviewed_by:reviewerId,
+               reviewed_at:new Date().toISOString(), applied_count:n})
+      .eq('id',requestId);
+    if (ue) throw ue;
+    DB.enqueueTrainerNotification(req.trainer_id,
+      `✅ Пересчёт категории одобрен: ${req.client_fio||'клиент'} → Кат.${req.new_category} (${req.scope==='all'?'все ПТ':'текущий месяц'}). Затронуто тренировок: ${n}.`,
+      'cat_recalc_approved');
+    return n;
+  },
+  async rejectCategoryRecalcRequest(requestId, reviewerId, note='') {
+    const {data:req} = await sb().from('category_recalc_requests')
+      .select('trainer_id,client_fio,new_category').eq('id',requestId).maybeSingle();
+    const {error} = await sb().from('category_recalc_requests')
+      .update({status:'rejected', reviewed_by:reviewerId,
+               reviewed_at:new Date().toISOString(), reject_note:note||null})
+      .eq('id',requestId);
+    if (error) throw error;
+    if (req) DB.enqueueTrainerNotification(req.trainer_id,
+      `❌ Пересчёт категории отклонён: ${req.client_fio||'клиент'} → Кат.${req.new_category}.${note?` Причина: ${note}.`:''}`,
+      'cat_recalc_rejected');
+  },
   async deleteWorkout(id) {
     // Перед удалением вернуть баланс, если тренировка его списывала.
     // Списывали баланс: обычная ПТ (logWorkouts -1), подтверждённый долг (confirmDebt -1),

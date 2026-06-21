@@ -1671,6 +1671,42 @@ async function doRejectLateRequestSenior(id) {
     renderSeniorAnalytics();
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
+// Карточка запроса на пересчёт категории (общая для панелей старшего и координатора)
+function catRecalcCardHtml(r, after) {
+  const scopeLbl = r.scope==='all' ? 'все тренировки' : 'текущий месяц';
+  return `<div class="staff-card" style="flex-direction:column;gap:8px;border-left:3px solid #8b5cf6">
+    <div>
+      <div class="staff-fio">🔄 ${r.clients?.fio||r.client_fio||'?'} · Кат.${r.clients?.category||'?'} → <b>Кат.${r.new_category}</b></div>
+      <div class="staff-meta">${r.profiles?.fio||'?'} · ${r.branch||''}</div>
+      <div class="staff-meta">Пересчёт: ${scopeLbl}</div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-sm btn-primary" style="flex:1" onclick="doApproveCatRecalc(${r.id},'${after}')">✓ Одобрить</button>
+      <button class="btn btn-sm btn-danger" style="flex:1" onclick="doRejectCatRecalc(${r.id},'${after}')">✗ Отклонить</button>
+    </div>
+  </div>`;
+}
+// Одобрение/отказ запросов на пересчёт категории. after — что перерисовать.
+async function doApproveCatRecalc(id, after) {
+  if (_pending.has('catr_'+id)) return;
+  if (!confirm('Одобрить пересчёт категории прошлых тренировок? ЗП за них пересчитается.')) return;
+  _pending.add('catr_'+id);
+  try {
+    const n = await DB.approveCategoryRecalcRequest(id, STATE.profile.id);
+    toast(`✅ Пересчитано тренировок: ${n}`,'success');
+    if (after==='senior') renderSeniorAnalytics(); else renderAdminControl(true);
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+  finally { _pending.delete('catr_'+id); }
+}
+async function doRejectCatRecalc(id, after) {
+  const note = prompt('Причина отказа (опционально):');
+  if (note === null) return;
+  try {
+    await DB.rejectCategoryRecalcRequest(id, STATE.profile.id, note);
+    toast('Запрос отклонён','success');
+    if (after==='senior') renderSeniorAnalytics(); else renderAdminControl(true);
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
 
 // ── ПРОБНЫЕ ТРЕНИРОВКИ ────────────────────────
 function renderTrialSessionModal() {
@@ -2392,46 +2428,64 @@ async function doEditClient(clientId, oldBalance, oldCat) {
     toast('✅ Данные сохранены','success');
     // Категория изменилась → предложить пересчитать прошлые ПТ (ошибочная категория)
     if (oldCat != null && category !== Number(oldCat)) {
-      renderRecalcCategoryModal(clientId, category);
+      renderRecalcCategoryModal(clientId, category, fio);
     } else {
       renderClientProfile(clientId, STATE.currentTab||'clients');
     }
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 
-// Спросить, пересчитывать ли категорию у уже проведённых тренировок клиента
-function renderRecalcCategoryModal(clientId, newCat) {
+// Спросить, пересчитывать ли категорию у уже проведённых тренировок клиента.
+// Тренер отправляет запрос → одобряет координатор/старший. Сам тренер не применяет.
+function renderRecalcCategoryModal(clientId, newCat, fio) {
+  const isApprover = ['admin','senior_trainer'].includes(STATE.profile.role);
+  const fioEnc = encodeURIComponent(fio||'');
+  const cancelJs = `this.closest('.modal-overlay').remove();renderClientProfile('${clientId}',STATE.currentTab||'clients')`;
   const m = el('div','modal-overlay');
   m.innerHTML=`<div class="modal">
     <div class="modal-header"><h3>Пересчитать прошлые ПТ?</h3>
-      <button class="btn-close" onclick="this.closest('.modal-overlay').remove();renderClientProfile('${clientId}',STATE.currentTab||'clients')">✕</button></div>
-    <p class="hint" style="margin-bottom:14px">Категория изменена на <b>Кат.${newCat}</b>. Уже проведённые тренировки остались по старой категории. Пересчитать их под новую ставку?</p>
+      <button class="btn-close" onclick="${cancelJs}">✕</button></div>
+    <p class="hint" style="margin-bottom:14px">Категория изменена на <b>Кат.${newCat}</b>. Уже проведённые тренировки остались по старой категории и считаются в ЗП по ней. ${isApprover?'Пересчитать их под новую ставку?':'Отправить запрос координатору/старшему тренеру на пересчёт?'}</p>
     <div class="warn-banner" style="margin-bottom:14px;font-size:13px">⚠️ «Все тренировки» затронут и прошлые месяцы — ЗП за уже закрытые периоды изменится. Если категория была неверна только что — выбирайте «Текущий месяц».</div>
     <button class="btn btn-primary btn-full" style="margin-bottom:8px"
-      onclick="doRecalcCategory('${clientId}',${newCat},'month')">📅 Только текущий месяц</button>
+      onclick="doRecalcCategory('${clientId}',${newCat},'month','${fioEnc}')">📅 ${isApprover?'Пересчитать текущий месяц':'Запросить: текущий месяц'}</button>
     <button class="btn btn-full btn-danger" style="margin-bottom:8px"
-      onclick="doRecalcCategory('${clientId}',${newCat},'all')">🗂 Все тренировки клиента</button>
+      onclick="doRecalcCategory('${clientId}',${newCat},'all','${fioEnc}')">🗂 ${isApprover?'Пересчитать все ПТ':'Запросить: все ПТ'}</button>
     <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border)"
-      onclick="this.closest('.modal-overlay').remove();renderClientProfile('${clientId}',STATE.currentTab||'clients')">Не пересчитывать</button>
+      onclick="${cancelJs}">Не пересчитывать</button>
   </div>`;
   document.body.appendChild(m);
 }
-async function doRecalcCategory(clientId, newCat, scope) {
+async function doRecalcCategory(clientId, newCat, scope, fioEnc) {
   if (_pending.has('recalcCat_'+clientId)) return;
   _pending.add('recalcCat_'+clientId);
+  const isApprover = ['admin','senior_trainer'].includes(STATE.profile.role);
+  const fio = decodeURIComponent(fioEnc||'');
   try {
     let fromDate = null;
     if (scope === 'month') {
       const now = new Date();
       fromDate = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
     }
-    const n = await DB.recalcWorkoutsCategory(clientId, newCat, fromDate);
-    DB.auditLog('workout_category_recalc', STATE.profile.id, STATE.profile.fio, clientId, 'client',
-      {new_cat:newCat, scope, count:n}, STATE.profile.branches?.[0]);
-    document.querySelector('.modal-overlay')?.remove();
-    toast(`✅ Пересчитано тренировок: ${n}`,'success');
+    if (isApprover) {
+      // Координатор/старший применяет сразу
+      const n = await DB.recalcWorkoutsCategory(clientId, newCat, fromDate);
+      DB.auditLog('workout_category_recalc', STATE.profile.id, STATE.profile.fio, clientId, 'client',
+        {new_cat:newCat, scope, count:n}, STATE.profile.branches?.[0]);
+      document.querySelector('.modal-overlay')?.remove();
+      toast(`✅ Пересчитано тренировок: ${n}`,'success');
+    } else {
+      // Тренер — отправляет запрос на одобрение
+      await DB.addCategoryRecalcRequest(STATE.profile.id, clientId, fio,
+        STATE.profile.branches?.[0]||'', newCat, scope, fromDate);
+      document.querySelector('.modal-overlay')?.remove();
+      toast('Запрос на пересчёт отправлен ✅','success');
+    }
     renderClientProfile(clientId, STATE.currentTab||'clients');
-  } catch(e) { console.error(e); toast('Ошибка','error'); }
+  } catch(e) {
+    if (e.message==='already_pending') toast('Запрос на пересчёт уже отправлен','info');
+    else { console.error(e); toast('Ошибка','error'); }
+  }
   finally { _pending.delete('recalcCat_'+clientId); }
 }
 

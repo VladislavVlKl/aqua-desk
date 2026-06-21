@@ -1156,17 +1156,18 @@ async function renderAdminControl(force=false) {
     if (force) invalidateCache(cacheKey);
     const D = await cached(cacheKey, async () => {
       const monthFrom=`${y}-${_p2(mo)}-01`, monthTo=`${y}-${_p2(mo)}-${_p2(now.getDate())}`;
-      const [lateRequests, workoutDelReqs, deleteReqs, recHanging, recRejected, pendingSubs] = await Promise.all([
+      const [lateRequests, workoutDelReqs, deleteReqs, recHanging, recRejected, pendingSubs, catRecalcReqs] = await Promise.all([
         DB.getPendingLateRequests(null).catch(()=>[]),
         DB.getAllWorkoutDeleteRequests().catch(()=>[]),
         DB.getAllDeleteRequests().catch(()=>[]),
         DB.getReceptionHanging(branches).catch(()=>[]),
         DB.getReceptionRejected(branches, monthFrom, monthTo).catch(()=>({workouts:[],trials:[]})),
         DB.getPendingSubstitutions().catch(()=>[]),   // замены — все филиалы
+        DB.getPendingCategoryRecalcRequests(null).catch(()=>[]),
       ]);
-      return {lateRequests, workoutDelReqs, deleteReqs, recHanging, recRejected, pendingSubs};
+      return {lateRequests, workoutDelReqs, deleteReqs, recHanging, recRejected, pendingSubs, catRecalcReqs};
     }, 60000);
-    const {lateRequests, workoutDelReqs, deleteReqs, recHanging, recRejected, pendingSubs} = D;
+    const {lateRequests, workoutDelReqs, deleteReqs, recHanging, recRejected, pendingSubs, catRecalcReqs} = D;
     const sections=[];
     // 🔄 Запросы на замену (подтверждает координатор или старший — кто первый)
     if (pendingSubs.length) sections.push(`<div class="control-section">
@@ -1219,6 +1220,18 @@ async function renderAdminControl(force=false) {
         <div style="display:flex;gap:6px;margin-top:8px">
           <button class="btn btn-sm btn-primary" onclick="doApproveLateRequest(${r.id})">✓ Одобрить</button>
           <button class="btn btn-sm btn-danger" onclick="doRejectLateRequest(${r.id})">✗ Отклонить</button>
+        </div>
+      </div>`).join('')}
+    </div>`);
+    // 🔄 Запросы на пересчёт категории прошлых ПТ
+    if (catRecalcReqs.length) sections.push(`<div class="control-section">
+      <div class="control-title warn">🔄 Пересчёт категории прошлых ПТ (${catRecalcReqs.length})</div>
+      ${catRecalcReqs.map(r=>`<div class="control-item">
+        <div class="ci-main"><b>${r.clients?.fio||r.client_fio||'?'}</b> · Кат.${r.clients?.category||'?'} → Кат.${r.new_category}</div>
+        <div class="ci-sub">Тренер: ${r.profiles?.fio||'?'} · ${r.branch||''} · ${r.scope==='all'?'все ПТ':'текущий месяц'}</div>
+        <div style="display:flex;gap:6px;margin-top:8px">
+          <button class="btn btn-sm btn-primary" onclick="doApproveCatRecalc(${r.id},'admin')">✓ Одобрить</button>
+          <button class="btn btn-sm btn-danger" onclick="doRejectCatRecalc(${r.id},'admin')">✗ Отклонить</button>
         </div>
       </div>`).join('')}
     </div>`);

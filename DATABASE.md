@@ -136,7 +136,10 @@ reception_status (pending|confirmed|rejected) · reception_reason · reception_b
 **workout_delete_requests** — на удаление ПТ: `workout_id, trainer_id, client_name, workout_date, branch, status`
 > Дубли по `workout_id` блокируются в `DB.requestWorkoutDelete`. При одобрении сперва закрываются все pending.
 
-**late_workout_requests** — позднее внесение ПТ (>48ч): `trainer_id, client_id, branch, workout_date, category, reason, status, reviewed_by, reject_note`
+**late_workout_requests** — позднее внесение ПТ (>72ч): `trainer_id, client_id, branch, workout_date, category, reason, status, reviewed_by, reject_note`
+
+**category_recalc_requests** — пересчёт категории уже проведённых ПТ (ошибочная категория): `trainer_id, client_id, client_fio, branch, new_category, scope (month|all), from_date, status, reviewed_by, reject_note, applied_count`
+> Тренер запрашивает → координатор/старший одобряет (`approveCategoryRecalcRequest` → `recalcWorkoutsCategory` обновляет `workouts.category_at_moment` → ЗП пересчитывается). admin/senior_trainer применяют сразу без запроса. Дубль pending на клиента блокируется в `DB.addCategoryRecalcRequest`. Индекс `idx_cat_recalc_branch_status (branch, status)`.
 
 ### Расписание и дежурства
 
