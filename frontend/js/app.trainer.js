@@ -332,7 +332,12 @@ async function renderClientsTab() {
             <span style="font-size:12px;${noBalance?'color:#ef4444;font-weight:600':'color:var(--hint)'}">${c.balance} ПТ</span>
             ${c.age?`<span style="font-size:12px;color:var(--hint)">${c.age} лет</span>`:''}
             ${isFrozen?`<span style="font-size:12px;color:#3b82f6">🧊 до ${c.freeze_end}</span>`:''}
-            ${!isFrozen&&c.subscription_end?`<span style="font-size:12px;color:${exp?'#ef4444':warn?'#f59e0b':'var(--hint)'}">до ${c.subscription_end}</span>`:''}
+            ${!isFrozen&&c.subscription_end?(()=>{
+              const col = exp?'#ef4444':warn?'#f59e0b':'#10b981';
+              const lbl = days<0?'истёк':days===0?'сегодня':`${days} дн.`;
+              return `<span style="font-size:13.5px;font-weight:700;color:${col}">⏳ ${lbl}</span>`
+                   + `<span style="font-size:11px;color:var(--hint)">${c.subscription_end}</span>`;
+            })():''}
           </div>
         </div>
         <span class="cr-arrow">›</span>
