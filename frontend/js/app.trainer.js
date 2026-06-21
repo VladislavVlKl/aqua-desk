@@ -293,17 +293,18 @@ async function renderClientsTab() {
     if (!body) return;
     let arr = filter ? clients.filter(c=>c.fio.toLowerCase().includes(filter.toLowerCase())) : clients;
     if (!arr.length) { body.innerHTML='<p class="hint" style="text-align:center;padding:20px">Не найдено</p>'; return; }
-    // Сортировка: просроченные → истекающие/нулевой баланс → остальные → архивные в конец
+    // Сортировка: истекает скоро (есть ПТ) → обычные → закончившийся пакет (balance<=0)
+    // вниз, над архивными → архивные в самый конец. Внутри группы — по алфавиту.
     arr = [...arr].sort((a,b)=>{
       const score = c=>{
-        if (c.is_archived) return 10;           // архивные — в самый конец
+        if (c.is_archived) return 30;           // архивные — в самый конец
+        if (c.balance<=0)  return 20;           // пакет закончился — вниз, над архивными
         const d=daysUntil(c.subscription_end);
-        if (d!==null&&d<0) return 0;           // просрочен
-        if (c.balance<=0) return 1;             // нулевой баланс
-        if (d!==null&&d<=SUBSCRIPTION_WARN_DAYS) return 1; // истекает
-        return 2;
+        if (d!==null&&d<0) return 0;           // членство истекло, но ПТ ещё есть — наверх (алерт)
+        if (d!==null&&d<=SUBSCRIPTION_WARN_DAYS) return 1; // истекает скоро
+        return 2;                               // обычные активные
       };
-      return score(a)-score(b);
+      return score(a)-score(b) || a.fio.localeCompare(b.fio,'ru');
     });
     const _dupNames = _trainerDupNames;
 
