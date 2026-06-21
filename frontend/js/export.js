@@ -414,6 +414,96 @@ function exportTrainerExcel(trainerFio, year, month, workouts, duties, groupSess
   ws['!cols']=[{wch:12},{wch:6},{wch:6},{wch:6},{wch:7},{wch:7},{wch:7},
                {wch:9},{wch:9},{wch:9},{wch:8},{wch:16}];
   XLSX.utils.book_append_sheet(wb,ws,'По дням');
+
+  // ── Лист 2: По клиентам (сетка клиент × день) ──
+  const DOW = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
+
+  // Группируем тренировки по клиенту
+  const byClient = {};
+  workouts.forEach(w => {
+    const cid = w.client_id || w.clients?.name || '—';
+    if (!byClient[cid]) byClient[cid] = { name: w.clients?.name||'—', days: {}, total: 0 };
+    const day = new Date(w.workout_date).getDate();
+    if (!byClient[cid].days[day]) byClient[cid].days[day] = [];
+    if (w.is_drop_in) {
+      byClient[cid].days[day].push(`Р${w.drop_in_category||1}`);
+    } else {
+      byClient[cid].days[day].push(String(w.category_at_moment||'?'));
+    }
+    byClient[cid].total++;
+  });
+
+  // Разовые агрегируем отдельно: кат → день → кол-во
+  const dropInByDay = {1:{},2:{},3:{}};
+  workouts.filter(w=>w.is_drop_in).forEach(w => {
+    const dc = w.drop_in_category||1;
+    const day = new Date(w.workout_date).getDate();
+    dropInByDay[dc][day] = (dropInByDay[dc][day]||0)+1;
+  });
+
+  // Регулярные клиенты (без разовых)
+  const regularClients = Object.values(byClient).filter(c => {
+    return workouts.some(w => !w.is_drop_in && (w.client_id===Object.keys(byClient).find(k=>byClient[k]===c) || w.clients?.name===c.name));
+  });
+  // Проще: берём всех клиентов у кого хоть одна не-разовая тренировка
+  const regularClientIds = new Set(workouts.filter(w=>!w.is_drop_in).map(w=>w.client_id||w.clients?.name||'—'));
+  const clientList = Object.entries(byClient)
+    .filter(([id]) => regularClientIds.has(id))
+    .sort(([,a],[,b]) => a.name.localeCompare(b.name,'ru'));
+
+  const clRows = [];
+  clRows.push([tc(`${trainerFio} — ${monthName} — по клиентам`, titleStyle())]);
+  clRows.push([]);
+
+  // Шапка: день недели
+  const dowRow = [tc('ФИО', hStyle())];
+  for (let d=1; d<=daysInMonth; d++) {
+    const dow = DOW[new Date(year,month-1,d).getDay()];
+    const isSat = new Date(year,month-1,d).getDay()===6;
+    const isSun = new Date(year,month-1,d).getDay()===0;
+    dowRow.push(tc(dow, hStyle(isSun?'DC2626':isSat?'2D6A9F':XL.BLUE_DARK)));
+  }
+  dowRow.push(tc('Итого', hStyle()));
+  clRows.push(dowRow);
+
+  // Шапка: числа
+  const dayNumRow = [tc('', hStyle(XL.BLUE_MID))];
+  for (let d=1; d<=daysInMonth; d++) dayNumRow.push(tc(d, hStyle(XL.BLUE_MID)));
+  dayNumRow.push(tc('', hStyle(XL.BLUE_MID)));
+  clRows.push(dayNumRow);
+
+  // Строки клиентов
+  clientList.forEach(([id, cl], i) => {
+    const st = rStyle(i%2===0);
+    const row = [tc(cl.name, st)];
+    for (let d=1; d<=daysInMonth; d++) {
+      const sessions = cl.days[d];
+      row.push(sessions?.length ? tc(sessions.join(','), {...st, font:{...st.font, bold:true}}) : tc('', st));
+    }
+    row.push(tc(cl.total, {...st, font:{...st.font, bold:true}}));
+    clRows.push(row);
+  });
+
+  // Разовые строки
+  [1,2,3].forEach((cat,i) => {
+    const hasAny = Object.keys(dropInByDay[cat]).length > 0;
+    if (!hasAny) return;
+    const st = rStyle(i%2===0);
+    const row = [tc(`Разовые ${cat} Кт`, {...st, font:{...st.font, bold:true, color:{rgb:XL.BLUE_DARK}}})];
+    let total = 0;
+    for (let d=1; d<=daysInMonth; d++) {
+      const cnt = dropInByDay[cat][d]||0;
+      row.push(cnt ? tc(cnt, st) : tc('', st));
+      total += cnt;
+    }
+    row.push(tc(total, {...st, font:{...st.font, bold:true}}));
+    clRows.push(row);
+  });
+
+  const ws2 = buildSheet(clRows);
+  ws2['!cols'] = [{wch:22}, ...Array.from({length:daysInMonth}, ()=>({wch:4})), {wch:7}];
+  XLSX.utils.book_append_sheet(wb, ws2, 'По клиентам');
+
   XLSX.writeFile(wb,`ЗП_${trainerFio.split(' ')[0]}_${monthName}.xlsx`);
 }
 
