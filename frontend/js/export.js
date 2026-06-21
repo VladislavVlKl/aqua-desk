@@ -378,8 +378,8 @@ function exportTrainerExcel(trainerFio, year, month, workouts, duties, groupSess
   for (let day=daysInMonth; day>=1; day--) {
     const b  = byDay[day]||{c1:0,c2:0,c3:0,v1:0,v2:0,v3:0,r1:0,r2:0,r3:0};
     const dh = dutyByDay[day]||0;
-    rows.push(sr([day,b.c1||0,b.c2||0,b.c3||0,b.v1||0,b.v2||0,b.v3||0,
-                  b.r1||0,b.r2||0,b.r3||0,dh?+dh.toFixed(2):0], rStyle((daysInMonth-day)%2===0)));
+    rows.push(sr([day,b.c1||'',b.c2||'',b.c3||'',b.v1||'',b.v2||'',b.v3||'',
+                  b.r1||'',b.r2||'',b.r3||'',dh?+dh.toFixed(2):''], rStyle((daysInMonth-day)%2===0)));
     ['c1','c2','c3','v1','v2','v3','r1','r2','r3'].forEach(k=>{tot[k]+=b[k];});
     tot.dh+=dh;
   }
