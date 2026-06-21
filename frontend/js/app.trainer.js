@@ -2371,11 +2371,11 @@ function renderEditClientModal(clientId, fioEnc, cat, age, subStart, subEnd, bal
       <input id="ec-sub-start" type="date" value="${subStart||''}"></div>
     <div class="form-group"><label>Конец абонемента</label>
       <input id="ec-sub-end" type="date" value="${subEnd||''}"></div>
-    <button class="btn btn-primary btn-full" onclick="doEditClient('${clientId}',${balance||0})">Сохранить</button>
+    <button class="btn btn-primary btn-full" onclick="doEditClient('${clientId}',${balance||0},${cat})">Сохранить</button>
   </div>`;
   document.body.appendChild(m);
 }
-async function doEditClient(clientId, oldBalance) {
+async function doEditClient(clientId, oldBalance, oldCat) {
   const fio       = document.getElementById('ec-fio')?.value.trim();
   const category  = parseInt(document.getElementById('ec-cat')?.value)||1;
   const age       = parseInt(document.getElementById('ec-age')?.value)||null;
@@ -2390,8 +2390,49 @@ async function doEditClient(clientId, oldBalance) {
     await DB.updateClient(clientId, fields);
     document.querySelector('.modal-overlay')?.remove();
     toast('✅ Данные сохранены','success');
-    renderClientProfile(clientId, STATE.currentTab||'clients');
+    // Категория изменилась → предложить пересчитать прошлые ПТ (ошибочная категория)
+    if (oldCat != null && category !== Number(oldCat)) {
+      renderRecalcCategoryModal(clientId, category);
+    } else {
+      renderClientProfile(clientId, STATE.currentTab||'clients');
+    }
   } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+
+// Спросить, пересчитывать ли категорию у уже проведённых тренировок клиента
+function renderRecalcCategoryModal(clientId, newCat) {
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>Пересчитать прошлые ПТ?</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove();renderClientProfile('${clientId}',STATE.currentTab||'clients')">✕</button></div>
+    <p class="hint" style="margin-bottom:14px">Категория изменена на <b>Кат.${newCat}</b>. Уже проведённые тренировки остались по старой категории. Пересчитать их под новую ставку?</p>
+    <div class="warn-banner" style="margin-bottom:14px;font-size:13px">⚠️ «Все тренировки» затронут и прошлые месяцы — ЗП за уже закрытые периоды изменится. Если категория была неверна только что — выбирайте «Текущий месяц».</div>
+    <button class="btn btn-primary btn-full" style="margin-bottom:8px"
+      onclick="doRecalcCategory('${clientId}',${newCat},'month')">📅 Только текущий месяц</button>
+    <button class="btn btn-full btn-danger" style="margin-bottom:8px"
+      onclick="doRecalcCategory('${clientId}',${newCat},'all')">🗂 Все тренировки клиента</button>
+    <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border)"
+      onclick="this.closest('.modal-overlay').remove();renderClientProfile('${clientId}',STATE.currentTab||'clients')">Не пересчитывать</button>
+  </div>`;
+  document.body.appendChild(m);
+}
+async function doRecalcCategory(clientId, newCat, scope) {
+  if (_pending.has('recalcCat_'+clientId)) return;
+  _pending.add('recalcCat_'+clientId);
+  try {
+    let fromDate = null;
+    if (scope === 'month') {
+      const now = new Date();
+      fromDate = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
+    }
+    const n = await DB.recalcWorkoutsCategory(clientId, newCat, fromDate);
+    DB.auditLog('workout_category_recalc', STATE.profile.id, STATE.profile.fio, clientId, 'client',
+      {new_cat:newCat, scope, count:n}, STATE.profile.branches?.[0]);
+    document.querySelector('.modal-overlay')?.remove();
+    toast(`✅ Пересчитано тренировок: ${n}`,'success');
+    renderClientProfile(clientId, STATE.currentTab||'clients');
+  } catch(e) { console.error(e); toast('Ошибка','error'); }
+  finally { _pending.delete('recalcCat_'+clientId); }
 }
 
 // Административная передача (координатор)

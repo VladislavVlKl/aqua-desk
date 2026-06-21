@@ -182,6 +182,18 @@ const DB = {
       .update(fields).eq('id',id).select().single();
     if (error) throw error; return data;
   },
+  // Пересчёт категории у уже проведённых ПТ клиента (ошибочно выставленная категория).
+  // Обновляет category_at_moment → ЗП за эти тренировки пересчитается по новой ставке.
+  // fromDate (YYYY-MM-DD) ограничивает периодом; null = все тренировки клиента.
+  // Разовые (is_drop_in) не трогаем — у них своя категория drop_in_category.
+  async recalcWorkoutsCategory(clientId, newCat, fromDate=null) {
+    let q = sb().from('workouts').update({category_at_moment:newCat})
+      .eq('client_id',clientId).eq('is_drop_in',false);
+    if (fromDate) q = q.gte('workout_date', fromDate + 'T00:00:00');
+    const {data,error} = await q.select('id');
+    if (error) throw error;
+    return data?.length || 0;
+  },
   async addBalance(clientId, amount) {
     // Атомарное обновление через RPC чтобы избежать race condition
     const {data,error} = await sb().rpc('increment_balance', {client_id: clientId, delta: amount});
