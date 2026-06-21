@@ -1105,7 +1105,8 @@ async function doApproveGroupSub(subId) {
   const rate = parseFloat(document.getElementById(`gsub-rate-${subId}`)?.value||0);
   if (!rate) { _pending.delete('gsub_'+subId); return toast('Введите ставку','error'); }
   try {
-    await DB.approveSubstitution(subId, rate);
+    const ok = await DB.approveSubstitution(subId, rate);
+    if (!ok) { toast('Уже подтверждено','info'); return; }
     toast('Замена утверждена ✅','success');
     document.getElementById(`gsub-rate-${subId}`)?.closest('.staff-card')
       ?.querySelector('span[style*="f59e0b"]')
@@ -1155,17 +1156,31 @@ async function renderAdminControl(force=false) {
     if (force) invalidateCache(cacheKey);
     const D = await cached(cacheKey, async () => {
       const monthFrom=`${y}-${_p2(mo)}-01`, monthTo=`${y}-${_p2(mo)}-${_p2(now.getDate())}`;
-      const [lateRequests, workoutDelReqs, deleteReqs, recHanging, recRejected] = await Promise.all([
+      const [lateRequests, workoutDelReqs, deleteReqs, recHanging, recRejected, pendingSubs] = await Promise.all([
         DB.getPendingLateRequests(null).catch(()=>[]),
         DB.getAllWorkoutDeleteRequests().catch(()=>[]),
         DB.getAllDeleteRequests().catch(()=>[]),
         DB.getReceptionHanging(branches).catch(()=>[]),
         DB.getReceptionRejected(branches, monthFrom, monthTo).catch(()=>({workouts:[],trials:[]})),
+        DB.getPendingSubstitutions().catch(()=>[]),   // замены — все филиалы
       ]);
-      return {lateRequests, workoutDelReqs, deleteReqs, recHanging, recRejected};
+      return {lateRequests, workoutDelReqs, deleteReqs, recHanging, recRejected, pendingSubs};
     }, 60000);
-    const {lateRequests, workoutDelReqs, deleteReqs, recHanging, recRejected} = D;
+    const {lateRequests, workoutDelReqs, deleteReqs, recHanging, recRejected, pendingSubs} = D;
     const sections=[];
+    // 🔄 Запросы на замену (подтверждает координатор или старший — кто первый)
+    if (pendingSubs.length) sections.push(`<div class="control-section">
+      <div class="control-title warn">🔄 Запросы на замену (${pendingSubs.length})</div>
+      ${pendingSubs.map(s=>`<div class="control-item">
+        <div class="ci-main"><b>${s.substitute?.fio||'?'}</b> вместо ${s.original?.fio||'?'} <span class="hint">${s.trainer_groups?.branch||''}</span></div>
+        <div class="ci-sub">${s.trainer_groups?.group_types?.name||'Группа'} · ${fmtDate(s.session_date)}</div>
+        <div style="display:flex;gap:6px;margin-top:8px;align-items:center">
+          <input type="number" id="asub-rate-${s.id}" placeholder="Ставка (сум)"
+            style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:6px;color:var(--text);font-size:13px">
+          <button class="btn btn-sm btn-primary" onclick="doApproveSubstitutionAdmin('${s.id}')">✓ Подтвердить</button>
+        </div>
+      </div>`).join('')}
+    </div>`);
     // 🛎 Висящие подтверждения ресепшн (эскалация >24ч)
     if (recHanging.length) {
       const escThreshold = Date.now() - RECEPTION_ESCALATE_HRS*3600000;
@@ -1243,6 +1258,27 @@ async function renderAdminControl(force=false) {
       ${sections.length?sections.join(''):'<div class="empty-state">✅<p>Очередь пуста</p></div>'}
     </div>`;
   } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+
+// Подтверждение замены координатором (доступ во все филиалы). Идемпотентно:
+// если старший уже подтвердил — покажем «уже подтверждено».
+async function doApproveSubstitutionAdmin(id) {
+  const rate = parseFloat(document.getElementById(`asub-rate-${id}`)?.value)||0;
+  if (!rate) return toast('Укажите ставку','error');
+  if (_pending.has('asub_'+id)) return;
+  _pending.add('asub_'+id);
+  try {
+    const ok = await DB.approveSubstitution(id, rate);
+    if (ok) {
+      DB.auditLog('group_substitution_approve', STATE.profile.id, STATE.profile.fio, id, 'group_substitution',
+        { rate }, STATE.profile.branches?.[0]);
+      toast('Замена одобрена ✅','success');
+    } else {
+      toast('Уже подтверждено','info');
+    }
+    invalidateCachePrefix('adm_control'); renderAdminControl(true);
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+  finally { _pending.delete('asub_'+id); }
 }
 
 // ── МОНИТОРИНГ: наблюдательные метрики координатора (открывается из «Ещё») ──

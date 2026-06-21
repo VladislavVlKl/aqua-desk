@@ -2837,8 +2837,28 @@ Object.assign(DB, {
       .insert({group_id:groupId, original_trainer_id:originalTrainerId,
                substitute_trainer_id:substituteTrainerId,
                session_date:sessionDate, status:'pending'})
-      .select().single();
-    if (error) throw error; return data;
+      .select('*, trainer_groups(branch, group_types(name)), original:profiles!original_trainer_id(fio), substitute:profiles!substitute_trainer_id(fio)').single();
+    if (error) throw error;
+    // Уведомить подтверждающих филиала: всех координаторов + старшего тренера (если есть).
+    // Кто первый подтвердит — тот и подтвердит (approveSubstitution идемпотентен).
+    try {
+      const branch  = data.trainer_groups?.branch;
+      const grpName = data.trainer_groups?.group_types?.name || 'группа';
+      const subFio  = data.substitute?.fio || 'тренер';
+      const origFio = data.original?.fio || 'тренер';
+      const approvers = await DB.getBranchApprovers(branch);
+      const msg = `🔄 Замена на подтверждение: ${subFio} вместо ${origFio} · ${grpName} · ${sessionDate}${branch?` · ${branch}`:''}. Подтвердите во вкладке «Контроль».`;
+      await Promise.all(approvers.map(a => DB.enqueueTrainerNotification(a.id, msg, 'substitution_approve')));
+    } catch(e) { console.error('[sub-notify]', e); }
+    return data;
+  },
+  // Подтверждающие замены: координаторы (все филиалы) + старшие тренеры данного филиала.
+  async getBranchApprovers(branch) {
+    const {data,error} = await sb().from('profiles')
+      .select('id,role,branches,tg_id').eq('is_archived',false)
+      .in('role',['admin','senior_trainer']);
+    if (error) throw error;
+    return (data||[]).filter(p => p.role==='admin' || (p.branches||[]).includes(branch));
   },
   // История замен группы (по всем строкам инстанса), новые сверху
   async getGroupSubstitutionsHistory(groupId) {
@@ -2863,8 +2883,10 @@ Object.assign(DB, {
   },
   async approveSubstitution(id, rate) {
     invalidateCachePrefix('grp:');
-    const {error} = await sb().from('group_substitutions')
-      .update({status:'approved', rate}).eq('id',id);
+    // Идемпотентно: одобряем только если запись ещё pending → «кто первый, тот подтвердил».
+    const {data,error} = await sb().from('group_substitutions')
+      .update({status:'approved', rate}).eq('id',id).eq('status','pending').select('id');
     if (error) throw error;
+    return (data||[]).length > 0;   // false → уже подтвердил кто-то другой
   },
 });

@@ -503,10 +503,14 @@ async function doApproveSubstitution(id) {
   const rate = parseFloat(document.getElementById(`sub-rate-${id}`)?.value)||0;
   if (!rate) return toast('Укажите ставку','error');
   try {
-    await DB.approveSubstitution(id, rate);
-    DB.auditLog('group_substitution_approve', STATE.profile.id, STATE.profile.fio, id, 'group_substitution',
-      { rate }, STATE.profile.branches?.[0]);
-    toast('Замена одобрена ✅','success');
+    const ok = await DB.approveSubstitution(id, rate);
+    if (ok) {
+      DB.auditLog('group_substitution_approve', STATE.profile.id, STATE.profile.fio, id, 'group_substitution',
+        { rate }, STATE.profile.branches?.[0]);
+      toast('Замена одобрена ✅','success');
+    } else {
+      toast('Уже подтверждено','info');
+    }
     renderPendingSubstitutions();
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
