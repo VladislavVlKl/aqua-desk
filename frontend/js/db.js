@@ -354,6 +354,26 @@ const DB = {
     if (error) throw error;
   },
   async deleteWorkout(id) {
+    // Перед удалением вернуть баланс, если тренировка его списывала.
+    // Списывали баланс: обычная ПТ (logWorkouts -1), подтверждённый долг (confirmDebt -1),
+    // подтверждённая замена (resolveSubstitute -1). НЕ списывали: разовое, неподтверждённый
+    // долг, замена в ожидании (pending_confirmation), уже отклонённое ресепшеном (баланс
+    // вернул rejectWorkout) — для них возврат не делаем (иначе двойной +1).
+    const {data:w} = await sb().from('workouts')
+      .select('client_id,is_debt,debt_confirmed_at,is_drop_in,pending_confirmation,reception_status,cl:clients(age,drop_in_used)')
+      .eq('id',id).maybeSingle();
+    if (w) {
+      const consumedBalance = !w.is_drop_in && !w.pending_confirmation
+        && w.reception_status !== 'rejected'
+        && (!w.is_debt || w.debt_confirmed_at);
+      if (consumedBalance) {
+        await sb().rpc('increment_balance', {client_id: w.client_id, delta: +1});
+      }
+      // Разовое ребёнка пометило drop_in_used → сбросить (как в rejectWorkout)
+      if (w.is_drop_in && w.cl && isChild(w.cl.age) && w.cl.drop_in_used) {
+        await sb().from('clients').update({drop_in_used:false}).eq('id',w.client_id);
+      }
+    }
     // schedule_confirmations ссылается на workouts без CASCADE — удаляем вручную
     await sb().from('schedule_confirmations').delete().eq('workout_id', id);
     const {error} = await sb().from('workouts').delete().eq('id',id);

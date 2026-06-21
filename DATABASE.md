@@ -24,7 +24,7 @@
 | `client_transfers.client_id` | clients | переводы клиента |
 | `late_workout_requests.client_id` | clients | поздние запросы по клиенту |
 | `session_notes.workout_id` | workouts | конспекты тренировки |
-| `workout_delete_requests.workout_id` | workouts | ⚠️ удаление ПТ сносит все запросы на её удаление — поэтому в `approveWorkoutDeleteRequest` сперва закрываем все pending по `workout_id`, потом удаляем ПТ |
+| `workout_delete_requests.workout_id` | workouts | ⚠️ удаление ПТ сносит все запросы на её удаление — поэтому в `approveWorkoutDeleteRequest` сперва закрываем все pending по `workout_id`, потом удаляем ПТ. `deleteWorkout` (этот путь + быстрое/админ-удаление) **возвращает баланс +1**, если ПТ его списывала (обычная ПТ / подтверждённый долг / подтверждённая замена; разовое, неподтв. долг, замена в ожидании, уже отклонённое ресепшеном — не трогает) |
 | `training_goals.subscription_id` | subscriptions | цели абонемента |
 | `group_clients.group_id` | trainer_groups | дети группы |
 | `adult_group_clients.group_id` | trainer_groups | взрослые группы |
