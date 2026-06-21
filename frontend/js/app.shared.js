@@ -11,7 +11,17 @@
 async function doDeleteClientCheck(clientId, fioEnc, createdAt) {
   const fio = decodeURIComponent(fioEnc);
   const diffH = (Date.now() - new Date(createdAt).getTime()) / 3600000;
-  if (diffH <= 24) {
+  // Сколько проведённых ПТ у клиента — удаление сотрёт их и уменьшит ЗП за те периоды
+  let ptCount = 0;
+  try {
+    const {count} = await sb().from('workouts')
+      .select('id',{count:'exact',head:true}).eq('client_id',clientId);
+    ptCount = count || 0;
+  } catch(e) { console.error(e); }
+  if (ptCount > 0) {
+    if (!confirm(`⚠️ У «${fio}» ${ptCount} проведённых тренировок.\n\nПолное удаление сотрёт всю историю безвозвратно и УМЕНЬШИТ ЗП тренера за те периоды.\n\nДля ушедших клиентов используйте «📦 Архив» — он скрывает клиента, но сохраняет историю и ЗП.\n\nВсё равно удалить с историей?`)) return;
+  }
+  if (diffH <= 24 && ptCount === 0) {
     if (!confirm(`Удалить «${fio}» полностью?\nЭто действие нельзя отменить.`)) return;
     try {
       await DB.deleteClient(clientId);
