@@ -8,6 +8,81 @@ function sb() {
   return _sb;
 }
 
+// ─── JWT-АУТЕНТИФИКАЦИЯ (Telegram initData → Supabase-сессия) ──────────
+// Сырой подписанный initData от Telegram (НЕ initDataUnsafe). В браузере вне
+// Telegram его нет → вернётся '' и весь JWT-поток корректно пропускается.
+function _rawInitData() {
+  try { return window.Telegram?.WebApp?.initData || ''; } catch (e) { return ''; }
+}
+
+// Декод payload JWT для диагностики (только чтение claims, без проверки подписи).
+function _decodeJwt(token) {
+  try {
+    const p = token.split('.')[1];
+    return JSON.parse(decodeURIComponent(escape(atob(p.replace(/-/g,'+').replace(/_/g,'/')))));
+  } catch (e) { return null; }
+}
+
+// Запрашивает Supabase-сессию у Edge Function telegram-auth. Никогда не бросает:
+// при любой ошибке/отсутствии initData возвращает null, и приложение продолжает
+// работать под anon (текущее поведение).
+async function _fetchJwtSession() {
+  const initData = _rawInitData();
+  if (!initData) return null; // браузерный/dev-вход без подписи — JWT не запрашиваем
+  try {
+    const res = await fetch(`${CONFIG.SUPABASE_URL}/functions/v1/telegram-auth`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': CONFIG.SUPABASE_ANON_KEY,
+        'Authorization': `Bearer ${CONFIG.SUPABASE_ANON_KEY}`,
+      },
+      body: JSON.stringify({ initData }),
+    });
+    if (!res.ok) {
+      console.warn('[jwt] telegram-auth вернул', res.status, await res.text().catch(()=>''));
+      return null;
+    }
+    return await res.json(); // { session, tg_id }
+  } catch (e) {
+    console.warn('[jwt] запрос telegram-auth не удался:', e?.message || e);
+    return null;
+  }
+}
+
+// Главная точка входа JWT. Поведение по CONFIG.JWT_MODE. Никогда не бросает.
+// Возвращает true, если сессия реально переключена на authenticated (режим 'on').
+async function ensureJwtSession() {
+  const mode = (typeof CONFIG !== 'undefined' && CONFIG.JWT_MODE) || 'off';
+  if (mode === 'off') return false;
+  const data = await _fetchJwtSession();
+  if (!data?.session?.access_token) return false;
+
+  if (mode === 'diagnostic') {
+    // Только смотрим, что токен валиден и несёт tg_id — сессию НЕ переключаем.
+    const claims = _decodeJwt(data.session.access_token);
+    console.log('[jwt:diagnostic] получен токен. role=', claims?.role,
+                'app_metadata.tg_id=', claims?.app_metadata?.tg_id,
+                'exp=', claims?.exp ? new Date(claims.exp*1000).toISOString() : '?');
+    return false; // остаёмся под anon — ничего не ломается
+  }
+
+  if (mode === 'on') {
+    try {
+      const { error } = await sb().auth.setSession({
+        access_token:  data.session.access_token,
+        refresh_token: data.session.refresh_token,
+      });
+      if (error) { console.warn('[jwt] setSession error:', error.message); return false; }
+      return true;
+    } catch (e) {
+      console.warn('[jwt] setSession упал:', e?.message || e);
+      return false;
+    }
+  }
+  return false;
+}
+
 // Фильтр запроса по филиалу: строка → один филиал (.eq), массив → несколько (.in),
 // null/'' /[] → без фильтра. Обратно совместимо со старыми вызовами (строка).
 function _brFilter(q, branch) {

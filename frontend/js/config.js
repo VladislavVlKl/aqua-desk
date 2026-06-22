@@ -5,6 +5,17 @@
 const CONFIG = {
   SUPABASE_URL:      'https://nkwfvuhtpaoxsaczwsrg.supabase.co',
   SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5rd2Z2dWh0cGFveHNhY3p3c3JnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgxMzUwMzIsImV4cCI6MjA5MzcxMTAzMn0.a2rKoLNBB4OGpuENu1XUhsfbc-8JmPbxEkvLrXqUM3A',
+
+  // ─── РЕЖИМ JWT-АУТЕНТИФИКАЦИИ ───────────────
+  // 'off'        — прод. Приложение ходит под anon, как раньше. JWT не запрашивается.
+  // 'diagnostic' — ветка/тест. JWT запрашивается и логируется в консоль, но сессия
+  //                НЕ переключается (чтение остаётся под anon → ничего не ломается).
+  // 'on'         — боевой JWT. Сессия переключается на authenticated.
+  //                Включать ТОЛЬКО после того, как у роли authenticated появятся
+  //                RLS-политики (иначе чтение вернёт пусто и приложение не загрузится).
+  // ⚠️ ВРЕМЕННО 'diagnostic' для теста happy-path через Telegram. Вернуть в 'off'
+  //    после проверки (или перейти в 'on' на этапе 2 с authenticated-политиками).
+  JWT_MODE: 'diagnostic',
 };
 
 // Динамический URL — не ломается при переименовании репозитория

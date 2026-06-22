@@ -408,6 +408,9 @@ async function init() {
   try {
     // Очищаем старую auth сессию из localStorage (после rollback telegram-auth)
     try { localStorage.removeItem('sb-nkwfvuhtpaoxsaczwsrg-auth-token'); } catch(e){}
+    // JWT-аутентификация. В режиме CONFIG.JWT_MODE='off' (прод) — мгновенный no-op.
+    // Никогда не бросает: при любой ошибке приложение продолжает работать под anon.
+    if (typeof ensureJwtSession === 'function') { try { await ensureJwtSession(); } catch(e){} }
     const p=await DB.getProfileByTgId(STATE.tgId);
     if (!p) { renderRegister(); return; }
     STATE.profile=p;
