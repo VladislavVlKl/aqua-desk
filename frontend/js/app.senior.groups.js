@@ -566,8 +566,12 @@ function renderGroupSessionScreenHtml() {
     ${stationCards}
     <div style="font-size:11px;color:var(--hint);margin:2px 0 12px">Тап по имени — отметить на станции, повторный тап — снять. Можно отметить тренера на обеих станциях. Кого не было — не отмечайте. Процентникам ЗП идёт независимо от присутствия.</div>
 
-    <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
-      onclick="renderGroupAttendanceByDate('${g.groupId}')">📅 Посещаемость за другую дату</button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-sm" style="flex:1;min-width:160px;background:var(--card);border:1px solid var(--border)"
+        onclick="renderGroupAttendanceByDate('${g.groupId}')">📅 Посещаемость за другую дату</button>
+      <button class="btn btn-sm" style="flex:1;min-width:160px;background:var(--card);border:1px solid var(--border)"
+        onclick="renderConductedByDate('${g.groupId}')">✏️ Кто проводил — другая дата</button>
+    </div>
   </div></div>`);
 }
 
@@ -635,6 +639,121 @@ async function toggleConducted(trainerId, conductedRole) {
     if (sumEl) sumEl.innerHTML = _cndSummaryInner(g, sub);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
   finally { _pending.delete(key); }
+}
+
+// ═══ РЕДАКТОР «КТО ПРОВОДИЛ» ЗА ДРУГУЮ ДАТУ (правка задним числом) ═══
+// Зеркало экрана занятия для прошлой даты: забыли отметить тренера (напр. арт-свим) — можно исправить.
+// Пишет в ту же group_sessions через setGroupConducted/removeGroupConducted.
+async function renderConductedByDate(groupId) {
+  const g = await ensureGd(groupId); if (!g) return;
+  if (!g.instanceId) return toast('Недоступно для этой группы','error');
+  g._cbd = { date: g.today, sub: g.currentSubgroup||'', conductedMap:{}, attMap:{} };
+  const m = el('div','modal-overlay'); m.id = 'cbd-modal';
+  m.innerHTML = `<div class="modal">
+    <div class="modal-header"><h3>Кто проводил — правка</h3>
+      <button class="btn-close" onclick="cbdClose('${groupId}')">✕</button></div>
+    <div class="form-group"><label>Дата</label>
+      <input type="date" id="cbd-date" value="${g._cbd.date}" max="${todayStr()}"
+        onchange="cbdReload('${groupId}')"></div>
+    <div id="cbd-body"><p class="hint">Загрузка…</p></div>
+  </div>`;
+  document.body.appendChild(m);
+  await cbdReload(groupId);
+}
+
+async function cbdReload(groupId) {
+  const g = window._gd; if (!g || !g._cbd) return;
+  const dateEl = document.getElementById('cbd-date');
+  if (dateEl) g._cbd.date = dateEl.value;
+  const date = g._cbd.date;
+  try {
+    const [conducted, att] = await Promise.all([
+      DB.getGroupConductedByDate(g.instanceId, date),
+      DB.getGroupAttendanceByInstance(g.instanceId, date),
+    ]);
+    const cm = {};
+    conducted.forEach(s=>{ const sg = s.subgroup||''; ((cm[sg] ||= {})[s.trainer_id] ||= []).push(s.conducted_role); });
+    g._cbd.conductedMap = cm;
+    g._cbd.attMap = Object.fromEntries(att.map(a=>[a.group_client_id, a.attended]));
+    cbdRenderBody();
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+
+function _cbdPill(trainerId, role, fio, active) {
+  return `<button id="cbd-${trainerId}-${role}" style="${_cndPillStyle(active, role)}"
+    onclick="cbdToggle('${trainerId}','${role}')">${fio}${active?' ✓':''}</button>`;
+}
+function cbdRenderBody() {
+  const g = window._gd; const cbd = g?._cbd; if (!cbd) return;
+  const sub = cbd.sub||'';
+  const cm = cbd.conductedMap[sub]||{};
+  const uniqMembers = _uniqMembers(g.members);
+  const hasSubs = g.subgroups.length > 0;
+  const segHtml = hasSubs ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+    ${['', ...g.subgroups].map(s=>`<button class="btn btn-sm"
+      style="font-size:12px;${s===sub?'background:var(--accent);color:#fff':'background:var(--card);border:1px solid var(--border)'}"
+      onclick="cbdSwitchSub('${encodeURIComponent(s)}')">${subLabel(s)}</button>`).join('')}</div>` : '';
+  const cards = uniqMembers.length ? CONDUCTED_ROLES.map(role=>{
+    const meta = STATION_META[role]||{};
+    const pills = uniqMembers.map(t=>_cbdPill(t.trainer_id, role, t.profiles?.fio||'—', (cm[t.trainer_id]||[]).includes(role))).join('');
+    return `<div class="staff-card" style="flex-direction:column;align-items:stretch;gap:10px;margin-bottom:10px">
+      <div style="display:flex;align-items:center;gap:6px;font-size:14px;font-weight:600">
+        <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${meta.dot}"></span>
+        ${meta.icon||''} ${role[0].toUpperCase()+role.slice(1)}
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">${pills}</div></div>`;
+  }).join('') : '<p class="hint">Тренеры не назначены</p>';
+  const body = document.getElementById('cbd-body');
+  if (body) body.innerHTML = segHtml + cards +
+    `<p class="hint" style="font-size:11px;margin-top:4px">Тап по имени — отметить/снять «кто проводил» на станции за выбранную дату.</p>`;
+}
+
+function cbdSwitchSub(subEnc) {
+  const g = window._gd; if (!g || !g._cbd) return;
+  g._cbd.sub = decodeURIComponent(subEnc);
+  cbdRenderBody();
+}
+
+// UPSERT/DELETE в group_sessions за ВЫБРАННУЮ дату (g._cbd.date), без перерисовки всей модалки
+async function cbdToggle(trainerId, conductedRole) {
+  const g = window._gd; const cbd = g?._cbd; if (!cbd) return;
+  trainerId = parseInt(trainerId);
+  const date = cbd.date, sub = cbd.sub||'';
+  const key = `cbd_${trainerId}_${date}_${conductedRole}_${sub}`;
+  if (_pending.has(key)) return;
+  _pending.add(key);
+  try {
+    const subMap = (cbd.conductedMap[sub] ||= {});
+    const roles = subMap[trainerId] || [];
+    const already = roles.includes(conductedRole);
+    // headcount = отмеченные дети этой подгруппы за выбранную дату
+    const headcount = g.clients.filter(c=>(c.subgroup||'')===sub && cbd.attMap[c.id]).length;
+    if (already) {
+      await DB.removeGroupConducted(trainerId, g.groupTypeId, g.branch, date, conductedRole, sub);
+      subMap[trainerId] = roles.filter(r=>r!==conductedRole);
+      if (!subMap[trainerId].length) delete subMap[trainerId];
+      toast('Отметка снята','success');
+    } else {
+      await DB.setGroupConducted(trainerId, g.groupTypeId, g.branch, date, headcount, conductedRole, g.instanceId, sub);
+      subMap[trainerId] = [...roles, conductedRole];
+      toast('Отмечено ✅','success');
+    }
+    DB.auditLog('group_conducted_edit', STATE.profile.id, STATE.profile.fio, trainerId, 'group_session',
+      { date, role:conductedRole, removed:already, subgroup:sub }, g.branch);
+    const fio = g.members.find(t=>t.trainer_id===trainerId)?.profiles?.fio||'—';
+    const btn = document.getElementById(`cbd-${trainerId}-${conductedRole}`);
+    if (btn) btn.outerHTML = _cbdPill(trainerId, conductedRole, fio, !already);
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+  finally { _pending.delete(key); }
+}
+
+// Закрыть редактор; если правили сегодняшнюю дату и открыт экран занятия — перезагрузить его
+function cbdClose(groupId) {
+  document.getElementById('cbd-modal')?.remove();
+  const g = window._gd;
+  const editedToday = g && g._cbd && g._cbd.date===g.today;
+  if (g) g._cbd = null;
+  if (editedToday && String(g.groupId)===String(groupId) && g._screen==='session') renderGroupSessionScreen(groupId);
 }
 
 // ═══ ЭКРАН «СПИСОК ДЕТЕЙ» (плоский список или аккордеоны подгрупп) ═══
