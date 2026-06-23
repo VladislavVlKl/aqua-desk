@@ -41,10 +41,23 @@ app.js → app.trainer.js → app.admin.js → app.admin-ops.js → app.exec.js 
 
 | Файл | Назначение |
 |---|---|
-| `app.js` | Ядро: STATE, утилиты, UI, INIT, AUTH + панели КЛИЕНТ и СТАРШИЙ (~2400 стр.) |
-| `app.trainer.js` | Панель тренера: TRAINER:* (home/clients/workouts/schedule/today/duties/events/report) |
-| `app.admin.js` | Координатор — управление: SHELL/ANALYTICS/CLIENTS/SALARY/STAFF/BRANCHES |
-| `app.admin-ops.js` | Координатор — операционка: GROUPS/CONTROL/TECH (top-level `window._glInstances`) |
+| `app.core.js` | Ядро: STATE, кеш (`cached`/`once`/`invalidateCache*`), утилиты (`$`/`$$`/`toast`), UI, dev-переключатель, INIT. **Грузится первым** среди app-файлов |
+| `app.auth.js` | AUTH: регистрация, PIN-вход, привязка профиля |
+| `app.client.js` | CLIENT:PROFILE + EXPORT: профиль клиента, абонементы, заморозка, цели, Excel-экспорт |
+| `app.senior.js` | SENIOR: шелл старшего, аналитика, `seniorTab` |
+| `app.senior.groups.js` | SENIOR:GROUPS: группы старшего (`renderSeniorGroups`/`renderGroupDetail`/назначения) |
+| `app.senior.report.js` | SENIOR:REPORT: `renderBranchReport`, `loadBranchSummary` |
+| `app.trainer.tabs.js` | Тренер: shell + home + clients + конспекты (overdue) |
+| `app.trainer.workouts.js` | Тренер: таб «Списание» + добавление клиента (`let _wkClientTimer`) |
+| `app.trainer.schedule.js` | Тренер: schedule + today + duties + events (`let _schedWeekOffset`) |
+| `app.trainer.report.js` | Тренер: отчёт + модалки действий с клиентом (edit/transfer/пакет/пересчёт) |
+| `app.admin.shell.js` | Координатор: SHELL (`renderAdminApp`/`adminTab`/`renderAdminMore`) |
+| `app.admin.analytics.js` | Координатор: ANALYTICS (Overview + хабы Деньги/Клиенты/Загрузка/Контроль) |
+| `app.admin.clients.js` | Координатор: CLIENTS + SALARY (клиенты, сводка ЗП, `adminDetail`) |
+| `app.admin.staff.js` | Координатор: STAFF + BRANCHES (персонал, филиалы, `ROLE_LBL`) |
+| `app.admin-ops.groups.js` | Координатор — операционка: GROUPS (top-level `window._glInstances`) |
+| `app.admin-ops.control.js` | Координатор — операционка: CONTROL (audit log, сессии, конспекты, поздние запросы) |
+| `app.admin-ops.tech.js` | Координатор — операционка: TECH (оборудование/счета/закупки/хлор/планы, `TECH_*`) |
 | `app.exec.js` | CEO / RECEPTION / MANAGER |
 | `app.shared.js` | SHARED:* (модалки удаления/профиля/уведомлений/групп) + bootstrap `DOMContentLoaded→init` |
 | `db.*.js` | Обёртки над Supabase (`DB.*`) — единственная точка интеграции. Разбито по доменам, грузить строго в порядке: `db.core.js` (хелперы `sb`/JWT/`_brFilter` + `const DB = {}` + auth/профили/филиалы) → `db.clients.js` (клиенты/ПТ/разовые/дежурства) → `db.groups.js` (группы/посещения/замены/ставки) → `db.schedule.js` (слоты/события/абонементы/конспекты) → `db.analytics.js` (аналитика/сводки/`An*`) → `db.ops.js` (уведомления/переводы/ресепшн) → `db.salary.js` (глобальные `calcSalary`/`calcChildGroupPayroll`) → `db.misc.js` (техчасть/удаления/аудит/взрослые группы). Каждый файл после core делает `Object.assign(DB, {...})` |
