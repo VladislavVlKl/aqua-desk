@@ -20,7 +20,7 @@ description: >
 
 ```bash
 # Браузерные JS в frontend/js/ + node-джобы в backend/jobs/
-for f in frontend/js/app.js frontend/js/app.trainer.js frontend/js/app.admin.js frontend/js/app.admin-ops.js frontend/js/app.exec.js frontend/js/app.shared.js frontend/js/db.js frontend/js/config.js frontend/js/export.js frontend/js/tutorial.js frontend/js/notifications-ui.js backend/jobs/remind.js backend/jobs/process-queue.js; do
+for f in frontend/js/app.js frontend/js/app.trainer.js frontend/js/app.admin.js frontend/js/app.admin-ops.js frontend/js/app.exec.js frontend/js/app.shared.js frontend/js/db.core.js frontend/js/db.clients.js frontend/js/db.groups.js frontend/js/db.schedule.js frontend/js/db.analytics.js frontend/js/db.ops.js frontend/js/db.salary.js frontend/js/db.misc.js frontend/js/config.js frontend/js/export.js frontend/js/tutorial.js frontend/js/notifications-ui.js backend/jobs/remind.js backend/jobs/process-queue.js; do
   node --check /Users/vladislavklimov/aqua-desk/$f && echo "✅ $f OK" || echo "❌ $f ОШИБКА"
 done
 ```

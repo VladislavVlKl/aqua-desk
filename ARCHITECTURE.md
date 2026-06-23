@@ -47,7 +47,7 @@ app.js → app.trainer.js → app.admin.js → app.admin-ops.js → app.exec.js 
 | `app.admin-ops.js` | Координатор — операционка: GROUPS/CONTROL/TECH (top-level `window._glInstances`) |
 | `app.exec.js` | CEO / RECEPTION / MANAGER |
 | `app.shared.js` | SHARED:* (модалки удаления/профиля/уведомлений/групп) + bootstrap `DOMContentLoaded→init` |
-| `db.js` | Обёртки над Supabase (`DB.*`), ~2800 строк — единственная точка интеграции с Supabase |
+| `db.*.js` | Обёртки над Supabase (`DB.*`) — единственная точка интеграции. Разбито по доменам, грузить строго в порядке: `db.core.js` (хелперы `sb`/JWT/`_brFilter` + `const DB = {}` + auth/профили/филиалы) → `db.clients.js` (клиенты/ПТ/разовые/дежурства) → `db.groups.js` (группы/посещения/замены/ставки) → `db.schedule.js` (слоты/события/абонементы/конспекты) → `db.analytics.js` (аналитика/сводки/`An*`) → `db.ops.js` (уведомления/переводы/ресепшн) → `db.salary.js` (глобальные `calcSalary`/`calcChildGroupPayroll`) → `db.misc.js` (техчасть/удаления/аудит/взрослые группы). Каждый файл после core делает `Object.assign(DB, {...})` |
 | `config.js` | Константы: тарифы `RATES`, пакеты `SUB_PACKAGES`, лимиты, `calcSubEnd` |
 | `export.js` | Экспорт Excel (xlsx-js-style) |
 | `tutorial.js` | Туториал + `enterApp` |
