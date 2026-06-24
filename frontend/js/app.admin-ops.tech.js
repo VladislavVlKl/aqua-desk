@@ -28,6 +28,17 @@ function techAgeBadge(iso) {
   return `<span class="tc-age ${cls}">⏳ ${lbl} · с ${fmtDate(iso)}</span>`;
 }
 
+// поле выбора филиала для модалок добавления.
+// Если филиал уже выбран сверху — фиксируем его; если «Все филиалы» — даём выбрать.
+async function techBranchField(id, selected) {
+  const branches = (await cached('branches',()=>DB.getBranches())).map(b=>b.name);
+  return `<div class="form-group"><label>Филиал</label>
+    <select id="${id}">
+      ${selected?'':'<option value="">— выберите филиал —</option>'}
+      ${branches.map(b=>`<option value="${b}" ${b===selected?'selected':''}>${b}</option>`).join('')}
+    </select></div>`;
+}
+
 // панель выбора раздела (общая)
 function techTabBar(switchFn) {
   return `<div class="tech-tabs">
@@ -135,11 +146,13 @@ async function techRenderBills(body, branch, editable) {
         </div>`}
       </div>`).join('')}`;
 }
-function renderAddBillModal(branch) {
+async function renderAddBillModal(branch) {
+  const branchField = await techBranchField('bill-branch', branch);
   const m=el('div','modal-overlay');
   m.innerHTML=`<div class="modal">
     <div class="modal-header"><h3>💳 Добавить счёт</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    ${branchField}
     <div class="form-group"><label>Категория</label>
       <select id="bill-cat">${BILL_CATS.map(c=>`<option>${c}</option>`).join('')}</select></div>
     <div class="form-group"><label>Описание</label>
@@ -148,14 +161,15 @@ function renderAddBillModal(branch) {
       <input id="bill-amount" type="number" placeholder="0"></div>
     <div class="form-group"><label>Дата</label>
       <input id="bill-date" type="date" value="${todayStr()}"></div>
-    <button class="btn btn-primary btn-full" onclick="doAddBill('${branch}')">Добавить</button>
+    <button class="btn btn-primary btn-full" onclick="doAddBill()">Добавить</button>
   </div>`;
   document.body.appendChild(m);
 }
-async function doAddBill(branch) {
+async function doAddBill() {
+  const branch = document.getElementById('bill-branch')?.value || '';
   const amount = parseFloat(document.getElementById('bill-amount')?.value)||0;
-  if (!amount) return toast('Введите сумму','error');
   if (!branch) return toast('Выберите филиал','error');
+  if (!amount) return toast('Введите сумму','error');
   await DB.addTechBill({
     branch,
     category:    document.getElementById('bill-cat')?.value,
@@ -198,25 +212,28 @@ async function techRenderIssues(body, branch, editable) {
         </div>`:''}
       </div>`).join('')}`;
 }
-function renderAddIssueModal(branch) {
+async function renderAddIssueModal(branch) {
+  const branchField = await techBranchField('iss-branch', branch);
   const m=el('div','modal-overlay');
   m.innerHTML=`<div class="modal">
     <div class="modal-header"><h3>🔧 Поломка</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    ${branchField}
     <div class="form-group"><label>Что сломалось</label>
       <input id="iss-desc" type="text" placeholder="Напр.: насос мамской ванны"></div>
     <div class="form-group"><label>Приоритет</label>
       <select id="iss-pri">
         ${Object.entries(PRIORITY_LBL).map(([v,l])=>`<option value="${v}" ${v==='normal'?'selected':''}>${l}</option>`).join('')}
       </select></div>
-    <button class="btn btn-primary btn-full" onclick="doAddIssue('${branch}')">Добавить</button>
+    <button class="btn btn-primary btn-full" onclick="doAddIssue()">Добавить</button>
   </div>`;
   document.body.appendChild(m);
 }
-async function doAddIssue(branch) {
+async function doAddIssue() {
+  const branch = document.getElementById('iss-branch')?.value || '';
   const desc = document.getElementById('iss-desc')?.value.trim();
-  if (!desc) return toast('Опишите поломку','error');
   if (!branch) return toast('Выберите филиал','error');
+  if (!desc) return toast('Опишите поломку','error');
   await DB.addTechIssue({
     branch, description:desc,
     priority: document.getElementById('iss-pri')?.value||'normal',
@@ -261,11 +278,13 @@ async function techRenderChlorine(body, branch, editable) {
         </div>`:''}
       </div>`).join('')}`;
 }
-function renderAddChlorineModal(branch) {
+async function renderAddChlorineModal(branch) {
+  const branchField = await techBranchField('chl-branch', branch);
   const m=el('div','modal-overlay');
   m.innerHTML=`<div class="modal">
     <div class="modal-header"><h3>🧪 Закуп хлора</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    ${branchField}
     <div class="form-group"><label>Дата</label>
       <input type="date" id="chl-date" value="${todayStr()}"></div>
     <div class="form-group"><label>Количество (кг)</label>
@@ -276,18 +295,19 @@ function renderAddChlorineModal(branch) {
       <input id="chl-sup" placeholder="Необязательно"></div>
     <div class="form-group"><label>Примечание</label>
       <input id="chl-note" placeholder="Необязательно"></div>
-    <button class="btn btn-primary btn-full" onclick="doAddChlorine('${branch}')">Добавить</button>
+    <button class="btn btn-primary btn-full" onclick="doAddChlorine()">Добавить</button>
   </div>`;
   document.body.appendChild(m);
 }
-async function doAddChlorine(branch) {
+async function doAddChlorine() {
+  const branch = document.getElementById('chl-branch')?.value || '';
   const date = document.getElementById('chl-date')?.value;
   const qty  = parseFloat(document.getElementById('chl-qty')?.value||0);
   const sum  = parseFloat(document.getElementById('chl-sum')?.value||0);
   const sup  = document.getElementById('chl-sup')?.value.trim()||null;
   const note = document.getElementById('chl-note')?.value.trim()||null;
-  if (!qty||!sum) return toast('Укажите количество и сумму','error');
   if (!branch) return toast('Выберите филиал','error');
+  if (!qty||!sum) return toast('Укажите количество и сумму','error');
   try {
     await sb().from('chlorine_orders').insert({branch,order_date:date,quantity_kg:qty,price_total:sum,supplier:sup,note});
     document.querySelector('.modal-overlay')?.remove();
