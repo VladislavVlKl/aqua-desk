@@ -120,6 +120,8 @@ const AUDIT_LABELS = {
   workout_delete:            { icon:'🗑', label:'ПТ удалена' },
   workout_delete_admin:      { icon:'🗑', label:'ПТ удалена (координатор)' },
   workout_delete_request:    { icon:'📋', label:'Запрос на удаление ПТ' },
+  trial_delete:              { icon:'🗑', label:'Пробная удалена' },
+  trial_delete_request:      { icon:'📋', label:'Запрос на удаление пробной' },
   client_add:                { icon:'👤', label:'Клиент добавлен' },
   client_delete:             { icon:'❌', label:'Клиент удалён' },
   sub_buy:                   { icon:'💳', label:'Абонемент куплен' },

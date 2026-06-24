@@ -41,6 +41,7 @@
 | Дочерняя | Родитель |
 |---|---|
 | `delete_requests.client_id` | clients |
+| `trial_delete_requests.trial_id` | trial_sessions (CASCADE) |
 | `schedule_slots.client_id` | clients |
 | `audit_log.actor_id` | profiles |
 | `notifications_queue.created_by` | profiles |
@@ -135,6 +136,9 @@ reception_status (pending|confirmed|rejected) · reception_reason · reception_b
 
 **workout_delete_requests** — на удаление ПТ: `workout_id, trainer_id, client_name, workout_date, branch, status`
 > Дубли по `workout_id` блокируются в `DB.requestWorkoutDelete`. При одобрении сперва закрываются все pending.
+
+**trial_delete_requests** — на удаление пробной (паритет с ПТ): `trial_id, trainer_id, client_name, session_date, branch, status (pending|approved|rejected)`
+> Тренер удаляет пробную сам в окне 30 мин (`EDIT_WINDOW_MIN`, `DB.deleteTrialSession`); позже — `DB.requestTrialDelete` → координатор одобряет в «Контроле» (`approveTrialDeleteRequest` → удаляет `trial_sessions`). Дубль pending по `trial_id` блокируется. `trial_id` FK → `trial_sessions ON DELETE CASCADE` (при одобрении сперва закрываются pending). Индекс `idx_trial_del_branch_status (branch, status)`.
 
 **late_workout_requests** — позднее внесение ПТ (>72ч): `trainer_id, client_id, branch, workout_date, category, reason, status, reviewed_by, reject_note`
 

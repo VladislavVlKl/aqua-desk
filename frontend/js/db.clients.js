@@ -152,6 +152,36 @@ Object.assign(DB, {
     const {error} = await sb().from('trial_sessions').delete().eq('id',id);
     if (error) throw error;
   },
+  async updateTrialSession(id, fields) {
+    const {error} = await sb().from('trial_sessions').update(fields).eq('id',id);
+    if (error) throw error;
+  },
+  // ─── ЗАПРОСЫ НА УДАЛЕНИЕ ПРОБНОЙ (паритет с workout_delete_requests) ──
+  async requestTrialDelete(trialId, trainerId, clientName, sessionDate, branch) {
+    const {data:existing} = await sb().from('trial_delete_requests')
+      .select('id').eq('trial_id',trialId).eq('status','pending').limit(1);
+    if (existing?.length) throw new Error('already_pending');
+    const {error} = await sb().from('trial_delete_requests')
+      .insert({trial_id:trialId, trainer_id:trainerId, client_name:clientName,
+               session_date:sessionDate, branch, status:'pending'});
+    if (error) throw error;
+  },
+  async getAllTrialDeleteRequests() {
+    const {data,error} = await sb().from('trial_delete_requests')
+      .select('*, profiles!trainer_id(fio)')
+      .eq('status','pending')
+      .order('created_at',{ascending:false});
+    if (error) throw error; return data||[];
+  },
+  async approveTrialDeleteRequest(reqId, trialId) {
+    // Закрываем все pending-запросы на эту пробную ДО удаления (иначе CASCADE сотрёт их)
+    await sb().from('trial_delete_requests').update({status:'approved'}).eq('trial_id',trialId).eq('status','pending');
+    await this.deleteTrialSession(trialId);
+  },
+  async rejectTrialDeleteRequest(reqId) {
+    const {error} = await sb().from('trial_delete_requests').update({status:'rejected'}).eq('id',reqId);
+    if (error) throw error;
+  },
 
   // ─── ЗАПРОСЫ НА ПОЗДНИЕ ТРЕНИРОВКИ ──────────
   async addLateRequest(trainerId, clientId, branch, workoutDate, category, reason) {

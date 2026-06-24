@@ -51,6 +51,7 @@ async function loadTrainerReport(year,month) {
     const salP=calcSalary({workouts:wPending,trialSessions:tPending,trainerId:STATE.profile.id});
     const pendingPtSum = salP.ptSum + salP.dropInSum + salP.trialSum + salP.ptSubSum;
     const pendingCnt = wPending.length + tPending.length;
+    window._reportTrials = trialSessions; // для модалки правки пробной
     // ⚠️ unpaidGroups (дети ходят, но не платят), pending (замены), transfers (передачи)
     // и lateRequests загружены выше в общем Promise.all
     body.innerHTML=`
@@ -223,6 +224,16 @@ async function loadTrainerReport(year,month) {
             ${t.reception_status==='rejected'?'<span style="font-size:11px;background:rgba(239,68,68,.15);color:#ef4444;padding:2px 8px;border-radius:8px">✗ не оплачено</span>':''}
           </div>
           <div class="hi-sub">${fmtDT(t.session_date)} · ${t.branch}${t.phone?' · '+t.phone:''}${t.age?' · '+t.age+' лет':''}</div>
+          <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
+            ${STATE.profile.role==='admin'
+              ? `<button class="btn btn-sm btn-danger" onclick="doDeleteTrial(${t.id})">Удалить</button>`
+              : (canEdit(t.created_at)
+                  ? `<button class="btn btn-sm btn-danger" onclick="doDeleteTrial(${t.id})">Удалить</button>`
+                  : `<button class="btn btn-sm" style="background:rgba(239,68,68,.1);color:#ef4444;border:1px solid rgba(239,68,68,.25)"
+                       onclick="doRequestTrialDelete(${t.id},'${encodeURIComponent(t.first_name+(t.last_name?' '+t.last_name:''))}','${t.session_date}','${t.branch||''}')">Запрос на удаление</button>`)}
+            ${isToday(t.session_date)?`<button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
+              onclick="renderEditTrialModal(${t.id})">✏️</button>`:''}
+          </div>
         </div>`).join('')}`:''}
       ${groupSessions.length?`
         <h4 style="margin-top:16px">Групповые занятия</h4>
@@ -308,6 +319,81 @@ async function doRequestWorkoutDelete(workoutId, workoutDate, clientNameEnc, bra
     else { console.error(e); toast('Ошибка','error'); }
   }
   finally { _pending.delete('wdr_'+workoutId); }
+}
+
+// ─── ПРОБНЫЕ: удаление / запрос на удаление / правка (паритет с ПТ) ──
+async function doDeleteTrial(trialId) {
+  if (!confirm('Удалить пробную тренировку?')) return;
+  try {
+    await DB.deleteTrialSession(trialId);
+    DB.auditLog('trial_delete', STATE.profile.id, STATE.profile.fio, String(trialId), 'trial', {}, STATE.profile.branches?.[0]);
+    toast('Удалено','success'); renderReportTab();
+  } catch(e){ console.error(e); toast('Ошибка','error'); }
+}
+async function doRequestTrialDelete(trialId, nameEnc, sessionDate, branch) {
+  const name = decodeURIComponent(nameEnc);
+  if (!confirm(`Запросить удаление пробной?\n${name} · ${fmtDate(sessionDate)}\n\nЗапрос уйдёт координатору на подтверждение.`)) return;
+  if (_pending.has('tdr_'+trialId)) return;
+  _pending.add('tdr_'+trialId);
+  try {
+    await DB.requestTrialDelete(trialId, STATE.profile.id, name, sessionDate, branch);
+    DB.auditLog('trial_delete_request', STATE.profile.id, STATE.profile.fio, String(trialId), 'trial',
+      { name, date: sessionDate?.slice(0,10) }, branch);
+    toast('Запрос отправлен координатору','success');
+  } catch(e) {
+    if (e.message==='already_pending') toast('Запрос уже отправлен ранее','info');
+    else { console.error(e); toast('Ошибка','error'); }
+  }
+  finally { _pending.delete('tdr_'+trialId); }
+}
+function renderEditTrialModal(trialId) {
+  const t = (window._reportTrials||[]).find(x=>String(x.id)===String(trialId));
+  if (!t) return toast('Пробная не найдена','error');
+  const dateLocal = new Date(t.session_date).toISOString().slice(0,16);
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>✏️ Редактировать пробную</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="form-group" style="display:flex;gap:10px">
+      <div style="flex:1"><label>Имя</label><input id="et-fname" value="${t.first_name||''}"></div>
+      <div style="flex:1"><label>Фамилия</label><input id="et-lname" value="${t.last_name||''}"></div>
+    </div>
+    <div class="form-group"><label>Категория</label>
+      <select id="et-cat">
+        ${[1,2,3].map(n=>`<option value="${n}" ${n==t.category?'selected':''}>Кат.${n} — ${fmt(RATES.pt[n])} сум</option>`).join('')}
+      </select></div>
+    <div class="form-group" style="display:flex;gap:10px">
+      <div style="flex:1"><label>Возраст</label><input id="et-age" type="number" min="1" max="99" value="${t.age||''}"></div>
+      <div style="flex:1"><label>Телефон</label><input id="et-phone" value="${t.phone||''}"></div>
+    </div>
+    <div class="form-group"><label>Дата и время</label>
+      <input type="datetime-local" id="et-date" value="${dateLocal}"></div>
+    <p class="hint" style="margin-bottom:12px">Редактировать можно только пробные текущего дня</p>
+    <button class="btn btn-primary btn-full" onclick="doEditTrial(${trialId})">Сохранить</button>
+  </div>`;
+  document.body.appendChild(m);
+}
+async function doEditTrial(trialId) {
+  const fname = document.getElementById('et-fname')?.value.trim();
+  const lname = document.getElementById('et-lname')?.value.trim()||null;
+  const cat   = parseInt(document.getElementById('et-cat')?.value||1);
+  const age   = parseInt(document.getElementById('et-age')?.value)||null;
+  const phone = document.getElementById('et-phone')?.value.trim()||null;
+  const date  = document.getElementById('et-date')?.value;
+  if (!fname) return toast('Укажите имя','error');
+  if (!date || !isToday(date)) return toast('Можно редактировать только пробные сегодняшнего дня','error');
+  if (_pending.has('editTrial_'+trialId)) return;
+  _pending.add('editTrial_'+trialId);
+  try {
+    await DB.updateTrialSession(trialId, {
+      first_name:fname, last_name:lname, category:cat, age, phone,
+      session_date:new Date(date).toISOString(),
+    });
+    document.querySelector('.modal-overlay')?.remove();
+    toast('✅ Пробная обновлена','success');
+    renderReportTab();
+  } catch(e){ console.error(e); toast('Ошибка','error'); }
+  finally { _pending.delete('editTrial_'+trialId); }
 }
 
 async function renderEditWorkoutModal(workoutId, clientId, workoutDate, category) {

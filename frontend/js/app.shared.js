@@ -61,6 +61,27 @@ async function doRejectWorkoutDelete(reqId) {
   } catch(e) { console.error(e); toast('Ошибка','error'); }
   finally { _pending.delete('wdr2_'+reqId); }
 }
+async function doApproveTrialDelete(reqId, trialId) {
+  if (_pending.has('tda_'+reqId)) return;
+  if (!confirm('Удалить пробную окончательно?')) return;
+  _pending.add('tda_'+reqId);
+  try {
+    await DB.approveTrialDeleteRequest(reqId, trialId);
+    toast('Пробная удалена','success');
+    invalidateCachePrefix('adm_control'); adminTab('control');
+  } catch(e) { console.error(e); toast('Ошибка','error'); }
+  finally { _pending.delete('tda_'+reqId); }
+}
+async function doRejectTrialDelete(reqId) {
+  if (_pending.has('tdr2_'+reqId)) return;
+  _pending.add('tdr2_'+reqId);
+  try {
+    await DB.rejectTrialDeleteRequest(reqId);
+    toast('Запрос отклонён','success');
+    invalidateCachePrefix('adm_control'); adminTab('control');
+  } catch(e) { console.error(e); toast('Ошибка','error'); }
+  finally { _pending.delete('tdr2_'+reqId); }
+}
 
 async function doApproveDelete(reqId, clientId, nameEnc) {
   if (_pending.has('approve_'+reqId)) return;

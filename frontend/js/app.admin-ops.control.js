@@ -17,7 +17,7 @@ async function renderAdminControl(force=false) {
     if (force) invalidateCache(cacheKey);
     const D = await cached(cacheKey, async () => {
       const monthFrom=`${y}-${_p2(mo)}-01`, monthTo=`${y}-${_p2(mo)}-${_p2(now.getDate())}`;
-      const [lateRequests, workoutDelReqs, deleteReqs, recHanging, recRejected, pendingSubs, catRecalcReqs] = await Promise.all([
+      const [lateRequests, workoutDelReqs, deleteReqs, recHanging, recRejected, pendingSubs, catRecalcReqs, trialDelReqs] = await Promise.all([
         DB.getPendingLateRequests(null).catch(()=>[]),
         DB.getAllWorkoutDeleteRequests().catch(()=>[]),
         DB.getAllDeleteRequests().catch(()=>[]),
@@ -25,10 +25,11 @@ async function renderAdminControl(force=false) {
         DB.getReceptionRejected(branches, monthFrom, monthTo).catch(()=>({workouts:[],trials:[]})),
         DB.getPendingSubstitutions().catch(()=>[]),   // замены — все филиалы
         DB.getPendingCategoryRecalcRequests(null).catch(()=>[]),
+        DB.getAllTrialDeleteRequests().catch(()=>[]),
       ]);
-      return {lateRequests, workoutDelReqs, deleteReqs, recHanging, recRejected, pendingSubs, catRecalcReqs};
+      return {lateRequests, workoutDelReqs, deleteReqs, recHanging, recRejected, pendingSubs, catRecalcReqs, trialDelReqs};
     }, 60000);
-    const {lateRequests, workoutDelReqs, deleteReqs, recHanging, recRejected, pendingSubs, catRecalcReqs} = D;
+    const {lateRequests, workoutDelReqs, deleteReqs, recHanging, recRejected, pendingSubs, catRecalcReqs, trialDelReqs} = D;
     const sections=[];
     // 🔄 Запросы на замену (подтверждает координатор или старший — кто первый)
     if (pendingSubs.length) sections.push(`<div class="control-section">
@@ -106,6 +107,19 @@ async function renderAdminControl(force=false) {
           <button class="btn btn-sm btn-danger" onclick="doApproveWorkoutDelete('${r.id}','${r.workout_id}')">Удалить</button>
           <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
             onclick="doRejectWorkoutDelete('${r.id}')">Отклонить</button>
+        </div>
+      </div>`).join('')}
+    </div>`);
+    // 🗑 Запросы на удаление пробной
+    if (trialDelReqs.length) sections.push(`<div class="control-section">
+      <div class="control-title danger">🗑 Запросы на удаление пробной (${trialDelReqs.length})</div>
+      ${trialDelReqs.map(r=>`<div class="control-item">
+        <div class="ci-main">${r.client_name||'—'} · ${fmtDate(r.session_date)}</div>
+        <div class="ci-sub">Тренер: ${r.profiles?.fio||'?'} · ${r.branch||''}</div>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <button class="btn btn-sm btn-danger" onclick="doApproveTrialDelete('${r.id}','${r.trial_id}')">Удалить</button>
+          <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
+            onclick="doRejectTrialDelete('${r.id}')">Отклонить</button>
         </div>
       </div>`).join('')}
     </div>`);
