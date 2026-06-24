@@ -56,6 +56,19 @@ Object.assign(DB, {
   },
 
   async addSlot(fields) {
+    // Защита от дублей: тот же тренер/день/время/тип/клиент(группа) уже есть активным — не плодим копию
+    let dupQ = sb().from('schedule_slots').select('id')
+      .eq('trainer_id', fields.trainer_id)
+      .eq('day_of_week', fields.day_of_week)
+      .eq('start_time', fields.start_time)
+      .eq('slot_type',  fields.slot_type)
+      .eq('active', true);
+    dupQ = fields.specific_date ? dupQ.eq('specific_date', fields.specific_date) : dupQ.is('specific_date', null);
+    if (fields.client_id)     dupQ = dupQ.eq('client_id', fields.client_id);
+    if (fields.group_type_id) dupQ = dupQ.eq('group_type_id', fields.group_type_id);
+    const {data:dup} = await dupQ.limit(1);
+    if (dup && dup.length) return dup[0]; // уже существует — возвращаем как есть
+
     const {data,error} = await sb().from('schedule_slots')
       .insert(fields).select('*, clients(fio,category), group_types(name,type)').single();
     if (error) throw error; return data;

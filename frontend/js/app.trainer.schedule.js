@@ -61,7 +61,8 @@ async function loadScheduleWeek(offset) {
       const dateForDow = new Date(mon); dateForDow.setDate(mon.getDate()+s.day_of_week);
       const dateStr = dateForDow.toISOString().slice(0,10);
       if (cancelledSet.has(`${s.id}__${dateStr}`)) return; // отменён
-      if (s.slot_type==='pt' && (s.clients?.balance||0)<=0) return; // нулевой остаток ПТ
+      // Остаток ПТ исчерпан → НЕ скрываем, а помечаем приглушённо (тренер должен видеть слот)
+      const lowBal = s.slot_type==='pt' && (s.clients?.balance||0)<=0;
       const startH = parseInt(s.start_time.slice(0,2));
       const endH   = parseInt(s.end_time.slice(0,2));
       if (s.slot_type==='duty') {
@@ -72,18 +73,18 @@ async function loadScheduleWeek(offset) {
         }
       } else {
         const hKey=`${String(startH).padStart(2,'0')}:00`;
-        if (grid[s.day_of_week]?.[hKey]) grid[s.day_of_week][hKey].push({...s,_date:dateStr});
+        if (grid[s.day_of_week]?.[hKey]) grid[s.day_of_week][hKey].push({...s,_date:dateStr,_lowBalance:lowBal});
       }
     });
 
     // Разовые слоты
     oneTime.forEach(s=>{
-      if (s.slot_type==='pt' && (s.clients?.balance||0)<=0) return; // нулевой остаток ПТ
+      const lowBal = s.slot_type==='pt' && (s.clients?.balance||0)<=0;
       const date = new Date(s.specific_date+'T12:00:00');
       const dow  = (date.getDay()+6)%7;
       const startH = parseInt(s.start_time.slice(0,2));
       const hKey=`${String(startH).padStart(2,'0')}:00`;
-      if (grid[dow]?.[hKey]) grid[dow][hKey].push({...s,_date:s.specific_date,_oneTime:true});
+      if (grid[dow]?.[hKey]) grid[dow][hKey].push({...s,_date:s.specific_date,_oneTime:true,_lowBalance:lowBal});
     });
 
     // События
@@ -180,9 +181,14 @@ function renderSlotPill(s) {
   const label = s.slot_type==='pt'
     ? (s.clients?.fio?.split(' ')[0]||'ПТ')
     : (s.group_types?.name?.slice(0,6)||'Гр');
-  return `<div class="slot-pill" style="background:${c.bg};color:${c.color};${oneBorder}"
+  // Остаток ПТ исчерпан — слот виден, но приглушён + показываем остаток (напр. «(0)», «(-1)»)
+  const lowBal   = !!s._lowBalance;
+  const lowStyle = lowBal ? 'opacity:.45;' : '';
+  const lowMark  = lowBal ? ` (${s.clients?.balance ?? 0})` : '';
+  const lowTitle = lowBal ? ' title="Остаток ПТ исчерпан — продлите абонемент"' : '';
+  return `<div class="slot-pill" style="background:${c.bg};color:${c.color};${oneBorder}${lowStyle}"${lowTitle}
     onclick="showSlotMenu('${s.id}','${s.slot_type}','${s._date||''}',${!!s._oneTime})">
-    ${oneTimeMark}${label}</div>`;
+    ${oneTimeMark}${label}${lowMark}</div>`;
 }
 
 function showSlotMenu(slotId, type, date, isOneTime) {
