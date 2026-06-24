@@ -69,7 +69,7 @@ async function renderAdminMore() {
       <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);text-align:left;padding:14px 16px;border-radius:12px"
         onclick="adminTab('events')">🏆 События</button>
       <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);text-align:left;padding:14px 16px;border-radius:12px"
-        onclick="adminTab('tech')">⚙️ Операционка</button>
+        onclick="adminTab('tech')">⚙️ Техчасть</button>
       <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);text-align:left;padding:14px 16px;border-radius:12px"
         onclick="renderCoordinatorSchedule()">📅 Расписание</button>
       <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);text-align:left;padding:14px 16px;border-radius:12px"

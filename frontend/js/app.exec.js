@@ -22,17 +22,19 @@ async function renderCeoApp() {
       <button class="nav-btn" onclick="ceoTab('finance')"><span>💰</span>Финансы</button>
       <button class="nav-btn" onclick="ceoTab('stats')"><span>📊</span>Аналитика</button>
       <button class="nav-btn" onclick="ceoTab('trainers')"><span>🏋️</span>Тренеры</button>
+      <button class="nav-btn" onclick="ceoTab('tech')"><span>⚙️</span>Техчасть</button>
     </nav>`);
   ceoTab('finance');
   setTimeout(checkInAppNotifications, 2000);
 }
 
 function ceoTab(tab) {
-  const tabs = ['finance','stats','trainers'];
+  const tabs = ['finance','stats','trainers','tech'];
   $$('.nav-btn').forEach((b,i)=>b.classList.toggle('active',tabs[i]===tab));
   if (tab==='finance')  renderCeoFinance();
   if (tab==='stats')    renderCeoStats();
   if (tab==='trainers') renderCeoTrainers();
+  if (tab==='tech')     renderCeoTech();
 }
 
 // ЗП всех тренеров за месяц из данных getSummary → [{p, sal}]
@@ -911,102 +913,7 @@ async function renderManagerGroupCard(groupId, monthStr) {
 }
 
 // ── ТЕХЧАСТЬ (read-only) ──────────────────────
-let _mgrTechSection = 'equipment';
-async function renderManagerTech() {
-  const branch = _mgrBranch();
-  $('#tab-content').innerHTML = `<div class="tab-pad">
-    <div class="section-header"><h3>⚙️ Техчасть</h3><span class="hint">${branch||'—'}</span></div>
-    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px">
-      ${TECH_SECTIONS.map(s=>`<button class="btn btn-sm ${s===_mgrTechSection?'btn-primary':''}"
-        onclick="_mgrTechSection='${s}';renderManagerTech()">${TECH_ICONS[s]} ${TECH_LABELS[s]}</button>`).join('')}
-    </div>
-    <div id="mtech-body"><div class="center-screen"><div class="spinner"></div></div></div>
-  </div>`;
-  const body = document.getElementById('mtech-body');
-  try {
-    if (_mgrTechSection==='equipment') await _mgrTechEquipment(body, branch);
-    if (_mgrTechSection==='issues')    await _mgrTechIssues(body, branch);
-    if (_mgrTechSection==='shopping')  await _mgrTechShopping(body, branch);
-    if (_mgrTechSection==='bills')     await _mgrTechBills(body, branch);
-    if (_mgrTechSection==='chlorine')  await _mgrTechChlorine(body, branch);
-    if (_mgrTechSection==='plans')     await _mgrTechPlans(body, branch);
-  } catch(e){ console.error(e); body.innerHTML='<p class="hint">⚠️ Ошибка загрузки</p>'; }
-}
-async function _mgrTechEquipment(body, branch) {
-  const items = await DB.getTechEquipment(branch);
-  const bycat = {}; EQUIP_CATS.forEach(c=>bycat[c]=[]);
-  items.forEach(i=>{ (bycat[i.category]||bycat['Прочее']).push(i); });
-  body.innerHTML = !items.length ? '<p class="hint">Нет оборудования</p>' :
-    EQUIP_CATS.map(cat=>!bycat[cat]?.length?'':`<div style="margin-bottom:12px">
-      <div style="font-weight:600;font-size:12px;color:var(--hint);margin-bottom:6px">${cat}</div>
-      ${bycat[cat].map(eq=>`<div class="staff-card" style="flex-direction:column;gap:4px">
-        <div class="staff-fio">${eq.name}</div>
-        <div class="staff-meta">${EQUIP_STATUS[eq.status]||eq.status}${eq.next_service?` · ТО: ${eq.next_service}`:''}</div>
-        ${eq.notes?`<div style="font-size:11px;color:var(--hint)">${eq.notes}</div>`:''}
-      </div>`).join('')}</div>`).join('');
-}
-async function _mgrTechIssues(body, branch) {
-  const issues = await DB.getTechIssues(branch);
-  body.innerHTML = !issues.length ? '<p class="hint">Поломок нет 🎉</p>' :
-    issues.map(iss=>`<div class="staff-card" style="flex-direction:column;gap:4px">
-      <div class="staff-fio">${iss.description}</div>
-      <div class="staff-meta">${PRIORITY_LBL[iss.priority]||iss.priority} · ${ISSUE_STATUS[iss.status]||iss.status}${iss.tech_equipment?.name?' · '+iss.tech_equipment.name:''}</div>
-    </div>`).join('');
-}
-async function _mgrTechShopping(body, branch) {
-  const items = await DB.getTechShopping(branch);
-  const STATUS = {pending:'⏳ Ожидает', ordered:'📦 Заказано', received:'✅ Получено'};
-  body.innerHTML = !items.length ? '<p class="hint">Список пуст</p>' :
-    items.map(it=>`<div class="staff-card" style="flex-direction:column;gap:4px">
-      <div class="staff-fio">${it.name}</div>
-      <div class="staff-meta">${PRIORITY_LBL[it.priority]||it.priority} · ${STATUS[it.status]||it.status}${it.quantity?' · '+it.quantity:''}${it.price?` · ${fmt(it.price)} сум`:''}</div>
-    </div>`).join('');
-}
-async function _mgrTechBills(body, branch) {
-  const bills = await DB.getTechBills(branch);
-  const unpaid = bills.filter(b=>!b.paid).reduce((s,b)=>s+b.amount,0);
-  body.innerHTML = `${unpaid>0?`<div class="warn-banner" style="margin-bottom:12px">💳 Неоплачено: ${fmt(Math.round(unpaid))} сум</div>`:''}
-    ${!bills.length?'<p class="hint">Счетов нет</p>':bills.map(b=>`<div class="staff-card" style="flex-direction:column;gap:4px">
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <div><div class="staff-fio">${b.category}${b.description?' — '+b.description:''}</div>
-          <div class="staff-meta">${fmt(b.amount)} сум · ${b.bill_date}</div></div>
-        <span style="font-size:11px;padding:3px 8px;border-radius:12px;background:${b.paid?'rgba(16,185,129,.15)':'rgba(239,68,68,.15)'};color:${b.paid?'#10b981':'#ef4444'}">${b.paid?'Оплачен':'Не оплачен'}</span>
-      </div></div>`).join('')}`;
-}
-async function _mgrTechChlorine(body, branch) {
-  let q = sb().from('chlorine_orders').select('*').order('order_date',{ascending:false});
-  if (branch) q = q.eq('branch', branch);
-  const { data: orders } = await q;
-  const totalKg  = (orders||[]).reduce((s,o)=>s+Number(o.quantity_kg),0);
-  const totalSum = (orders||[]).reduce((s,o)=>s+Number(o.price_total),0);
-  body.innerHTML = `<div class="summary-cards" style="margin-bottom:16px">
-      <div class="summary-card"><div class="s-val">${totalKg.toFixed(1)}</div><div class="s-lbl">кг всего</div></div>
-      <div class="summary-card"><div class="s-val" style="font-size:14px">${fmt(Math.round(totalSum))}</div><div class="s-lbl">потрачено</div></div>
-    </div>
-    ${!(orders||[]).length?'<p class="hint">Закупов нет</p>':(orders||[]).map(o=>`<div class="staff-card" style="flex-direction:column;gap:4px">
-      <div class="staff-fio">${o.quantity_kg} кг · ${fmt(o.price_total)} сум</div>
-      <div class="staff-meta">${fmtDate(o.order_date)}${o.supplier?' · '+o.supplier:''}${o.note?' · '+o.note:''}</div>
-    </div>`).join('')}`;
-}
-async function _mgrTechPlans(body, branch) {
-  let pq = sb().from('ops_plans').select('*, profiles!created_by(fio)').neq('status','cancelled').order('due_date',{ascending:true,nullsFirst:false});
-  if (branch) pq = pq.or(`branch.is.null,branch.eq.${branch}`);
-  const { data: plans } = await pq;
-  body.innerHTML = !(plans||[]).length ? '<p class="hint">Нет планов</p>' :
-    Object.keys(PLAN_TYPES).map(type=>{
-      const items = (plans||[]).filter(p=>p.plan_type===type);
-      if (!items.length) return '';
-      const pt = PLAN_TYPES[type];
-      return `<div style="margin-bottom:16px">
-        <div style="font-weight:700;font-size:13px;margin-bottom:8px">${pt.icon} ${pt.label}</div>
-        ${items.map(p=>`<div class="staff-card" style="flex-direction:column;gap:4px;border-left:3px solid ${pt.textColor}">
-          <div class="staff-fio">${p.title}</div>
-          ${p.description?`<div class="staff-meta">${p.description}</div>`:''}
-          <div class="staff-meta">${p.due_date?'до '+fmtDate(p.due_date):''}${p.profiles?.fio?' · '+p.profiles.fio:''}${p.status==='done'?' · ✅ выполнено':''}</div>
-        </div>`).join('')}
-      </div>`;
-    }).join('');
-}
+// renderManagerTech вынесен в app.admin-ops.tech.js (общие рендеры с координатором/CEO).
 
 // ── ЗП (read-only, поимённо) ──────────────────
 async function renderManagerSalary(year, month) {

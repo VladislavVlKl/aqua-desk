@@ -31,7 +31,7 @@
 //   ADMIN:STAFF         — renderAdminStaff, добавление/редактирование тренеров
 //   ADMIN:BRANCHES      — renderAdminBranches
 //   ADMIN:GROUPS        — renderAdminGroups, renderGroupsStructure, renderGroupMonthReport
-//   ADMIN:TECH          — renderAdminTech, оборудование, счета, закупки, хлор, планы
+//   ADMIN:TECH          — renderAdminTech/Ceo/Manager: счета, техничка (поломки), хлор
 //   CEO                 — renderCeoApp, renderCeoDashboard, renderCeoAnalytics, renderCeoSalary
 //   SHARED:DELETE       — doDeleteClientCheck, doApproveDelete, doApproveWorkoutDelete
 //   SHARED:PROFILE      — renderTrainerEditProfile

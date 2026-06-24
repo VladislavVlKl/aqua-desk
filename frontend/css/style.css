@@ -169,6 +169,35 @@ select option{background:#1a1a2e;}
 .paid-badge{font-size:11px;padding:2px 8px;border-radius:20px;font-weight:700;
   background:rgba(16,185,129,.15);color:var(--success);}
 
+/* ── ТЕХЧАСТЬ ── */
+.tech-tabs{display:flex;gap:8px;margin-bottom:16px;}
+.tech-tab{flex:1;background:var(--card);border:1px solid var(--border);border-radius:var(--rs);
+  color:var(--hint);padding:10px 6px;font-size:13px;font-weight:600;cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;gap:3px;transition:.15s;}
+.tech-tab .ic{font-size:18px;}
+.tech-tab.active{border-color:var(--accent);background:rgba(124,58,237,.15);color:var(--text);}
+.tech-card{background:var(--card);border:1px solid var(--border);border-radius:var(--rs);
+  padding:13px 14px;margin-bottom:10px;}
+.tech-card.unpaid{border-left:3px solid var(--danger);}
+.tech-card.paid{opacity:.55;}
+.tc-row{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;}
+.tc-title{font-size:14px;font-weight:600;line-height:1.3;}
+.tc-meta{font-size:12px;color:var(--hint);margin-top:3px;}
+.tc-amount{font-size:16px;font-weight:700;white-space:nowrap;}
+.tc-amount.unpaid{color:var(--danger);}
+.tc-amount.paid{color:var(--hint);}
+.tc-actions{display:flex;gap:8px;align-items:center;margin-top:10px;}
+.tc-actions .grow{flex:1;}
+.tc-prio{font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;white-space:nowrap;}
+.tc-prio.urgent{background:rgba(239,68,68,.15);color:var(--danger);}
+.tc-prio.normal{background:rgba(245,158,11,.15);color:var(--warn);}
+.tc-prio.low{background:var(--border);color:var(--hint);}
+.tc-age{font-size:12px;color:var(--hint);}
+.tc-age.old{color:var(--warn);font-weight:600;}
+.tc-age.stale{color:var(--danger);font-weight:600;}
+.tech-empty{text-align:center;color:var(--hint);font-size:14px;padding:28px 12px;}
+.tech-empty .ic{font-size:30px;display:block;margin-bottom:6px;}
+
 /* ── DEBT TOGGLE ── */
 .debt-toggle{margin-bottom:16px;}
 .toggle-row{display:flex;align-items:center;gap:10px;cursor:pointer;font-size:14px;}
