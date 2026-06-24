@@ -72,7 +72,7 @@ const NOTE_DEADLINE_HOURS    = 48;
 // но очередь пуста, у тренеров нет «ожидающего баланса»).
 // Пилот на один филиал: ['Chekhov Sport'] — других филиалов НЕ затрагивает.
 // Точные названия — как в таблице branches (БД).
-const RECEPTION_ENABLED_BRANCHES = [];
+const RECEPTION_ENABLED_BRANCHES = ['Chekhov Sport'];
 function receptionEnabledForBranch(branch) {
   return Array.isArray(RECEPTION_ENABLED_BRANCHES) && RECEPTION_ENABLED_BRANCHES.includes(branch);
 }
