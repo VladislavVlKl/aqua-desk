@@ -35,8 +35,8 @@ Object.assign(DB, {
       trainer_id:           toBTrainerId,
       substitute_for:       substituteForId,
       pending_confirmation: true,   // ждёт подтверждения тренера Б
-      // в очередь ресепшена попадёт после тренера Б — только если фича включена
-      ...(RECEPTION_SUBMIT_ENABLED ? {reception_status:'pending'} : {}),
+      // в очередь ресепшена попадёт после тренера Б — только если филиал включён
+      ...(receptionEnabledForBranch(r.branch) ? {reception_status:'pending'} : {}),
     }));
     const {data,error} = await sb().from('workouts').insert(subRows).select('*, clients(fio), a:profiles!substitute_for(fio)');
     if (error) throw error;
@@ -159,6 +159,37 @@ Object.assign(DB, {
     const tq = sb().from('trial_sessions').select('id',{count:'exact',head:true})
       .eq('branch',branch).eq('reception_status','pending')
       .gte('session_date',from).lte('session_date',to);
+    const [w, t] = await Promise.all([wq, tq]);
+    return (w.count||0) + (t.count||0);
+  },
+
+  /** Висящие pending за ПРОШЛЫЕ дни (до сегодня): ПТ + пробные */
+  async getReceptionOlderPending(branch, todayStr) {
+    const before = `${todayStr}T00:00:00+05:00`;
+    const wq = sb().from('workouts')
+      .select('*, clients(fio,age), profiles!trainer_id(fio)')
+      .eq('branch', branch).eq('reception_status','pending').eq('pending_confirmation', false)
+      .lt('workout_date', before)
+      .order('workout_date',{ascending:true});
+    const tq = sb().from('trial_sessions')
+      .select('*, profiles!trainer_id(fio)')
+      .eq('branch', branch).eq('reception_status','pending')
+      .lt('session_date', before)
+      .order('session_date',{ascending:true});
+    const [w, t] = await Promise.all([wq, tq]);
+    if (w.error) throw w.error; if (t.error) throw t.error;
+    return { workouts: w.data||[], trials: t.data||[] };
+  },
+
+  /** Кол-во висящих за прошлые дни (для бейджа/баннера) */
+  async getReceptionOlderPendingCount(branch, todayStr) {
+    const before = `${todayStr}T00:00:00+05:00`;
+    const wq = sb().from('workouts').select('id',{count:'exact',head:true})
+      .eq('branch',branch).eq('reception_status','pending').eq('pending_confirmation',false)
+      .lt('workout_date',before);
+    const tq = sb().from('trial_sessions').select('id',{count:'exact',head:true})
+      .eq('branch',branch).eq('reception_status','pending')
+      .lt('session_date',before);
     const [w, t] = await Promise.all([wq, tq]);
     return (w.count||0) + (t.count||0);
   },

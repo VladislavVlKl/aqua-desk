@@ -68,10 +68,10 @@ Object.assign(DB, {
 
   // ─── WORKOUTS ────────────────────────────────
   async logWorkouts(rows) {
-    // Все новые списания тренера уходят на подтверждение ресепшену (Шаг 1 → 1С),
-    // но только если фича включена (RECEPTION_SUBMIT_ENABLED). Иначе остаются
+    // Новые списания уходят на подтверждение ресепшену (Шаг 1 → 1С) только для
+    // филиалов из RECEPTION_ENABLED_BRANCHES (пофилиальный запуск). Иначе остаются
     // confirmed по DB DEFAULT — у тренеров нет «ожидающего баланса».
-    const rows2 = RECEPTION_SUBMIT_ENABLED ? rows.map(r => ({reception_status:'pending', ...r})) : rows;
+    const rows2 = rows.map(r => (receptionEnabledForBranch(r.branch) ? {reception_status:'pending', ...r} : r));
     const {data,error} = await sb().from('workouts').insert(rows2).select();
     if (error) throw error;
     const nonDebtNonDropin = rows.filter(r=>!r.is_debt&&!r.is_drop_in);
@@ -125,7 +125,7 @@ Object.assign(DB, {
       .insert({trainer_id:trainerId, branch, first_name:firstName.trim(),
                last_name:lastName?.trim()||null, phone:phone?.trim()||null,
                age:age||null, category, session_date:new Date().toISOString(),
-               ...(RECEPTION_SUBMIT_ENABLED ? {reception_status:'pending'} : {})})
+               ...(receptionEnabledForBranch(branch) ? {reception_status:'pending'} : {})})
       .select().single();
     if (error) throw error; return data;
   },
@@ -189,8 +189,8 @@ Object.assign(DB, {
       category_at_moment: req.category,
       is_debt: false, is_drop_in: false,
       pending_confirmation: false,
-      // позднее списание тоже подтверждает ресепшн — если фича включена
-      ...(RECEPTION_SUBMIT_ENABLED ? {reception_status:'pending'} : {}),
+      // позднее списание тоже подтверждает ресепшн — если филиал включён
+      ...(receptionEnabledForBranch(req.branch) ? {reception_status:'pending'} : {}),
     });
     if (we) throw we;
     // Списываем баланс клиента — ошибка пробрасывается наверх

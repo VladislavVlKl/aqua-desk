@@ -67,11 +67,15 @@ const EDIT_WINDOW_MIN        = 30;
 const MAX_BACKDATE_HOURS     = 72;
 const SUBSCRIPTION_WARN_DAYS = 7;
 const NOTE_DEADLINE_HOURS    = 48;
-// Флаг включения отправки списаний на подтверждение ресепшену.
-// false — панель ресепшена в проде есть, но новые ПТ НЕ уходят в pending (остаются
-// confirmed), у тренеров не появляется «ожидающий баланс». Переключить в true +
-// задеплоить — фича активируется, ПТ начинают уходить на ресепшн. Единственный гейт.
-const RECEPTION_SUBMIT_ENABLED = false;
+// ПОФИЛИАЛЬНЫЙ запуск ресепшена. Список филиалов, где новые списания уходят на
+// подтверждение (reception_status='pending'). [] = выключено везде (панель есть,
+// но очередь пуста, у тренеров нет «ожидающего баланса»).
+// Пилот на один филиал: ['Chekhov Sport'] — других филиалов НЕ затрагивает.
+// Точные названия — как в таблице branches (БД).
+const RECEPTION_ENABLED_BRANCHES = [];
+function receptionEnabledForBranch(branch) {
+  return Array.isArray(RECEPTION_ENABLED_BRANCHES) && RECEPTION_ENABLED_BRANCHES.includes(branch);
+}
 const RECEPTION_EOD_HOUR     = 21;  // час «конца дня»: напоминание ресепшену о висящих pending
 const RECEPTION_ESCALATE_HRS = 24;  // pending старше → эскалация в «Контроле» координатора
 

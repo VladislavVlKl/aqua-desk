@@ -435,9 +435,14 @@ function receptionTab(tab) {
 
 async function checkReceptionBadge() {
   try {
-    const n = await DB.getReceptionPendingCount(_recBranch(), _recToday());
+    const br=_recBranch(), today=_recToday();
+    const [n, older] = await Promise.all([
+      DB.getReceptionPendingCount(br, today),
+      DB.getReceptionOlderPendingCount(br, today),
+    ]);
+    const total = n + older;  // бейдж считает сегодня + висящие за прошлые дни
     const b = document.getElementById('rec-pending-badge');
-    if (b) { b.style.display = n>0?'inline-block':'none'; b.textContent = n>99?'99+':String(n); }
+    if (b) { b.style.display = total>0?'inline-block':'none'; b.textContent = total>99?'99+':String(total); }
   } catch(e) { /* тихо */ }
 }
 
@@ -458,13 +463,19 @@ async function renderReceptionPending() {
   if (!branch) { body.innerHTML = '<div class="tab-pad"><p class="hint">Филиал не задан в профиле ресепшена.</p></div>'; return; }
   const date = STATE._recDate || _recToday();
   try {
-    const { workouts, trials } = await DB.getReceptionPending(branch, date);
+    const [{ workouts, trials }, olderN] = await Promise.all([
+      DB.getReceptionPending(branch, date),
+      DB.getReceptionOlderPendingCount(branch, _recToday()),
+    ]);
     const items = [
       ...workouts.map(w=>({...w, _kind:'w', _ts:w.workout_date, _client:w.clients?.fio||'—', _trainer:w.profiles?.fio||'—', _cat:w.category_at_moment})),
       ...trials.map(t=>({...t, _kind:'t', _trial:true, _ts:t.session_date, _client:`${t.first_name}${t.last_name?' '+t.last_name:''}`, _trainer:t.profiles?.fio||'—', _cat:t.category})),
     ].sort((a,b)=>new Date(a._ts)-new Date(b._ts));
     const total = items.length;
     body.innerHTML = `<div class="tab-pad">
+      ${olderN>0?`<div class="warn-banner" style="background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.4);color:var(--text);cursor:pointer;margin-bottom:12px" onclick="renderReceptionOlder()">
+        ⚠️ <b>Висящие за прошлые дни: ${olderN}</b> — нажмите, чтобы разобрать
+      </div>`:''}
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
         <input type="date" id="rec-date" value="${date}" onchange="recSetDate(this.value)"
           style="flex:1;padding:10px;border-radius:10px;background:var(--card);border:1px solid var(--border);color:var(--text)">
@@ -479,6 +490,35 @@ async function renderReceptionPending() {
     </div>`;
     checkReceptionBadge();
   } catch(e) { body.innerHTML='<div class="tab-pad"><p class="hint">Ошибка загрузки</p></div>'; console.error(e); }
+}
+
+// Экран «Висящие за прошлые дни» — pending до сегодня, сгруппированы по дате
+async function renderReceptionOlder() {
+  const body = $('#tab-content');
+  body.innerHTML = `<div class="center-screen"><div class="spinner"></div></div>`;
+  const branch = _recBranch();
+  try {
+    const { workouts, trials } = await DB.getReceptionOlderPending(branch, _recToday());
+    const items = [
+      ...workouts.map(w=>({...w, _kind:'w', _ts:w.workout_date, _client:w.clients?.fio||'—', _trainer:w.profiles?.fio||'—', _cat:w.category_at_moment})),
+      ...trials.map(t=>({...t, _kind:'t', _trial:true, _ts:t.session_date, _client:`${t.first_name}${t.last_name?' '+t.last_name:''}`, _trainer:t.profiles?.fio||'—', _cat:t.category})),
+    ].sort((a,b)=>new Date(a._ts)-new Date(b._ts));
+    const byDate = {};
+    items.forEach(it=>{ const d=fmtDate(it._ts); (byDate[d] ||= []).push(it); });
+    body.innerHTML = `<div class="tab-pad">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+        <button class="btn btn-sm" onclick="receptionTab('pending')" style="background:var(--card);border:1px solid var(--border)">← Назад</button>
+        <div style="font-weight:700;font-size:15px">Висящие за прошлые дни (${items.length})</div>
+      </div>
+      ${!items.length ? '<p class="hint">Нет висящих за прошлые дни ✓</p>'
+        : Object.entries(byDate).map(([d,arr])=>`
+          <div style="font-size:12px;color:var(--hint);font-weight:600;margin:10px 0 6px">${d}</div>
+          ${arr.map(recCard).join('')}`).join('')}
+    </div>`;
+    navPush(()=>receptionTab('pending'));
+    setupBack(()=>receptionTab('pending'));
+    checkReceptionBadge();
+  } catch(e) { body.innerHTML='<div class="tab-pad"><p class="hint">Ошибка</p></div>'; console.error(e); }
 }
 
 function recCard(it) {
