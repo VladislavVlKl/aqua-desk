@@ -198,7 +198,8 @@ leader_name + leader_fee_percent · group_instance_id uuid · days_of_week text[
 ### Операционка
 
 **tech_issues** — поломки: `branch, equipment_id, description, priority, status, resolved_at`
-**tech_bills** — счета: `branch, category, description, amount, bill_date, paid, paid_at`
+**tech_bills** — счета: `branch, category, description, amount, bill_date, paid, paid_at, is_general`
+  (`is_general=true` — «общие» счета без филиала, видны только владельцу `isDev`; исключены из выборок остальных ролей через `getTechBills(branch,{general})`)
 **tech_shopping** — закупки: `branch, name, quantity, price, priority, status`
 **tech_equipment** — инвентарь: `branch, name, category, status, last_service, next_service, notes`
 **chlorine_orders** — хлор: `branch, order_date, quantity_kg, price_total, supplier, note`

@@ -49,9 +49,16 @@ Object.assign(DB, {
     const {error} = await sb().from('tech_shopping').update(fields).eq('id',id);
     if (error) throw error;
   },
-  async getTechBills(branch) {
+  // general:true → только «общие» счета (is_general), branch игнорируется.
+  // general:false (по умолч.) → обычные счета филиалов, «общие» всегда исключены.
+  async getTechBills(branch, {general=false}={}) {
     let q = sb().from('tech_bills').select('*').order('bill_date',{ascending:false});
-    if (branch) q = q.eq('branch',branch);
+    if (general) {
+      q = q.eq('is_general', true);
+    } else {
+      q = q.eq('is_general', false);
+      if (branch) q = q.eq('branch', branch);
+    }
     const {data,error} = await q;
     if (error) throw error; return data||[];
   },

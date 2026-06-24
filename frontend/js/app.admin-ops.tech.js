@@ -32,10 +32,13 @@ function techAgeBadge(iso) {
 // Если филиал уже выбран сверху — фиксируем его; если «Все филиалы» — даём выбрать.
 async function techBranchField(id, selected) {
   const branches = (await cached('branches',()=>DB.getBranches())).map(b=>b.name);
+  const ownerOpt = isDev()
+    ? `<option value="__general__" ${selected==='__general__'?'selected':''}>🔒 Общие (только я)</option>` : '';
   return `<div class="form-group"><label>Филиал</label>
     <select id="${id}">
       ${selected?'':'<option value="">— выберите филиал —</option>'}
       ${branches.map(b=>`<option value="${b}" ${b===selected?'selected':''}>${b}</option>`).join('')}
+      ${ownerOpt}
     </select></div>`;
 }
 
@@ -71,6 +74,7 @@ async function renderAdminTech() {
       <select id="tech-branch" onchange="_techBranch=this.value;techLoadSection(_techBranch,true)">
         <option value="" ${_techBranch===''?'selected':''}>🏢 Все филиалы</option>
         ${branches.map(b=>`<option value="${b}" ${b===_techBranch?'selected':''}>📍 ${b}</option>`).join('')}
+        ${isDev()?`<option value="__general__" ${_techBranch==='__general__'?'selected':''}>🔒 Общие (только я)</option>`:''}
       </select></div>
     ${techTabBar('techSwitchAdmin')}
     <div id="tech-body"><div class="center-screen"><div class="spinner"></div></div></div>
@@ -112,7 +116,8 @@ function techSwitchMgr(s){ _techSection=s; renderManagerTech(); }
 // SECTION: ADMIN:TECH — Счета
 // ============================================================
 async function techRenderBills(body, branch, editable) {
-  const bills  = await DB.getTechBills(branch);
+  const general = branch === '__general__';
+  const bills  = await DB.getTechBills(general?'':branch, {general});
   const unpaid = bills.filter(b=>!b.paid);
   const unpaidSum = unpaid.reduce((s,b)=>s+Number(b.amount),0);
   const paidSum   = bills.filter(b=>b.paid).reduce((s,b)=>s+Number(b.amount),0);
@@ -166,19 +171,21 @@ async function renderAddBillModal(branch) {
   document.body.appendChild(m);
 }
 async function doAddBill() {
-  const branch = document.getElementById('bill-branch')?.value || '';
+  const sel    = document.getElementById('bill-branch')?.value || '';
+  const isGen  = sel === '__general__';
+  const branch = isGen ? '' : sel;
   const amount = parseFloat(document.getElementById('bill-amount')?.value)||0;
-  if (!branch) return toast('Выберите филиал','error');
+  if (!isGen && !branch) return toast('Выберите филиал','error');
   if (!amount) return toast('Введите сумму','error');
   await DB.addTechBill({
-    branch,
+    branch, is_general:isGen,
     category:    document.getElementById('bill-cat')?.value,
     description: document.getElementById('bill-desc')?.value.trim()||null,
     amount,
     bill_date:   document.getElementById('bill-date')?.value||todayStr(),
   });
   document.querySelector('.modal-overlay')?.remove();
-  toast('Добавлено','success'); techLoadSection(branch, true);
+  toast('Добавлено','success'); techLoadSection(isGen?'__general__':branch, true);
 }
 async function toggleBillPaid(id, currentPaid) {
   await DB.updateTechBill(id,{ paid:!currentPaid, paid_at:!currentPaid?new Date().toISOString():null });
