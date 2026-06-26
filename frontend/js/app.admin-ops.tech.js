@@ -177,15 +177,17 @@ async function doAddBill() {
   const amount = parseFloat(document.getElementById('bill-amount')?.value)||0;
   if (!isGen && !branch) return toast('Выберите филиал','error');
   if (!amount) return toast('Введите сумму','error');
-  await DB.addTechBill({
-    branch, is_general:isGen,
-    category:    document.getElementById('bill-cat')?.value,
-    description: document.getElementById('bill-desc')?.value.trim()||null,
-    amount,
-    bill_date:   document.getElementById('bill-date')?.value||todayStr(),
-  });
-  document.querySelector('.modal-overlay')?.remove();
-  toast('Добавлено','success'); techLoadSection(isGen?'__general__':branch, true);
+  try {
+    await DB.addTechBill({
+      branch, is_general:isGen,
+      category:    document.getElementById('bill-cat')?.value,
+      description: document.getElementById('bill-desc')?.value.trim()||null,
+      amount,
+      bill_date:   document.getElementById('bill-date')?.value||todayStr(),
+    });
+    document.querySelector('.modal-overlay')?.remove();
+    toast('Добавлено','success'); techLoadSection(isGen?'__general__':branch, true);
+  } catch(e) { console.error(e); toast('Ошибка: '+(e?.message||'не удалось добавить'),'error'); }
 }
 async function toggleBillPaid(id, currentPaid) {
   await DB.updateTechBill(id,{ paid:!currentPaid, paid_at:!currentPaid?new Date().toISOString():null });
@@ -241,13 +243,15 @@ async function doAddIssue() {
   const desc = document.getElementById('iss-desc')?.value.trim();
   if (!branch) return toast('Выберите филиал','error');
   if (!desc) return toast('Опишите поломку','error');
-  await DB.addTechIssue({
-    branch, description:desc,
-    priority: document.getElementById('iss-pri')?.value||'normal',
-    status:'open',
-  });
-  document.querySelector('.modal-overlay')?.remove();
-  toast('Добавлено','success'); techLoadSection(branch, true);
+  try {
+    await DB.addTechIssue({
+      branch, description:desc,
+      priority: document.getElementById('iss-pri')?.value||'normal',
+      status:'open',
+    });
+    document.querySelector('.modal-overlay')?.remove();
+    toast('Добавлено','success'); techLoadSection(branch, true);
+  } catch(e) { console.error(e); toast('Ошибка: '+(e?.message||'не удалось добавить'),'error'); }
 }
 async function resolveIssue(id) {
   await DB.updateTechIssue(id,{ status:'resolved', resolved_at:new Date().toISOString() });
