@@ -54,6 +54,25 @@ async function loadTrainerReport(year,month) {
     window._reportTrials = trialSessions; // для модалки правки пробной
     // ⚠️ unpaidGroups (дети ходят, но не платят), pending (замены), transfers (передачи)
     // и lateRequests загружены выше в общем Promise.all
+
+    // Явные дубли: ≥2 обычных ПТ одного клиента, созданные почти одновременно (двойной тап).
+    // Их тренеру разрешаем удалять напрямую даже после 30-мин окна — это очевидное двойное
+    // списание, а не правка истории. Удаление вернёт балансу +1 (DB.deleteWorkout).
+    const _dupWorkoutIds = new Set();
+    for (let i=0;i<workouts.length;i++) {
+      const a=workouts[i];
+      if (a.is_debt||a.is_drop_in) continue;
+      for (let j=0;j<workouts.length;j++) {
+        if (i===j) continue;
+        const b=workouts[j];
+        if (b.is_debt||b.is_drop_in) continue;
+        if (a.client_id===b.client_id
+            && Math.abs(new Date(a.created_at)-new Date(b.created_at))<=DUP_WORKOUT_WINDOW_MS) {
+          _dupWorkoutIds.add(a.id); break;
+        }
+      }
+    }
+
     body.innerHTML=`
       ${pending.length?`<div class="warn-banner" style="background:rgba(124,58,237,.1);border-color:rgba(124,58,237,.3);color:var(--text)">
         <b>⚡ ${pending.length} замен(а) ждут подтверждения</b>
@@ -186,8 +205,10 @@ async function loadTrainerReport(year,month) {
               <button class="btn btn-sm btn-danger" onclick="doAdminDeleteWorkout('${w.id}')">Удалить</button>`:
               (!w.is_debt?(canEdit(w.created_at)?`
               <button class="btn btn-sm btn-danger" onclick="doDeleteWorkout('${w.id}')">Удалить</button>`:
+              (_dupWorkoutIds.has(w.id)?`
+              <button class="btn btn-sm btn-danger" onclick="doDeleteDuplicate('${w.id}')" title="Дубль — создан почти одновременно с другой записью этого клиента">🗑 Удалить дубль</button>`:
               `<button class="btn btn-sm" style="background:rgba(239,68,68,.1);color:#ef4444;border:1px solid rgba(239,68,68,.25)"
-                onclick="doRequestWorkoutDelete('${w.id}','${w.workout_date}','${encodeURIComponent(w.clients?.fio||'')}','${w.branch||''}')">Запрос на удаление</button>`
+                onclick="doRequestWorkoutDelete('${w.id}','${w.workout_date}','${encodeURIComponent(w.clients?.fio||'')}','${w.branch||''}')">Запрос на удаление</button>`)
               ):'')}
             ${isToday(w.workout_date)&&!w.is_debt?`
               <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
@@ -293,6 +314,14 @@ async function doDeleteWorkout(id) {
     await DB.deleteWorkout(id);
     DB.auditLog('workout_delete', STATE.profile.id, STATE.profile.fio, id, 'workout', {}, STATE.profile.branches?.[0]);
     toast('Удалено','success');renderReportTab();
+  } catch(e){console.error(e);toast('Ошибка','error');}
+}
+async function doDeleteDuplicate(id) {
+  if(!confirm('Удалить дублирующую запись?\n\nЭта ПТ создана почти одновременно с другой записью того же клиента — похоже на двойное списание. Баланс клиента вернётся +1.'))return;
+  try{
+    await DB.deleteWorkout(id);
+    DB.auditLog('workout_delete_dup', STATE.profile.id, STATE.profile.fio, id, 'workout', {reason:'duplicate'}, STATE.profile.branches?.[0]);
+    toast('Дубль удалён','success');renderReportTab();
   } catch(e){console.error(e);toast('Ошибка','error');}
 }
 async function doAdminDeleteWorkout(id) {
