@@ -513,7 +513,10 @@ async function doAddClient() {
         ? parseInt(document.getElementById('nc-custom-qty')?.value||'0')
         : parseInt(selPkg?.dataset.qty||'0');
       const startDate = document.getElementById('nc-start')?.value || todayStr();
-      const endDate   = bal > 0 ? calcSubEnd(startDate, bal, isWeekend) : null;
+      // Взрослым блок ПТ к дате НЕ привязываем: абонемент (членство) тренер ставит отдельно,
+      // ПТ при окончании членства замораживается, но не сгорает. Дети — пакет привязан к
+      // дате (остаток сгорает по сроку). Викенд — дата-зависимый продукт (сб/вс, 1 мес).
+      const endDate   = (bal > 0 && (isChild(age) || isWeekend)) ? calcSubEnd(startDate, bal, isWeekend) : null;
       const client = await DB.addClient(fio, cat, STATE.profile.id, age, startDate, endDate, isWeekend);
       if (bal > 0) {
         await DB.addBalance(client.id, bal);
@@ -523,7 +526,8 @@ async function doAddClient() {
       const startDate = $('#nc-start-ex')?.value || todayStr();
       const remaining = parseInt($('#nc-remaining')?.value||'0');
       const initOrig  = parseInt($('#nc-initial')?.value||remaining);
-      const endDate   = remaining > 0 ? calcSubEnd(startDate, initOrig) : null;
+      // Взрослым дату членства из ПТ-пакета не выводим (членство ставится отдельно).
+      const endDate   = (remaining > 0 && isChild(age)) ? calcSubEnd(startDate, initOrig) : null;
       const client = await DB.addClient(fio, cat, STATE.profile.id, age, startDate, endDate);
       if (remaining > 0) await DB.addBalance(client.id, remaining);
       await DB.createSubscriptionWithInitial(client.id, STATE.profile.id, startDate, initOrig, remaining);

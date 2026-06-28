@@ -72,8 +72,13 @@ async function ruleSubExpiring() {
   const in7   = new Date(); in7.setDate(in7.getDate()+7);
   const in7str = in7.toISOString().slice(0,10);
 
+  // Только клиенты с остатком ПТ и не в архиве: если ПТ уже 0 — продлевать нечего,
+  // напоминание «истекает абонемент» лишь шумит (клиент давно отходил пакет, а дата
+  // членства подошла только сейчас). См. жалобу тренеров на ложные пуши.
   const { data: clients } = await sb.from('clients')
-    .select('fio,subscription_end,profiles!trainer_id(fio,tg_id)')
+    .select('fio,subscription_end,balance,profiles!trainer_id(fio,tg_id)')
+    .gt('balance', 0)
+    .eq('is_archived', false)
     .gte('subscription_end', today)
     .lte('subscription_end', in7str);
 
