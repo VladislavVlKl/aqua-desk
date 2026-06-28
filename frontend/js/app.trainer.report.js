@@ -542,7 +542,7 @@ function renderBuyPackageModal(clientId, isChildClient, currentBalance) {
       Текущий остаток ${currentBalance} ПТ сохранится, новые добавятся сверху.</p>`:''}
     <div class="form-group"><label>Выберите пакет</label>
       <div style="display:flex;flex-direction:column;gap:8px">
-        ${packages.map((p,i)=>`<button class="btn pkg-btn ${i===1?'btn-primary':''}" data-qty="${p.qty}"
+        ${packages.map((p,i)=>`<button class="btn pkg-btn ${i===1?'btn-primary':''}" data-qty="${p.qty}" data-weekend="${p.weekend?'1':''}"
           onclick="selectPkg(this)" style="${i!==1?'background:var(--card);border:1px solid var(--border)':''}">
           <b>${p.label}</b> · ${p.period}</button>`).join('')}
       </div>
@@ -569,14 +569,17 @@ function togglePkgCustom(on) {
 }
 function updatePkgEndDate() {
   const customOn = document.getElementById('pkg-custom-toggle')?.checked;
+  const sel = document.querySelector('.pkg-btn.btn-primary');
+  const weekend = !customOn && sel?.dataset.weekend==='1';
   const qty = customOn
     ? parseInt(document.getElementById('pkg-custom-qty')?.value||'0')
-    : parseInt(document.querySelector('.pkg-btn.btn-primary')?.dataset.qty||'0');
+    : parseInt(sel?.dataset.qty||'0');
   const start = document.getElementById('pkg-start')?.value || todayStr();
   const preview = document.getElementById('pkg-end-preview');
   if (!preview) return;
   if (!qty) { preview.textContent=''; return; }
-  preview.textContent = `📅 Действует до: ${calcSubEnd(start, qty)}`;
+  preview.textContent = `📅 Действует до: ${calcSubEnd(start, qty, weekend)}`
+    + (weekend ? ' · только сб/вс' : '');
 }
 function selectPkg(btn) {
   if (!btn) return;
@@ -590,15 +593,17 @@ function selectPkg(btn) {
 }
 async function doBuyPackage(clientId, isChildClient) {
   const customOn = document.getElementById('pkg-custom-toggle')?.checked;
+  const selBtn = document.querySelector('.pkg-btn.btn-primary');
+  const isWeekend = !customOn && selBtn?.dataset.weekend==='1';
   const qty = customOn
     ? parseInt(document.getElementById('pkg-custom-qty')?.value||'0')
-    : parseInt(document.querySelector('.pkg-btn.btn-primary')?.dataset.qty||'10');
+    : parseInt(selBtn?.dataset.qty||'10');
   if (!qty) return toast('Выберите пакет или введите количество','error');
   const start = document.getElementById('pkg-start')?.value||todayStr();
   try {
-    await DB.buyNewPackage(clientId, STATE.profile.id, isChildClient, qty, start);
+    await DB.buyNewPackage(clientId, STATE.profile.id, isChildClient, qty, start, isWeekend);
     DB.auditLog('sub_buy', STATE.profile.id, STATE.profile.fio, clientId, 'subscription',
-      { qty, start, is_child: isChildClient }, STATE.profile.branches?.[0]);
+      { qty, start, is_child: isChildClient, weekend: isWeekend }, STATE.profile.branches?.[0]);
     document.querySelector('.modal-overlay')?.remove();
     toast(`✅ Пакет ${qty} ПТ оформлен`,'success');
     renderClientProfile(clientId, STATE.currentTab||'clients');

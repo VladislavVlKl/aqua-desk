@@ -101,12 +101,14 @@ group_type_access int[] (зарезервировано, в коде не исп
 id uuid PK · fio · category 1-3 · trainer_id · balance int · age
 subscription_start/end date · drop_in_used bool · is_archived · archive_reason
 freeze_start/end date · color · last_used
+is_weekend bool — пакет «Викенд» (только сб/вс), денормализ. с активного абонемента; читается при списании ПТ
 ```
 
 **subscriptions** — история абонементов
 ```
 id int PK · client_id · trainer_id · start_date · end_date · initial_balance
 is_active · closing_note · freeze_start/end
+is_weekend bool — пакет «Викенд» (детский: 5 ПТ на 1 месяц, занятия только сб/вс)
 ```
 
 **workouts** — тренировки

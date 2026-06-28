@@ -107,6 +107,7 @@ function onClientChange(sel) {
   const age=parseInt(opt?.dataset.age||'99');
   const diUsed=opt?.dataset.di==='true';
   if (sel.value&&bal<=0) toast('⚠️ Нулевой баланс!','error');
+  if (opt?.dataset.weekend==='1') toast('📅 Пакет «Викенд» — занятия только по сб и вс','info');
   // Блокируем разовые для детей, уже использовавших разовое
   const diOpts=[...document.getElementById('wk-type')?.options||[]].filter(o=>o.value.startsWith('dropin'));
   diOpts.forEach(o=>{
@@ -180,6 +181,7 @@ async function _doLogWorkoutInner() {
     const age=parseInt(opt.dataset.age||'99');
     if (isChild(age)&&opt.dataset.di==='true') return toast('Ребёнок уже использовал разовое','error');
   }
+  const isWeekendClient = opt?.dataset.weekend==='1';
   const dates=[];
   for (let i=0;i<count;i++) {
     const d=document.getElementById(`wk-date-${i}`)?.value;
@@ -187,6 +189,7 @@ async function _doLogWorkoutInner() {
     const v = d ? `${d}T${t}:00+05:00` : null;
     if (!v) return toast(`Введите дату для ПТ №${i+1}`,'error');
     if (!isValidWorkoutDate(v)) return toast(`ПТ №${i+1}: можно вносить тренировки за последние 72 часа. Если тренировка была раньше — обратитесь к координатору.`,'error');
+    if (isWeekendClient && !isWeekendDate(d)) return toast(`ПТ №${i+1}: пакет «Викенд» — занятия только по сб и вс`,'error');
     dates.push(v);
   }
   // Блокирующие события
@@ -385,7 +388,7 @@ function renderAddClientModal() {
     <div id="nc-new-fields">
       <div class="form-group"><label>Пакет абонемента</label>
         <div id="nc-pkg-list" style="display:flex;flex-direction:column;gap:8px">
-          ${pkgsChild.map((p,i)=>`<button class="btn pkg-btn ${i===1?'btn-primary':''}" data-qty="${p.qty}"
+          ${pkgsChild.map((p,i)=>`<button class="btn pkg-btn ${i===1?'btn-primary':''}" data-qty="${p.qty}" data-weekend="${p.weekend?'1':''}"
             onclick="selectNcPkg(this)"
             style="${i!==1?'background:var(--card);border:1px solid var(--border)':''}">
             <b>${p.label}</b> · ${p.period}</button>`).join('')}
@@ -427,7 +430,7 @@ function onNcAgeChange(age) {
   const pkgs = isChild ? SUB_PACKAGES.child : SUB_PACKAGES.adult;
   const list = document.getElementById('nc-pkg-list');
   if (!list) return;
-  list.innerHTML = pkgs.map((p,i)=>`<button class="btn pkg-btn ${i===1?'btn-primary':''}" data-qty="${p.qty}"
+  list.innerHTML = pkgs.map((p,i)=>`<button class="btn pkg-btn ${i===1?'btn-primary':''}" data-qty="${p.qty}" data-weekend="${p.weekend?'1':''}"
     onclick="selectNcPkg(this)"
     style="${i!==1?'background:var(--card);border:1px solid var(--border)':''}">
     <b>${p.label}</b> · ${p.period}</button>`).join('');
@@ -450,14 +453,17 @@ function toggleNcCustom(on) {
 }
 function updateNcEndDate() {
   const customOn = document.getElementById('nc-custom-toggle')?.checked;
+  const sel = document.querySelector('.pkg-btn.btn-primary');
+  const weekend = !customOn && sel?.dataset.weekend==='1';
   const qty = customOn
     ? parseInt(document.getElementById('nc-custom-qty')?.value||'0')
-    : parseInt(document.querySelector('.pkg-btn.btn-primary')?.dataset.qty||'0');
+    : parseInt(sel?.dataset.qty||'0');
   const start = document.getElementById('nc-start')?.value || todayStr();
   const preview = document.getElementById('nc-end-preview');
   if (!preview) return;
   if (!qty) { preview.textContent=''; return; }
-  preview.textContent = `📅 Действует до: ${calcSubEnd(start, qty)}`;
+  preview.textContent = `📅 Действует до: ${calcSubEnd(start, qty, weekend)}`
+    + (weekend ? ' · только сб/вс' : '');
 }
 
 function setClientMode(mode) {
@@ -501,15 +507,17 @@ async function doAddClient() {
   try {
     if (!isExisting) {
       const customOn = document.getElementById('nc-custom-toggle')?.checked;
+      const selPkg = document.querySelector('.pkg-btn.btn-primary');
+      const isWeekend = !customOn && selPkg?.dataset.weekend==='1';
       const bal = customOn
         ? parseInt(document.getElementById('nc-custom-qty')?.value||'0')
-        : parseInt(document.querySelector('.pkg-btn.btn-primary')?.dataset.qty||'0');
+        : parseInt(selPkg?.dataset.qty||'0');
       const startDate = document.getElementById('nc-start')?.value || todayStr();
-      const endDate   = bal > 0 ? calcSubEnd(startDate, bal) : null;
-      const client = await DB.addClient(fio, cat, STATE.profile.id, age, startDate, endDate);
+      const endDate   = bal > 0 ? calcSubEnd(startDate, bal, isWeekend) : null;
+      const client = await DB.addClient(fio, cat, STATE.profile.id, age, startDate, endDate, isWeekend);
       if (bal > 0) {
         await DB.addBalance(client.id, bal);
-        await DB.createSubscription(client.id, STATE.profile.id, startDate, bal);
+        await DB.createSubscription(client.id, STATE.profile.id, startDate, bal, isWeekend);
       }
     } else {
       const startDate = $('#nc-start-ex')?.value || todayStr();

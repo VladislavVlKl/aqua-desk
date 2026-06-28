@@ -194,12 +194,13 @@ Object.assign(DB, {
       .order('created_at',{ascending:false}).limit(1).maybeSingle();
     if (error) throw error; return data;
   },
-  async createSubscription(clientId, trainerId, startDate, initialBalance) {
+  async createSubscription(clientId, trainerId, startDate, initialBalance, isWeekend = false) {
     await sb().from('subscriptions')
       .update({is_active:false}).eq('client_id',clientId).eq('is_active',true);
     const {data,error} = await sb().from('subscriptions')
       .insert({client_id:clientId,trainer_id:trainerId,
-               start_date:startDate,initial_balance:initialBalance,is_active:true})
+               start_date:startDate,initial_balance:initialBalance,is_active:true,
+               is_weekend:!!isWeekend})
       .select().single();
     if (error) throw error; return data;
   },
@@ -221,19 +222,20 @@ Object.assign(DB, {
   /** Купить новый пакет ПТ:
    *  - Ребёнок: закрывает старый (остаток сгорает), создаёт новый
    *  - Взрослый: добавляет ПТ к балансу, абонемент не закрывается */
-  async buyNewPackage(clientId, trainerId, isChild, quantity, startDate) {
-    const endDate = calcSubEnd(startDate, quantity);
+  async buyNewPackage(clientId, trainerId, isChild, quantity, startDate, isWeekend = false) {
+    const endDate = calcSubEnd(startDate, quantity, isWeekend);
     if (isChild) {
       // Закрыть старый (баланс сгорает)
       await sb().from('subscriptions')
         .update({is_active:false, end_date:startDate, closing_note:'Истёк. Остаток сгорел.'})
         .eq('client_id',clientId).eq('is_active',true);
-      // Обнулить баланс, установить новый, сбросить заморозку
-      await sb().from('clients').update({balance:quantity, freeze_start:null, freeze_end:null}).eq('id',clientId);
+      // Обнулить баланс, установить новый, сбросить заморозку, обновить тип пакета
+      await sb().from('clients').update({balance:quantity, freeze_start:null, freeze_end:null, is_weekend:!!isWeekend}).eq('id',clientId);
       // Создать новый абонемент
       const {data,error} = await sb().from('subscriptions')
         .insert({client_id:clientId,trainer_id:trainerId,
-                 start_date:startDate,end_date:endDate,initial_balance:quantity,is_active:true})
+                 start_date:startDate,end_date:endDate,initial_balance:quantity,is_active:true,
+                 is_weekend:!!isWeekend})
         .select().single();
       if (error) throw error; return data;
     } else {

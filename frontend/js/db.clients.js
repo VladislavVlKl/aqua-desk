@@ -14,10 +14,11 @@ Object.assign(DB, {
       .order('fio');
     if (error) throw error; return data||[];
   },
-  async addClient(fio, category, trainerId, age, subStart, subEnd) {
+  async addClient(fio, category, trainerId, age, subStart, subEnd, isWeekend = false) {
     const {data,error} = await sb().from('clients').insert({
       fio:fio.trim(), category, trainer_id:trainerId, balance:0,
       age:age||null, subscription_start:subStart||null, subscription_end:subEnd||null,
+      is_weekend:!!isWeekend,
     }).select().single();
     if (error) throw error; return data;
   },

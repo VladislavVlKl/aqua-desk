@@ -153,14 +153,23 @@ function daysUntil(dateStr) {
   return Math.ceil((new Date(dateStr) - new Date(todayStr())) / 86400000);
 }
 
-/** Рассчитать дату окончания абонемента по количеству ПТ */
-function calcSubEnd(startDate, qty) {
+/** Рассчитать дату окончания абонемента по количеству ПТ.
+ *  weekend=true — пакет «Викенд» (5 ПТ на 1 месяц), срок не зависит от qty. */
+function calcSubEnd(startDate, qty, weekend = false) {
   const d = new Date(startDate);
-  if (qty <= 5)       d.setDate(d.getDate() + 14);
+  if (weekend)        d.setMonth(d.getMonth() + 1); // Викенд = 1 месяц
+  else if (qty <= 5)  d.setDate(d.getDate() + 14);
   else if (qty <= 10) d.setMonth(d.getMonth() + 1);
   else if (qty <= 25) d.setMonth(d.getMonth() + 3);
   else                d.setMonth(d.getMonth() + 6); // 50 ПТ = 6 месяцев
   return d.toISOString().slice(0,10);
+}
+
+/** Дата (YYYY-MM-DD) приходится на субботу или воскресенье? */
+function isWeekendDate(dateStr) {
+  if (!dateStr) return false;
+  const day = new Date(dateStr + 'T12:00:00').getDay();
+  return day === 0 || day === 6;
 }
 
 // Пакеты абонементов
@@ -170,6 +179,7 @@ const SUB_PACKAGES = {
     {qty:10, label:'10 ПТ', period:'1 месяц'},
     {qty:25, label:'25 ПТ', period:'3 месяца'},
     {qty:50, label:'50 ПТ', period:'6 месяцев'},
+    {qty:5,  label:'Викенд · 5 ПТ', period:'1 месяц · только сб/вс', weekend:true},
   ],
   adult: [
     {qty:5,  label:'5 ПТ',  period:'2 недели'},
