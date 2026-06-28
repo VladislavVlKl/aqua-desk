@@ -308,28 +308,30 @@ async function doGymDeduct(clientId) {
     renderClientProfile(clientId);
   } catch(e){ console.error(e); toast('Ошибка','error'); if(btn) btn.disabled=false; }
 }
-async function doDeleteWorkout(id) {
+// clientId передаётся, когда удаление вызвано из профиля клиента — тогда обновляем профиль,
+// иначе (из «Отчёта») — перерисовываем отчёт.
+async function doDeleteWorkout(id, clientId) {
   if(!confirm('Удалить запись?'))return;
   try{
     await DB.deleteWorkout(id);
     DB.auditLog('workout_delete', STATE.profile.id, STATE.profile.fio, id, 'workout', {}, STATE.profile.branches?.[0]);
-    toast('Удалено','success');renderReportTab();
+    toast('Удалено','success'); clientId?renderClientProfile(clientId):renderReportTab();
   } catch(e){console.error(e);toast('Ошибка','error');}
 }
-async function doDeleteDuplicate(id) {
+async function doDeleteDuplicate(id, clientId) {
   if(!confirm('Удалить дублирующую запись?\n\nЭта ПТ создана почти одновременно с другой записью того же клиента — похоже на двойное списание. Баланс клиента вернётся +1.'))return;
   try{
     await DB.deleteWorkout(id);
     DB.auditLog('workout_delete_dup', STATE.profile.id, STATE.profile.fio, id, 'workout', {reason:'duplicate'}, STATE.profile.branches?.[0]);
-    toast('Дубль удалён','success');renderReportTab();
+    toast('Дубль удалён','success'); clientId?renderClientProfile(clientId):renderReportTab();
   } catch(e){console.error(e);toast('Ошибка','error');}
 }
-async function doAdminDeleteWorkout(id) {
+async function doAdminDeleteWorkout(id, clientId) {
   if(!confirm('Удалить запись? (Без ограничений по времени)'))return;
   try{
     await DB.deleteWorkout(id);
     DB.auditLog('workout_delete_admin', STATE.profile.id, STATE.profile.fio, id, 'workout', {force:true}, STATE.profile.branches?.[0]);
-    toast('Удалено','success');renderReportTab();
+    toast('Удалено','success'); clientId?renderClientProfile(clientId):renderReportTab();
   } catch(e){console.error(e);toast('Ошибка','error');}
 }
 async function doRequestWorkoutDelete(workoutId, workoutDate, clientNameEnc, branch) {

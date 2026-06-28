@@ -99,7 +99,7 @@ async function renderClientProfile(clientId, backTab='home') {
           </div>
         </div>
         <h4>Занятия абонемента</h4>
-        ${renderSessionsList(workouts,activeSub.id,clientId,canEdit)}`
+        ${renderSessionsList(workouts,activeSub.id,clientId,canEdit,client.fio)}`
       :`<div class="sub-card new-sub-card">
           <p class="hint">Нет активного абонемента</p>
           ${canEdit?`<button class="btn btn-primary btn-full" style="margin-top:10px"
@@ -208,16 +208,37 @@ function renderSubReport() {
     </div>`).join('');
 }
 
-function renderSessionsList(workouts, activeSubId, clientId, canEdit=true) {
+function renderSessionsList(workouts, activeSubId, clientId, canEdit=true, clientFio='') {
   // Фильтруем: конспекты нужны только для обычных ПТ (не разовые, не долг без подтверждения)
   const ptWorkouts = workouts.filter(w => !w.is_drop_in && (!w.is_debt || w.debt_confirmed_at));
   if (!ptWorkouts.length) return '<p class="hint">Нет тренировок по абонементу</p>';
+  // Явные дубли: ≥2 ПТ, созданные почти одновременно (двойной тап) — их разрешаем удалять
+  // напрямую даже после 30-мин окна. Все ptWorkouts здесь — один клиент.
+  const dupIds = new Set();
+  for (let i=0;i<ptWorkouts.length;i++) {
+    for (let j=0;j<ptWorkouts.length;j++) {
+      if (i===j) continue;
+      if (Math.abs(new Date(ptWorkouts[i].created_at)-new Date(ptWorkouts[j].created_at))<=DUP_WORKOUT_WINDOW_MS) {
+        dupIds.add(ptWorkouts[i].id); break;
+      }
+    }
+  }
+  const fioEnc = encodeURIComponent(clientFio||'');
   return ptWorkouts.map((w,i)=>{
     const note = w.session_notes;
     const hasNote = note?.accomplishments;
     const ageMs = Date.now() - new Date(w.workout_date).getTime();
     const isOverdue = !hasNote && ageMs > 48*3600000;
     const canWriteNote = canEdit && ageMs < 30*24*3600000; // можно писать в течение 30 дней
+    // Кнопка удаления (canEdit тут = boolean, глобальная canEdit() затенена — окно считаем вручную)
+    const withinEditWindow = (Date.now()-new Date(w.created_at)) < EDIT_WINDOW_MIN*60000;
+    const delBtn = (canEdit && !w.is_debt) ? (
+      withinEditWindow
+        ? `<button class="btn btn-sm btn-danger" style="font-size:11px;margin-top:6px" onclick="doDeleteWorkout('${w.id}','${clientId}')">🗑 Удалить</button>`
+        : (dupIds.has(w.id)
+            ? `<button class="btn btn-sm btn-danger" style="font-size:11px;margin-top:6px" title="Дубль — создан почти одновременно с другой записью" onclick="doDeleteDuplicate('${w.id}','${clientId}')">🗑 Удалить дубль</button>`
+            : `<button class="btn btn-sm" style="font-size:11px;margin-top:6px;background:rgba(239,68,68,.1);color:#ef4444;border:1px solid rgba(239,68,68,.25)" onclick="doRequestWorkoutDelete('${w.id}','${w.workout_date}','${fioEnc}','${w.branch||''}')">🗑 Запрос на удаление</button>`)
+    ) : '';
     return `<div class="session-item ${isOverdue?'overdue-session':''}">
       <div class="si-header">
         <span class="si-num">№${ptWorkouts.length-i}</span>
@@ -236,6 +257,7 @@ function renderSessionsList(workouts, activeSubId, clientId, canEdit=true) {
           onclick="renderSessionNoteModal('${w.id}','${clientId}')">
           ${isOverdue?'⛔ Написать (просрочено)':'📝 Написать конспект'}</button>`
       : '<p class="hint" style="font-size:12px;margin-top:4px">Конспект не написан</p>'}
+      ${delBtn}
     </div>`;
   }).join('');
 }
