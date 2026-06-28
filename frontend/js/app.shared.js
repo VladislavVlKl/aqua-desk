@@ -465,11 +465,17 @@ async function renderGroupSubstitutionsHistory(groupId) {
 
 async function renderGroupSubstitutionModal(groupId) {
   try {
-    const trainers = await cached('profiles',()=>DB.getAllProfiles());
+    const [trainers, gInfo] = await Promise.all([
+      cached('profiles',()=>DB.getAllProfiles()),
+      sb().from('trainer_groups').select('group_types(billing_model)').eq('id',groupId).single().then(r=>r.data).catch(()=>null),
+    ]);
     const others = trainers.filter(t=>
       ['trainer','senior_trainer'].includes(t.role) &&
       t.id !== STATE.profile.id && t.tg_id
     );
+    // Взрослая группа (биллинг по явке) — спрашиваем число человек, чтобы координатор
+    // сразу видел подсказку ставки. Для детских групп поле не нужно (ставка не по явке).
+    const isHeadcount = gInfo?.group_types?.billing_model === 'headcount';
     const m = el('div','modal-overlay');
     m.innerHTML=`<div class="modal">
       <div class="modal-header"><h3>Замена на занятии</h3>
@@ -482,6 +488,9 @@ async function renderGroupSubstitutionModal(groupId) {
           <option value="">— выберите —</option>
           ${others.map(t=>`<option value="${t.id}">${t.fio}</option>`).join('')}
         </select></div>
+      ${isHeadcount?`<div class="form-group"><label>Сколько человек было на занятии</label>
+        <input type="number" id="sub-headcount" min="1" inputmode="numeric" placeholder="напр. 5">
+        <p class="hint" style="font-size:11px;margin-top:4px">По этому числу координатор выставит ставку (до 3 / до 6 / 7+).</p></div>`:''}
       <button class="btn btn-primary btn-full" onclick="doCreateSubstitution('${groupId}')">Отправить запрос</button>
     </div>`;
     document.body.appendChild(m);
@@ -490,11 +499,12 @@ async function renderGroupSubstitutionModal(groupId) {
 async function doCreateSubstitution(groupId) {
   const date = document.getElementById('sub-date')?.value;
   const subId = parseInt(document.getElementById('sub-trainer')?.value);
+  const headcount = parseInt(document.getElementById('sub-headcount')?.value) || null;
   if (!date || !subId) return toast('Заполните все поля','error');
   try {
-    await DB.createGroupSubstitution(groupId, STATE.profile.id, subId, date);
+    await DB.createGroupSubstitution(groupId, STATE.profile.id, subId, date, headcount);
     DB.auditLog('group_substitution_create', STATE.profile.id, STATE.profile.fio, groupId, 'group_substitution',
-      { substitute_id: subId, date }, STATE.profile.branches?.[0]);
+      { substitute_id: subId, date, headcount }, STATE.profile.branches?.[0]);
     document.querySelector('.modal-overlay')?.remove();
     toast('Запрос отправлен старшему тренеру ✅','success');
   } catch(e) { toast('Ошибка','error'); console.error(e); }
@@ -508,15 +518,18 @@ async function renderPendingSubstitutions() {
     if (!subs.length) { body.innerHTML=''; return; }
     body.innerHTML=`<div class="warn-banner" style="margin-bottom:12px">
       🔄 Запросы на замену (${subs.length})
-      ${subs.map(s=>`<div style="padding:8px 0;border-top:1px solid rgba(255,255,255,.1)">
+      ${subs.map(s=>{
+        const sugg = (s.trainer_groups?.group_types?.billing_model==='headcount' && s.headcount) ? getAdultGroupRate(s.headcount) : '';
+        return `<div style="padding:8px 0;border-top:1px solid rgba(255,255,255,.1)">
         <div style="font-size:12px">${s.trainer_groups?.group_types?.name||'Группа'} · ${s.session_date}</div>
         <div style="font-size:12px">Провёл: <b>${s.substitute?.fio||'?'}</b> вместо ${s.original?.fio||'?'}</div>
+        ${s.headcount?`<div style="font-size:12px;color:#10b981">👥 ${s.headcount} чел.${sugg?` → ставка ${fmt(sugg)} сум`:''}</div>`:''}
         <div style="display:flex;gap:6px;margin-top:6px;align-items:center">
-          <input type="number" id="sub-rate-${s.id}" placeholder="Ставка (сум)" 
+          <input type="number" id="sub-rate-${s.id}" placeholder="Ставка (сум)" value="${sugg||''}"
             style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:6px;color:var(--text);font-size:12px">
           <button class="btn btn-sm btn-primary" onclick="doApproveSubstitution('${s.id}')">✓</button>
         </div>
-      </div>`).join('')}
+      </div>`;}).join('')}
     </div>`;
   } catch(e) { console.error(e); }
 }

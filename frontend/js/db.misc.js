@@ -238,12 +238,13 @@ Object.assign(DB, {
   },
 
   // ─── ЗАМЕНА В ГРУППАХ ────────────────────────
-  async createGroupSubstitution(groupId, originalTrainerId, substituteTrainerId, sessionDate) {
+  async createGroupSubstitution(groupId, originalTrainerId, substituteTrainerId, sessionDate, headcount=null) {
     invalidateCachePrefix('grp:');
     const {data,error} = await sb().from('group_substitutions')
       .insert({group_id:groupId, original_trainer_id:originalTrainerId,
                substitute_trainer_id:substituteTrainerId,
-               session_date:sessionDate, status:'pending'})
+               session_date:sessionDate, status:'pending',
+               headcount: (headcount && headcount>0) ? headcount : null})
       .select('*, trainer_groups(branch, group_types(name)), original:profiles!original_trainer_id(fio), substitute:profiles!substitute_trainer_id(fio)').single();
     if (error) throw error;
     // Уведомить подтверждающих филиала: всех координаторов + старшего тренера (если есть).
@@ -283,7 +284,7 @@ Object.assign(DB, {
   },
   async getPendingSubstitutions(branch) {
     const {data,error} = await sb().from('group_substitutions')
-      .select('*, original:profiles!original_trainer_id(fio), substitute:profiles!substitute_trainer_id(fio), trainer_groups(*, group_types(name))')
+      .select('*, original:profiles!original_trainer_id(fio), substitute:profiles!substitute_trainer_id(fio), trainer_groups(*, group_types(name, billing_model))')
       .eq('status','pending')
       .order('created_at',{ascending:false});
     if (error) throw error; return data||[];

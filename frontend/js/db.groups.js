@@ -452,7 +452,7 @@ async unassignTrainerGroup(id) {
     const from = `${year}-${String(month).padStart(2,'0')}-01`;
     const to   = new Date(year,month,1).toISOString().slice(0,10);
     const {data,error} = await sb().from('group_substitutions')
-      .select('*, original:profiles!original_trainer_id(fio), substitute:profiles!substitute_trainer_id(fio), trainer_groups(*, group_types(name))')
+      .select('*, original:profiles!original_trainer_id(fio), substitute:profiles!substitute_trainer_id(fio), trainer_groups(*, group_types(name, billing_model))')
       .gte('session_date',from).lt('session_date',to)
       .eq('trainer_groups.branch', branch)
       .order('session_date',{ascending:false});

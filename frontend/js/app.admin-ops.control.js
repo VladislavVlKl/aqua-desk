@@ -34,15 +34,18 @@ async function renderAdminControl(force=false) {
     // 🔄 Запросы на замену (подтверждает координатор или старший — кто первый)
     if (pendingSubs.length) sections.push(`<div class="control-section">
       <div class="control-title warn">🔄 Запросы на замену (${pendingSubs.length})</div>
-      ${pendingSubs.map(s=>`<div class="control-item">
+      ${pendingSubs.map(s=>{
+        const sugg = (s.trainer_groups?.group_types?.billing_model==='headcount' && s.headcount) ? getAdultGroupRate(s.headcount) : '';
+        return `<div class="control-item">
         <div class="ci-main"><b>${s.substitute?.fio||'?'}</b> вместо ${s.original?.fio||'?'} <span class="hint">${s.trainer_groups?.branch||''}</span></div>
         <div class="ci-sub">${s.trainer_groups?.group_types?.name||'Группа'} · ${fmtDate(s.session_date)}</div>
+        ${s.headcount?`<div class="ci-sub" style="color:#10b981">👥 ${s.headcount} чел.${sugg?` → ставка ${fmt(sugg)} сум`:''}</div>`:''}
         <div style="display:flex;gap:6px;margin-top:8px;align-items:center">
-          <input type="number" id="asub-rate-${s.id}" placeholder="Ставка (сум)"
+          <input type="number" id="asub-rate-${s.id}" placeholder="Ставка (сум)" value="${sugg||''}"
             style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:6px;color:var(--text);font-size:13px">
           <button class="btn btn-sm btn-primary" onclick="doApproveSubstitutionAdmin('${s.id}')">✓ Подтвердить</button>
         </div>
-      </div>`).join('')}
+      </div>`;}).join('')}
     </div>`);
     // 🛎 Висящие подтверждения ресепшн (эскалация >24ч)
     if (recHanging.length) {

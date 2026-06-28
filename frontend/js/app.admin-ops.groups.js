@@ -1041,13 +1041,15 @@ async function renderSubstitutionsApproval() {
       <!-- Групповые замены -->
       <h4 style="margin-bottom:8px">Групповые замены</h4>
       ${!groupSubs.length?'<p class="hint">Нет замен за период</p>':
-        groupSubs.map(s=>`<div class="staff-card" style="flex-direction:column;gap:8px">
+        groupSubs.map(s=>{
+          const sugg = (s.trainer_groups?.group_types?.billing_model==='headcount' && s.headcount) ? getAdultGroupRate(s.headcount) : '';
+          return `<div class="staff-card" style="flex-direction:column;gap:8px">
           <div>
             <div class="staff-fio">${s.substitute?.fio||'?'} <span class="hint" style="font-weight:400">вместо ${s.original?.fio||'?'}</span></div>
-            <div class="staff-meta">${s.trainer_groups?.group_types?.name||'Группа'} · ${fmtDate(s.session_date)}</div>
+            <div class="staff-meta">${s.trainer_groups?.group_types?.name||'Группа'} · ${fmtDate(s.session_date)}${s.headcount?` · 👥 ${s.headcount} чел.`:''}</div>
           </div>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <input id="gsub-rate-${s.id}" type="number" value="${s.rate||''}" placeholder="Ставка (сум)"
+            <input id="gsub-rate-${s.id}" type="number" value="${s.rate||sugg||''}" placeholder="Ставка (сум)"
               style="width:140px;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text);font-size:13px">
             <span style="font-size:12px;padding:3px 10px;border-radius:10px;
               background:${s.status==='approved'?'rgba(16,185,129,.15)':'rgba(245,158,11,.15)'};
@@ -1055,7 +1057,7 @@ async function renderSubstitutionsApproval() {
             ${s.status!=='approved'?`<button class="btn btn-sm btn-primary"
               onclick="doApproveGroupSub('${s.id}')">Утвердить</button>`:''}
           </div>
-        </div>`).join('')}
+        </div>`;}).join('')}
 
       <!-- ПТ-замены -->
       <h4 style="margin-top:20px;margin-bottom:8px">ПТ-замены</h4>

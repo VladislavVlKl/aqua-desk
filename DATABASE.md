@@ -191,7 +191,7 @@ leader_name + leader_fee_percent · group_instance_id uuid · days_of_week text[
 **trainer_group_rate_history** — история ставок: `id, trainer_group_id→trainer_groups (CASCADE), rate_type ('percent'|'flat'), rate_value, effective_from, created_by, created_at`
 > Действующая ставка тренера на дату `D` = последняя запись с `effective_from <= D`; нет записей — legacy `trainer_groups.rate_type/rate_value`. Пересмотр ставки: «за весь текущий месяц» (1-е тек.), «прошлый» (1-е прош.), «с этого дня» (сегодня). Ставочник — занятие по ставке на `session_date`; процентник — вал делится по `paid_at` оплат до/после `effective_from`.
 
-**group_substitutions** — замены: `group_id, original_trainer_id, substitute_trainer_id, session_date, rate, status`
+**group_substitutions** — замены: `group_id, original_trainer_id, substitute_trainer_id, session_date, rate, status, headcount` (headcount — кол-во человек на занятии для взрослых/headcount-групп, заполняет тренер при создании замены → подсказка ставки `getAdultGroupRate`)
 
 **group_progress_notes**: `group_id, group_client_id, trainer_id, month, note`
 
