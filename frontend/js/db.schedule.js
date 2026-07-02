@@ -157,15 +157,22 @@ Object.assign(DB, {
   },
 
   // ─── MONTH ADJUSTMENTS ───────────────────────
+  // Строк может быть несколько — по одной на филиал (branch='' — легаси/«без филиала»).
+  // getAdjustment возвращает агрегат по всем филиалам (для calcSalary и отчёта тренера).
   async getAdjustment(trainerId, year, month) {
     const {data,error} = await sb().from('month_adjustments').select('*')
-      .eq('trainer_id',trainerId).eq('year',year).eq('month',month).maybeSingle();
-    if (error) throw error; return data;
+      .eq('trainer_id',trainerId).eq('year',year).eq('month',month);
+    if (error) throw error;
+    if (!data?.length) return null;
+    return data.reduce((m,a)=>({
+      ...m, bonus:m.bonus+(a.bonus||0), penalty:m.penalty+(a.penalty||0),
+      notes:[m.notes,a.notes].filter(Boolean).join('; '),
+    }), {trainer_id:trainerId, year, month, bonus:0, penalty:0, notes:''});
   },
-  async upsertAdjustment(trainerId, year, month, bonus, penalty, notes) {
+  async upsertAdjustment(trainerId, year, month, bonus, penalty, notes, branch='') {
     const {data,error} = await sb().from('month_adjustments')
-      .upsert({trainer_id:trainerId,year,month,bonus,penalty,notes},
-              {onConflict:'trainer_id,year,month'})
+      .upsert({trainer_id:trainerId,year,month,bonus,penalty,notes,branch},
+              {onConflict:'trainer_id,year,month,branch'})
       .select().single();
     if (error) throw error; return data;
   },

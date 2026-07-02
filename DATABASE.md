@@ -199,7 +199,8 @@ leader_name + leader_fee_percent · group_instance_id uuid · days_of_week text[
 
 ### Зарплата
 
-**month_adjustments** — корректировки координатора: `trainer_id, year, month, bonus, penalty, notes`
+**month_adjustments** — корректировки координатора: `trainer_id, year, month, bonus, penalty, notes, branch`
+> Премия/штраф — ПО ФИЛИАЛАМ: unique `(trainer_id, year, month, branch)`, строка на филиал. `branch=''` — легаси «без филиала» (учитывается во всех филиалах). Свод по тренеру — `aggAdjustments()` (db.salary.js); `DB.getAdjustment` возвращает агрегат, строки по филиалам — `getTrainerDetail().adjustments`.
 
 ### Операционка
 

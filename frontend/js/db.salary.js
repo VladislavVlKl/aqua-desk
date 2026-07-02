@@ -1,4 +1,17 @@
 // ─── РАСЧЁТ ЗП ───────────────────────────────
+// Свод премий/штрафов по тренерам: строк в month_adjustments может быть несколько
+// (по одной на филиал), для calcSalary нужен суммарный bonus/penalty на тренера.
+function aggAdjustments(rows) {
+  const map = {};
+  (rows||[]).forEach(a => {
+    const m = map[a.trainer_id] || (map[a.trainer_id] = {trainer_id:a.trainer_id, bonus:0, penalty:0, notes:''});
+    m.bonus   += a.bonus  ||0;
+    m.penalty += a.penalty||0;
+    if (a.notes) m.notes = m.notes ? m.notes+'; '+a.notes : a.notes;
+  });
+  return map;
+}
+
 function calcSalary({workouts=[], duties=[], trainerGroups=[], groupSessions=[], adjustment=null,
                      groupPayouts=[], groupSubstitutions=[], trainerId=null, trialSessions=[],
                      childAutoSum=0}) {

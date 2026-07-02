@@ -100,8 +100,8 @@ function exportSummaryExcel(year, month, summaryData, branch) {
   const daysInMonth = new Date(year,month,0).getDate();
 
   const {workouts,duties,groupSessions,profiles,adjustments,groupSubstitutions,ptSubstitutions,trialSessions:allTrials,childAutoByTrainer={}} = summaryData;
-  const adjMap = {};
-  (adjustments||[]).forEach(a => { adjMap[a.trainer_id] = a; });
+  // Строк корректировок может быть несколько на тренера (по филиалам) — агрегируем
+  const adjMap = aggAdjustments(adjustments);
 
   // Тренеры отфильтрованные и отсортированные
   const trainers = [...(profiles||[])].sort((a,b)=>a.fio.localeCompare(b.fio,'ru'));
@@ -362,6 +362,17 @@ function exportTrainerExcel(trainerFio, year, month, workouts, duties, groupSess
   const daysInMonth = new Date(year, month, 0).getDate();
   const monthName   = new Date(year, month-1).toLocaleDateString('ru-RU', {month:'long',year:'numeric'});
 
+  // adjustment: массив строк по филиалам (новое) или один объект-агрегат (легаси)
+  const adjList = Array.isArray(adjustment) ? adjustment : (adjustment ? [adjustment] : []);
+  const adjFor  = b => {
+    const rows = adjList.filter(a => (a.branch||'') === b);
+    if (!rows.length) return null;
+    return rows.reduce((m,a)=>({bonus:m.bonus+(a.bonus||0), penalty:m.penalty+(a.penalty||0)}), {bonus:0,penalty:0});
+  };
+  const adjAgg = adjList.length
+    ? adjList.reduce((m,a)=>({bonus:m.bonus+(a.bonus||0), penalty:m.penalty+(a.penalty||0)}), {bonus:0,penalty:0})
+    : null;
+
   // Филиалы тренера в этом месяце: >1 → отдельная пара листов на каждый филиал + сводный лист
   const allBranches = [...new Set([...(workouts||[]),...(duties||[]),...(groupSessions||[])]
     .map(x=>x.branch).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ru'));
@@ -535,16 +546,16 @@ function exportTrainerExcel(trainerFio, year, month, workouts, duties, groupSess
   } // конец addBranchSheets
 
   if (!multiBranch) {
-    addBranchSheets(workouts, duties, groupSessions, adjustment, '');
+    addBranchSheets(workouts, duties, groupSessions, adjAgg, '');
   } else {
-    // Пара листов на каждый филиал. Премию/штраф (adjustment) в филиальные листы не кладём —
-    // они назначаются раз в месяц без привязки к филиалу, показываем на сводном листе
+    // Пара листов на каждый филиал; премия/штраф филиала — в его листах.
+    // Легаси-строки без филиала (branch='') — отдельно на сводном листе.
     const perBranch = allBranches.map(b => {
       const r = addBranchSheets(
         (workouts||[]).filter(w=>w.branch===b),
         (duties||[]).filter(d=>d.branch===b),
         (groupSessions||[]).filter(g=>g.branch===b),
-        null, ` — ${b}`);
+        adjFor(b), ` — ${b}`);
       return {branch:b, ...r};
     });
 
@@ -562,10 +573,12 @@ function exportTrainerExcel(trainerFio, year, month, workouts, duties, groupSess
       sRows.push(sr([branch, ptCount, mc(ptSum), +tot.dh.toFixed(2), mc(sal.dutySum), mc(other), mc(sal.total)], rStyle(i%2===0)));
       g.pt+=ptCount; g.ps+=ptSum; g.dh+=tot.dh; g.ds+=sal.dutySum; g.ot+=other; g.tot+=sal.total;
     });
-    const bonus   = adjustment?.bonus  ||0;
-    const penalty = adjustment?.penalty||0;
-    if (bonus)   sRows.push(sr(['Премия','','','','','',mc(bonus)],    rStyle(false)));
-    if (penalty) sRows.push(sr(['Штраф','','','','','',mc(-penalty)],  rStyle(true)));
+    // Премии/штрафы филиалов уже внутри «Итого» филиальных строк; здесь — только легаси без филиала
+    const legacy  = adjFor('');
+    const bonus   = legacy?.bonus  ||0;
+    const penalty = legacy?.penalty||0;
+    if (bonus)   sRows.push(sr(['Премия (без филиала)','','','','','',mc(bonus)],   rStyle(false)));
+    if (penalty) sRows.push(sr(['Штраф (без филиала)','','','','','',mc(-penalty)], rStyle(true)));
     sRows.push(sr(['ИТОГО', g.pt, mc(g.ps), +g.dh.toFixed(2), mc(g.ds), mc(g.ot), mc(g.tot+bonus-penalty)], gStyle()));
 
     const wsS = buildSheet(sRows);

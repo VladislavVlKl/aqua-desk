@@ -451,7 +451,7 @@ async function doExportTrainer(trainerId,fioEnc,year,month) {
   if (!window.Telegram?.WebApp?.initData) {
     await ensureXlsx();
     const d=await DB.getTrainerDetail(trainerId,year,month);
-    exportTrainerExcel(fio,year,month,d.workouts,d.duties,d.groupSessions,d.adjustment);
+    exportTrainerExcel(fio,year,month,d.workouts,d.duties,d.groupSessions,d.adjustments?.length?d.adjustments:d.adjustment);
     return;
   }
   const m=el('div','modal-overlay');

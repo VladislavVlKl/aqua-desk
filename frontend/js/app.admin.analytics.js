@@ -39,7 +39,7 @@ function _pkgMatch(child, balance, cat) {
 async function calcMonthPayroll(branch, year, month) {
   const data = await DB.getSummary(year, month, branch||null);
   const { groupSubstitutions=[], ptSubstitutions=[], childAutoByTrainer={} } = data;
-  const adjMap = {}; (data.adjustments||[]).forEach(a=>{ adjMap[a.trainer_id]=a; });
+  const adjMap = aggAdjustments(data.adjustments);
   const rows = (data.profiles||[]).map(p=>{
     const sal = calcSalary({
       workouts:[...(data.workouts||[]).filter(w=>w.trainer_id===p.id),

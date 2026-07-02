@@ -316,6 +316,12 @@ Object.assign(DB, {
     const [w,d,tg,gs,p,adj,gp,gsubR,ptsubR,trialR,gpayR,gattR] =
       await Promise.all([wq,dq,tgq,gsq,pq,aq,gpq,gsub,ptsub,trialq,gpayq,gattq]);
 
+    // Премии/штрафы: при выборке по филиалу — только строки этого филиала
+    // (branch='' — легаси «без филиала», показываем везде как раньше)
+    const adjData = branch
+      ? (adj.data||[]).filter(a => !a.branch || a.branch===branch)
+      : (adj.data||[]);
+
     // Замены в группах: при выборке по филиалу оставляем только замены в группах ЭТОГО филиала,
     // иначе замена тренера в другом филиале попадёт в ведомости обоих филиалов (двойной счёт)
     const gsubData = branch
@@ -348,7 +354,7 @@ Object.assign(DB, {
       trainerGroups:       tg.data     ||[],
       groupSessions:       gs.data     ||[],
       profiles:            p.data      ||[],
-      adjustments:         adj.data    ||[],
+      adjustments:         adjData,
       groupPayouts:        gp.data     ||[],
       groupSubstitutions:  gsubData,
       ptSubstitutions:     ptsubR.data ||[],
@@ -477,7 +483,7 @@ Object.assign(DB, {
         .eq('trainer_id',trainerId).gte('session_date',fromDay).lt('session_date',toDay)
         .order('session_date',{ascending:false}),
       sb().from('month_adjustments').select('*')
-        .eq('trainer_id',trainerId).eq('year',year).eq('month',month).maybeSingle(),
+        .eq('trainer_id',trainerId).eq('year',year).eq('month',month),
       sb().from('group_trainer_payouts').select('*')
         .eq('trainer_id',trainerId).eq('month',fromDay),
       sb().from('group_substitutions').select('*, trainer_groups(*, group_types(name))')
@@ -497,7 +503,9 @@ Object.assign(DB, {
       duties:             d.data      ||[],
       trainerGroups:      tg.data     ||[],
       groupSessions:      gs.data     ||[],
-      adjustment:         adj.data    ||null,
+      // adjustment — агрегат для calcSalary; adjustments — строки по филиалам (форма/экспорт)
+      adjustment:         Object.values(aggAdjustments(adj.data||[]))[0]||null,
+      adjustments:        adj.data    ||[],
       groupPayouts:       gp.data     ||[],
       groupSubstitutions: gsub.data   ||[],
       sessionNotes:       notes.data  ||[],

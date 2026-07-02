@@ -134,7 +134,7 @@ async function loadAdminSummary(year,month,branch) {
     const totalSalary    = data.profiles?.length
       ? (() => {
           const {groupSubstitutions=[],ptSubstitutions=[],childAutoByTrainer={}} = data;
-          const adjMap = {}; (data.adjustments||[]).forEach(a=>{adjMap[a.trainer_id]=a;});
+          const adjMap = aggAdjustments(data.adjustments);
           return (data.profiles||[]).reduce((s,p)=>{
             const sal = calcSalary({
               workouts:[...(data.workouts||[]).filter(w=>w.trainer_id===p.id),
@@ -168,7 +168,7 @@ async function loadAdminSummary(year,month,branch) {
 function renderSummaryTable(data,year,month,isAdmin) {
   const {workouts,duties,trainerGroups,groupSessions,profiles,adjustments=[]}=data;
   if (!profiles.length) return '<p class="hint">Нет тренеров</p>';
-  const adjMap={}; (adjustments||[]).forEach(a=>{adjMap[a.trainer_id]=a;});
+  const adjMap=aggAdjustments(adjustments);
   const {groupSubstitutions=[],ptSubstitutions=[],childAutoByTrainer={}}=data;
   const rows=profiles.map(p=>{
     const sal=calcSalary({
@@ -219,6 +219,8 @@ async function adminDetail(trainerId,fioEnc,year,month) {
   $('#tab-content').innerHTML=`<div class="tab-pad"><h3>${fio}</h3><div class="center-screen"><div class="spinner"></div></div></div>`;
   try {
     const d=await DB.getTrainerDetail(trainerId,year,month);
+    const {data:prof}=await sb().from('profiles').select('branches').eq('id',trainerId).single();
+    const trainerBranches=prof?.branches||[];
     const sal=calcSalary({...d,trainerId});
     $('#tab-content').innerHTML=`<div class="tab-pad">
       <div class="section-header">
@@ -237,18 +239,7 @@ async function adminDetail(trainerId,fioEnc,year,month) {
           <div class="s-val">${fmt(sal.total)}</div><div class="s-lbl">К выплате</div>
         </div>
       </div>
-      <div class="adj-form">
-        <h4>Премия / Штраф</h4>
-        <div style="display:flex;gap:10px;margin-bottom:8px">
-          <div class="form-group" style="flex:1;margin:0"><label>Премия</label>
-            <input type="number" id="adj-bonus" value="${d.adjustment?.bonus||0}" min="0"></div>
-          <div class="form-group" style="flex:1;margin:0"><label>Штраф</label>
-            <input type="number" id="adj-penalty" value="${d.adjustment?.penalty||0}" min="0"></div>
-        </div>
-        <input id="adj-notes" type="text" placeholder="Комментарий" value="${d.adjustment?.notes||''}">
-        <button class="btn btn-sm btn-primary" style="margin-top:8px;width:100%"
-          onclick="doSaveAdj(${trainerId},${year},${month})">Сохранить</button>
-      </div>
+      ${renderAdjForm(trainerId, year, month, d.adjustments||[], trainerBranches)}
 
       <h4 style="margin-top:16px">Тренировки (${d.workouts.length})</h4>
       ${!d.workouts.length?'<p class="hint">Нет</p>':d.workouts.map(w=>`
@@ -313,10 +304,49 @@ async function adminDetail(trainerId,fioEnc,year,month) {
     </div>`;
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
+// Форма премии/штрафа — теперь ПО ФИЛИАЛАМ (строка month_adjustments на филиал).
+// window._adjRows: branch → строка корректировки текущего тренера/месяца.
+function renderAdjForm(trainerId, year, month, adjRows, branches) {
+  window._adjRows = {};
+  (adjRows||[]).forEach(a=>{ window._adjRows[a.branch||''] = a; });
+  const opts = [...(branches||[])];
+  // «Общая» опция — только если есть легаси-строка без филиала (или у тренера нет филиалов)
+  const showLegacy = !!window._adjRows[''] || !opts.length;
+  const cur = opts[0] ?? '';
+  const curAdj = window._adjRows[cur]||{};
+  const multi = opts.length>1 || showLegacy;
+  return `<div class="adj-form">
+    <h4>Премия / Штраф${multi?' <span style="font-weight:normal;font-size:12px;color:var(--hint)">по филиалу</span>':''}</h4>
+    ${multi?`<div class="form-group" style="margin-bottom:8px"><select id="adj-branch" onchange="onAdjBranchChange()">
+      ${opts.map(b=>`<option value="${b}">${b}</option>`).join('')}
+      ${showLegacy?'<option value="">Общая (без филиала)</option>':''}
+    </select></div>`:`<input type="hidden" id="adj-branch" value="${cur}">`}
+    <div style="display:flex;gap:10px;margin-bottom:8px">
+      <div class="form-group" style="flex:1;margin:0"><label>Премия</label>
+        <input type="number" id="adj-bonus" value="${curAdj.bonus||0}" min="0"></div>
+      <div class="form-group" style="flex:1;margin:0"><label>Штраф</label>
+        <input type="number" id="adj-penalty" value="${curAdj.penalty||0}" min="0"></div>
+    </div>
+    <input id="adj-notes" type="text" placeholder="Комментарий" value="${curAdj.notes||''}">
+    <button class="btn btn-sm btn-primary" style="margin-top:8px;width:100%"
+      onclick="doSaveAdj(${trainerId},${year},${month})">Сохранить</button>
+  </div>`;
+}
+function onAdjBranchChange() {
+  const b = document.getElementById('adj-branch')?.value ?? '';
+  const a = (window._adjRows||{})[b]||{};
+  const set=(id,v)=>{ const e=document.getElementById(id); if(e) e.value=v; };
+  set('adj-bonus', a.bonus||0); set('adj-penalty', a.penalty||0); set('adj-notes', a.notes||'');
+}
 async function doSaveAdj(trainerId,year,month) {
+  const branch=document.getElementById('adj-branch')?.value ?? '';
   const bonus=parseInt(document.getElementById('adj-bonus')?.value||0);
   const penalty=parseInt(document.getElementById('adj-penalty')?.value||0);
   const notes=document.getElementById('adj-notes')?.value.trim()||'';
-  try { await DB.upsertAdjustment(trainerId,year,month,bonus,penalty,notes); invalidateCachePrefix('adm_summary'); toast('Сохранено ✅','success'); }
+  try {
+    const saved=await DB.upsertAdjustment(trainerId,year,month,bonus,penalty,notes,branch);
+    if (window._adjRows) window._adjRows[branch]=saved;
+    invalidateCachePrefix('adm_summary'); toast('Сохранено ✅','success');
+  }
   catch(e) { console.error(e); toast('Ошибка','error'); }
 }

@@ -40,7 +40,7 @@ function ceoTab(tab) {
 // ЗП всех тренеров за месяц из данных getSummary → [{p, sal}]
 function ceoFotRows(data) {
   const {groupSubstitutions=[],ptSubstitutions=[],childAutoByTrainer={}} = data;
-  const adjMap={}; (data.adjustments||[]).forEach(a=>{adjMap[a.trainer_id]=a;});
+  const adjMap=aggAdjustments(data.adjustments);
   return (data.profiles||[]).map(p=>({p, sal: calcSalary({
     workouts:[...(data.workouts||[]).filter(w=>w.trainer_id===p.id),
               ...(ptSubstitutions||[]).filter(w=>w.trainer_id===p.id)],
