@@ -316,6 +316,12 @@ Object.assign(DB, {
     const [w,d,tg,gs,p,adj,gp,gsubR,ptsubR,trialR,gpayR,gattR] =
       await Promise.all([wq,dq,tgq,gsq,pq,aq,gpq,gsub,ptsub,trialq,gpayq,gattq]);
 
+    // Замены в группах: при выборке по филиалу оставляем только замены в группах ЭТОГО филиала,
+    // иначе замена тренера в другом филиале попадёт в ведомости обоих филиалов (двойной счёт)
+    const gsubData = branch
+      ? (gsubR.data||[]).filter(s => !s.trainer_groups?.branch || s.trainer_groups.branch===branch)
+      : (gsubR.data||[]);
+
     // ── АВТО-ЗП детских групп: один расчёт на инстанс, без N+1 ──
     const childTgs = (tg.data||[]).filter(_isChildTg);
     const rateHistory = childTgs.length
@@ -325,7 +331,7 @@ Object.assign(DB, {
       childTgs,
       payments:      gpayR.data||[],
       sessions:      gs.data   ||[],
-      substitutions: gsubR.data||[],   // уже только approved
+      substitutions: gsubData,         // уже только approved + фильтр по филиалу
       adjustments:   gp.data   ||[],
       rateHistory,
       attendance:    gattR.data||[],
@@ -344,7 +350,7 @@ Object.assign(DB, {
       profiles:            p.data      ||[],
       adjustments:         adj.data    ||[],
       groupPayouts:        gp.data     ||[],
-      groupSubstitutions:  gsubR.data  ||[],
+      groupSubstitutions:  gsubData,
       ptSubstitutions:     ptsubR.data ||[],
       trialSessions:       trialR.data ||[],
       childAutoByTrainer,

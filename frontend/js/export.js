@@ -75,6 +75,19 @@ function buildSheet(rows) {
   return ws;
 }
 
+// Компактная сводка ЗП тренера: ПТ всего / дежурства / прочее / итого.
+// tot — счётчики по категориям (c1..r3, dh), sal — результат calcSalary.
+function pushSalarySummaryBlock(rows, tot, sal) {
+  rows.push(sr(['── Сводка ──','кол-во','','сумма'], hStyle(XL.BLUE_MID)));
+  const ptCount = tot.c1+tot.c2+tot.c3+tot.v1+tot.v2+tot.v3+tot.r1+tot.r2+tot.r3;
+  const ptSum   = sal.ptSum + (sal.dropInSum||0);
+  rows.push(sr(['ПТ всего',        ptCount,            '', mc(ptSum)],       rStyle(true)));
+  rows.push(sr(['Дежурства (ч)',   +tot.dh.toFixed(2), '', mc(sal.dutySum)], rStyle(false)));
+  const other = sal.total - ptSum - sal.dutySum;
+  if (other) rows.push(sr(['Прочее (группы, замены, премии/штрафы)','','',mc(other)], rStyle(true)));
+  rows.push(sr(['ИТОГО','','',mc(sal.total)], gStyle()));
+}
+
 // ─────────────────────────────────────────────
 // ЭКСПОРТ СВОДНОЙ ВЕДОМОСТИ (координатор)
 // 1 файл = 1 филиал
@@ -325,12 +338,15 @@ function exportSummaryExcel(year, month, summaryData, branch) {
 
     salLines.forEach((r,i) => rows.push(sr(r, rStyle(i%2===0))));
     rows.push(sr(['ИТОГО К ВЫПЛАТЕ','','',mc(sal.total)], gStyle()));
+    rows.push([]);
+    pushSalarySummaryBlock(rows, tot, sal);
 
     // Лист
     const sheetName = `${pi+1} ${p.fio.split(' ')[0]}`; // "1 Иванов"
     const ws = buildSheet(rows);
-    ws['!cols'] = [{wch:12},{wch:6},{wch:6},{wch:6},{wch:7},{wch:7},{wch:7},
-                   {wch:9},{wch:9},{wch:9},{wch:8},{wch:16}];
+    // A широкая под подписи расчёта ЗП, C/D — под суммы с разрядами (иначе в Excel будет ####)
+    ws['!cols'] = [{wch:20},{wch:6},{wch:10},{wch:12},{wch:7},{wch:7},{wch:7},
+                   {wch:9},{wch:9},{wch:9},{wch:8}];
     XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0,31));
   });
 
@@ -346,6 +362,14 @@ function exportTrainerExcel(trainerFio, year, month, workouts, duties, groupSess
   const daysInMonth = new Date(year, month, 0).getDate();
   const monthName   = new Date(year, month-1).toLocaleDateString('ru-RU', {month:'long',year:'numeric'});
 
+  // Филиалы тренера в этом месяце: >1 → отдельная пара листов на каждый филиал + сводный лист
+  const allBranches = [...new Set([...(workouts||[]),...(duties||[]),...(groupSessions||[])]
+    .map(x=>x.branch).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ru'));
+  const multiBranch = allBranches.length > 1;
+
+  // Строит пару листов («По дням»+suffix, «По клиентам»+suffix) по подмножеству данных.
+  // Возвращает {tot, sal} для сводного листа по филиалам.
+  function addBranchSheets(workouts, duties, groupSessions, adjustment, suffix) {
   const byDay = {};
   workouts.forEach(w => {
     const day = new Date(w.workout_date).getDate();
@@ -369,7 +393,7 @@ function exportTrainerExcel(trainerFio, year, month, workouts, duties, groupSess
   });
 
   const rows = [];
-  rows.push([tc(`${trainerFio} — ${monthName}`, titleStyle())]);
+  rows.push([tc(`${trainerFio} — ${monthName}${suffix}`, titleStyle())]);
   rows.push([]);
   rows.push(sr(['Число','1кат','2кат','3кат','1катВ','2катВ','3катВ',
                  'Разов.1к','Разов.2к','Разов.3к','Деж.(ч)'], hStyle()));
@@ -409,11 +433,14 @@ function exportTrainerExcel(trainerFio, year, month, workouts, duties, groupSess
   if (sal.penalty)  salLines.push(['Штраф','','',mc(-sal.penalty)]);
   salLines.forEach((r,i)=>rows.push(sr(r,rStyle(i%2===0))));
   rows.push(sr(['ИТОГО К ВЫПЛАТЕ','','',mc(sal.total)],gStyle()));
+  rows.push([]);
+  pushSalarySummaryBlock(rows, tot, sal);
 
   const ws = buildSheet(rows);
-  ws['!cols']=[{wch:12},{wch:6},{wch:6},{wch:6},{wch:7},{wch:7},{wch:7},
-               {wch:9},{wch:9},{wch:9},{wch:8},{wch:16}];
-  XLSX.utils.book_append_sheet(wb,ws,'По дням');
+  // A широкая под подписи расчёта ЗП, C/D — под суммы с разрядами (иначе в Excel будет ####)
+  ws['!cols']=[{wch:20},{wch:6},{wch:10},{wch:12},{wch:7},{wch:7},{wch:7},
+               {wch:9},{wch:9},{wch:9},{wch:8}];
+  XLSX.utils.book_append_sheet(wb,ws,('По дням'+suffix).slice(0,31));
 
   // ── Лист 2: По клиентам (сетка клиент × день) ──
   const DOW = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
@@ -421,8 +448,8 @@ function exportTrainerExcel(trainerFio, year, month, workouts, duties, groupSess
   // Группируем тренировки по клиенту
   const byClient = {};
   workouts.forEach(w => {
-    const cid = w.client_id || w.clients?.name || '—';
-    if (!byClient[cid]) byClient[cid] = { name: w.clients?.name||'—', days: {}, total: 0 };
+    const cid = w.client_id || w.clients?.fio || w.clients?.name || '—';
+    if (!byClient[cid]) byClient[cid] = { name: w.clients?.fio||w.clients?.name||'—', days: {}, total: 0 };
     const day = new Date(w.workout_date).getDate();
     if (!byClient[cid].days[day]) byClient[cid].days[day] = [];
     if (w.is_drop_in) {
@@ -446,13 +473,13 @@ function exportTrainerExcel(trainerFio, year, month, workouts, duties, groupSess
     return workouts.some(w => !w.is_drop_in && (w.client_id===Object.keys(byClient).find(k=>byClient[k]===c) || w.clients?.name===c.name));
   });
   // Проще: берём всех клиентов у кого хоть одна не-разовая тренировка
-  const regularClientIds = new Set(workouts.filter(w=>!w.is_drop_in).map(w=>w.client_id||w.clients?.name||'—'));
+  const regularClientIds = new Set(workouts.filter(w=>!w.is_drop_in).map(w=>w.client_id||w.clients?.fio||w.clients?.name||'—'));
   const clientList = Object.entries(byClient)
     .filter(([id]) => regularClientIds.has(id))
     .sort(([,a],[,b]) => a.name.localeCompare(b.name,'ru'));
 
   const clRows = [];
-  clRows.push([tc(`${trainerFio} — ${monthName} — по клиентам`, titleStyle())]);
+  clRows.push([tc(`${trainerFio} — ${monthName}${suffix} — по клиентам`, titleStyle())]);
   clRows.push([]);
 
   // Шапка: день недели
@@ -502,7 +529,49 @@ function exportTrainerExcel(trainerFio, year, month, workouts, duties, groupSess
 
   const ws2 = buildSheet(clRows);
   ws2['!cols'] = [{wch:22}, ...Array.from({length:daysInMonth}, ()=>({wch:4})), {wch:7}];
-  XLSX.utils.book_append_sheet(wb, ws2, 'По клиентам');
+  XLSX.utils.book_append_sheet(wb, ws2, ('По клиентам'+suffix).slice(0,31));
+
+  return {tot, sal};
+  } // конец addBranchSheets
+
+  if (!multiBranch) {
+    addBranchSheets(workouts, duties, groupSessions, adjustment, '');
+  } else {
+    // Пара листов на каждый филиал. Премию/штраф (adjustment) в филиальные листы не кладём —
+    // они назначаются раз в месяц без привязки к филиалу, показываем на сводном листе
+    const perBranch = allBranches.map(b => {
+      const r = addBranchSheets(
+        (workouts||[]).filter(w=>w.branch===b),
+        (duties||[]).filter(d=>d.branch===b),
+        (groupSessions||[]).filter(g=>g.branch===b),
+        null, ` — ${b}`);
+      return {branch:b, ...r};
+    });
+
+    // Сводный лист по филиалам
+    const sRows = [];
+    sRows.push([tc(`${trainerFio} — ${monthName} — по филиалам`, titleStyle())]);
+    sRows.push([]);
+    sRows.push(sr(['Филиал','ПТ (кол-во)','Сумма ПТ','Деж.(ч)','Сумма деж.','Прочее','Итого'], hStyle()));
+
+    const g = {pt:0,ps:0,dh:0,ds:0,ot:0,tot:0};
+    perBranch.forEach(({branch,tot,sal},i) => {
+      const ptCount = tot.c1+tot.c2+tot.c3+tot.v1+tot.v2+tot.v3+tot.r1+tot.r2+tot.r3;
+      const ptSum   = sal.ptSum + (sal.dropInSum||0);
+      const other   = sal.total - ptSum - sal.dutySum;
+      sRows.push(sr([branch, ptCount, mc(ptSum), +tot.dh.toFixed(2), mc(sal.dutySum), mc(other), mc(sal.total)], rStyle(i%2===0)));
+      g.pt+=ptCount; g.ps+=ptSum; g.dh+=tot.dh; g.ds+=sal.dutySum; g.ot+=other; g.tot+=sal.total;
+    });
+    const bonus   = adjustment?.bonus  ||0;
+    const penalty = adjustment?.penalty||0;
+    if (bonus)   sRows.push(sr(['Премия','','','','','',mc(bonus)],    rStyle(false)));
+    if (penalty) sRows.push(sr(['Штраф','','','','','',mc(-penalty)],  rStyle(true)));
+    sRows.push(sr(['ИТОГО', g.pt, mc(g.ps), +g.dh.toFixed(2), mc(g.ds), mc(g.ot), mc(g.tot+bonus-penalty)], gStyle()));
+
+    const wsS = buildSheet(sRows);
+    wsS['!cols'] = [{wch:20},{wch:11},{wch:13},{wch:8},{wch:12},{wch:13},{wch:14}];
+    XLSX.utils.book_append_sheet(wb, wsS, 'Сводка по филиалам');
+  }
 
   XLSX.writeFile(wb,`ЗП_${trainerFio.split(' ')[0]}_${monthName}.xlsx`);
 }
@@ -644,7 +713,7 @@ function exportChildGroupExcel(groupId, monthStr, report, groupInfo) {
 // ФИЛИАЛЬНАЯ ВЫГРУЗКА ДЕТСКИХ ГП
 // Один файл = один филиал, лист на каждую группу + сводный
 // ─────────────────────────────────────────────
-function exportBranchChildGroupsExcel(branch, monthStr, groupReports) {
+function exportBranchChildGroupsExcel(branch, monthStr, groupReports, payrolls=[]) {
   const XLSX = window.XLSX;
   const wb   = XLSX.utils.book_new();
   const monthLabel = new Date(monthStr).toLocaleDateString('ru-RU',{month:'long',year:'numeric'});
@@ -686,6 +755,44 @@ function exportBranchChildGroupsExcel(branch, monthStr, groupReports) {
   const wsSum = buildSheet(summaryRows);
   wsSum['!cols'] = [{wch:22},{wch:22},{wch:8},{wch:8},{wch:10},{wch:12},{wch:14},{wch:14}];
   XLSX.utils.book_append_sheet(wb, wsSum, 'Сводка');
+
+  // ── Лист: ЗП сводка (все группы разом, формула calcChildGroupPayroll) ──
+  if (payrolls.length) {
+    const zRows = [];
+    zRows.push([tc(`ЗП тренеров — детские ГП — ${branch} — ${monthLabel}`, titleStyle())]);
+    zRows.push([]);
+    zRows.push(sr(['Группа','Тренер','Роль','Формула','Авто','Премия','Штраф','К выплате'], hStyle()));
+
+    let grand = 0, ri = 0;
+    payrolls.forEach(({groupName, calc}) => {
+      (calc.rows||[]).forEach(r => {
+        const finalAmt = r.final !== undefined ? r.final : r.autoAmt;
+        grand += finalAmt;
+        const rs = rStyle(ri++%2===0);
+        zRows.push([
+          tc(groupName, rs), tc(r.fio, rs), tc(r.role, rs), tc(r.calcNote||'', rs),
+          mc(r.autoAmt, rs), mc(r.bonus||0, rs), mc(r.penalty||0, rs),
+          mc(finalAmt, {...rs, font:{...rs.font, bold:true, color:{rgb:XL.GREEN_DARK}}}),
+        ]);
+      });
+      if (calc.leaderName) {
+        grand += calc.leaderFee;
+        const rs = rStyle(ri++%2===0);
+        zRows.push([
+          tc(groupName, rs), tc(calc.leaderName, rs), tc('Руководитель', rs),
+          tc(`${calc.leaderPct}% пула (+ остаток, если все ставочники)`, rs),
+          mc(calc.leaderFee, rs), tc('—', rs), tc('—', rs), mc(calc.leaderFee, rs),
+        ]);
+      }
+    });
+
+    zRows.push([]);
+    zRows.push(sr(['ИТОГО к выплате:','','','','','','', mc(grand)], gStyle()));
+
+    const wsZ = buildSheet(zRows);
+    wsZ['!cols'] = [{wch:20},{wch:22},{wch:14},{wch:44},{wch:14},{wch:10},{wch:10},{wch:14}];
+    XLSX.utils.book_append_sheet(wb, wsZ, 'ЗП сводка');
+  }
 
   // ── Лист на каждую группу ──
   groupReports.forEach(({tg, report}) => {
@@ -816,7 +923,7 @@ function exportGroupPayrollExcel(groupName, monthStr, totalRevenue, activeCount,
   rows.push(sr(['ИТОГО к выплате:','','','','','', mc(grandTotal)], gStyle()));
 
   const ws = buildSheet(rows);
-  ws['!cols'] = [{wch:22},{wch:14},{wch:34},{wch:14},{wch:10},{wch:10},{wch:14}];
+  ws['!cols'] = [{wch:22},{wch:14},{wch:44},{wch:14},{wch:10},{wch:10},{wch:14}];
   ws['!merges'] = [{s:{r:0,c:0},e:{r:0,c:6}}];
   XLSX.utils.book_append_sheet(wb, ws, 'ЗП тренерам');
   XLSX.writeFile(wb, `ЗП_${safeName}_${monthLabel}.xlsx`);

@@ -482,8 +482,12 @@ function renderPickBranchForChildGP(monthStr, branches) {
   document.body.appendChild(m);
 }
 
-// Скачать Excel всех детских групп по филиалу
+// Скачать Excel всех детских групп по филиалу.
+// Включает лист «ЗП сводка» — доступ только координатору и старшему тренеру.
 async function doExportBranchChildGroups(monthStr, branches) {
+  if (!['admin','senior_trainer'].includes(STATE.profile?.role)) {
+    toast('Доступно только координатору и старшему тренеру','error'); return;
+  }
   if (window.Telegram?.WebApp?.initData) {
     const m=el('div','modal-overlay');
     m.innerHTML=`<div class="modal"><div class="modal-header"><h3>Скачать Excel</h3>
@@ -521,7 +525,21 @@ async function doExportBranchChildGroups(monthStr, branches) {
       reports.push({tg, report});
     }
 
-    exportBranchChildGroupsExcel(branch, monthStr, reports);
+    // ЗП по каждой группе — та же ЕДИНАЯ формула, что и в отчёте на экране (calcChildGroupPayroll)
+    const payrolls = [];
+    for (const {report} of reports) {
+      const {payments, attendance, payouts, trainers, instanceSessions, substitutions, groupTypeInfo} = report;
+      const approvedSubs = (substitutions||[]).filter(s=>s.status==='approved');
+      const rateHistory  = await DB.getRateHistory((trainers||[]).map(t=>t.id), monthStr);
+      const isArtSwim    = groupTypeInfo?.name?.toLowerCase().includes('art');
+      const calc = calcChildGroupPayroll({
+        payments, trainers, instanceSessions, substitutions: approvedSubs,
+        rateHistory, adjustments: payouts, monthStr, isArtSwim, attendance,
+      });
+      payrolls.push({groupName: groupTypeInfo?.name||'Группа', calc});
+    }
+
+    exportBranchChildGroupsExcel(branch, monthStr, reports, payrolls);
   } catch(e) { toast('Ошибка экспорта: '+(e?.message||String(e)),'error'); console.error('[exportBranch]',e); }
 }
 
