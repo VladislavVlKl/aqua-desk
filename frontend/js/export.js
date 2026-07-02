@@ -356,9 +356,38 @@ function exportSummaryExcel(year, month, summaryData, branch) {
 // ─────────────────────────────────────────────
 // ЭКСПОРТ ИНДИВИДУАЛЬНОГО ОТЧЁТА ТРЕНЕРА
 // ─────────────────────────────────────────────
-function exportTrainerExcel(trainerFio, year, month, workouts, duties, groupSessions, adjustment) {
+// Карта workout.id → № занятия по абонементу клиента.
+// Абонемент тренировки = последний абонемент клиента с start_date <= даты тренировки;
+// номер = счёт тренировок клиента (не-разовых, любым тренером) внутри этого абонемента.
+function buildWorkoutNumbers(numbering) {
+  const map = {};
+  if (!numbering) return map;
+  const subsBy = {};
+  (numbering.subs||[]).forEach(s=>{ (subsBy[s.client_id]=subsBy[s.client_id]||[]).push(s); });
+  Object.values(subsBy).forEach(a=>a.sort((x,y)=>x.start_date<y.start_date?-1:1));
+  const histBy = {};
+  (numbering.history||[]).filter(w=>!w.is_drop_in).forEach(w=>{ (histBy[w.client_id]=histBy[w.client_id]||[]).push(w); });
+  Object.entries(histBy).forEach(([cid,list])=>{
+    list.sort((a,b)=> a.workout_date<b.workout_date?-1 : a.workout_date>b.workout_date?1 : (a.id<b.id?-1:1));
+    const subsC = subsBy[cid]||[];
+    const counters = {};
+    list.forEach(w=>{
+      const day = String(w.workout_date).slice(0,10);
+      let sub = null;
+      for (const s of subsC) { if (s.start_date<=day) sub=s; else break; }
+      const key = sub ? sub.start_date : 'nosub';
+      counters[key]=(counters[key]||0)+1;
+      map[w.id]=counters[key];
+    });
+  });
+  return map;
+}
+
+function exportTrainerExcel(trainerFio, year, month, workouts, duties, groupSessions, adjustment, numbering=null) {
   const XLSX = window.XLSX;
   const wb   = XLSX.utils.book_new();
+  const numMap = buildWorkoutNumbers(numbering);
+  const hasNumbers = Object.keys(numMap).length > 0;
   const daysInMonth = new Date(year, month, 0).getDate();
   const monthName   = new Date(year, month-1).toLocaleDateString('ru-RU', {month:'long',year:'numeric'});
 
@@ -466,7 +495,8 @@ function exportTrainerExcel(trainerFio, year, month, workouts, duties, groupSess
     if (w.is_drop_in) {
       byClient[cid].days[day].push(`Р${w.drop_in_category||1}`);
     } else {
-      byClient[cid].days[day].push(String(w.category_at_moment||'?'));
+      // № занятия по абонементу (7-я, 8-я…); без данных нумерации — категория, как раньше
+      byClient[cid].days[day].push(String(numMap[w.id] ?? (w.category_at_moment||'?')));
     }
     byClient[cid].total++;
   });
@@ -491,7 +521,10 @@ function exportTrainerExcel(trainerFio, year, month, workouts, duties, groupSess
 
   const clRows = [];
   clRows.push([tc(`${trainerFio} — ${monthName}${suffix} — по клиентам`, titleStyle())]);
-  clRows.push([]);
+  clRows.push([tc(hasNumbers
+    ? 'В ячейке — № занятия по абонементу клиента (два числа = два занятия в день); Р1/Р2/Р3 — разовые'
+    : 'В ячейке — категория занятия (два числа = два занятия в день); Р1/Р2/Р3 — разовые',
+    {font:{sz:10,name:'Arial',color:{rgb:'6B7280'},italic:true}})]);
 
   // Шапка: день недели
   const dowRow = [tc('ФИО', hStyle())];

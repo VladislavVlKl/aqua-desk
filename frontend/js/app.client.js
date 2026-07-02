@@ -451,7 +451,33 @@ async function doExportTrainer(trainerId,fioEnc,year,month) {
   if (!window.Telegram?.WebApp?.initData) {
     await ensureXlsx();
     const d=await DB.getTrainerDetail(trainerId,year,month);
-    exportTrainerExcel(fio,year,month,d.workouts,d.duties,d.groupSessions,d.adjustments?.length?d.adjustments:d.adjustment);
+    // Для нумерации занятий по абонементу («7-я из 10») грузим абонементы клиентов
+    // и историю их тренировок с начала покрывающего абонемента (клиент мог заниматься и у заменяющих)
+    let numbering=null;
+    try {
+      const clientIds=[...new Set(d.workouts.filter(w=>!w.is_drop_in&&w.client_id).map(w=>w.client_id))];
+      if (clientIds.length) {
+        const monthStartDay=`${year}-${String(month).padStart(2,'0')}-01`;
+        const monthEnd=new Date(year,month,1).toISOString();
+        const {data:subs}=await sb().from('subscriptions')
+          .select('client_id,start_date,initial_balance')
+          .in('client_id',clientIds).lte('start_date',monthEnd.slice(0,10));
+        // История нужна с начала последнего абонемента, стартовавшего ДО месяца (по каждому клиенту)
+        const lastBefore={};
+        (subs||[]).forEach(s=>{ if (s.start_date<=monthStartDay &&
+          (!lastBefore[s.client_id]||s.start_date>lastBefore[s.client_id])) lastBefore[s.client_id]=s.start_date; });
+        const minFrom=clientIds.reduce((m,c)=>{
+          const f=lastBefore[c]||monthStartDay; return !m||f<m?f:m; },null)||monthStartDay;
+        const {data:hist}=await sb().from('workouts')
+          .select('id,client_id,workout_date,is_drop_in')
+          .in('client_id',clientIds).eq('pending_confirmation',false)
+          .gte('workout_date',new Date(minFrom).toISOString()).lt('workout_date',monthEnd)
+          .order('workout_date');
+        numbering={subs:subs||[],history:hist||[]};
+      }
+    } catch(e) { console.error('[exportTrainer numbering]',e); }
+    exportTrainerExcel(fio,year,month,d.workouts,d.duties,d.groupSessions,
+      d.adjustments?.length?d.adjustments:d.adjustment, numbering);
     return;
   }
   const m=el('div','modal-overlay');
