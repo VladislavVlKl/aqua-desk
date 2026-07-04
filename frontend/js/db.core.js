@@ -148,8 +148,10 @@ Object.assign(DB, {
     const {data,error} = await sb().rpc('verify_pin',{p_tg_id:tgId,p_pin:pin});
     if (error) throw error; return data;
   },
-  async changePin(profileId, pin) {
-    const {error} = await sb().rpc('change_pin',{p_profile_id:profileId,p_pin:pin});
+  async changePin(profileId, pin, oldPin=null) {
+    // Смена существующего PIN требует старый (WRONG_OLD_PIN при несовпадении);
+    // первичная установка (pincode ещё NULL) проходит без него.
+    const {error} = await sb().rpc('change_pin',{p_profile_id:profileId,p_pin:pin,p_old_pin:oldPin});
     if (error) throw error;
   },
 

@@ -162,6 +162,8 @@ async function renderTrainerEditProfile() {
       <input id="ep-fio" type="text" value="${profile.fio}"></div>
     <div class="form-group"><label>Телефон</label>
       <input id="ep-phone" type="tel" placeholder="+998 90 000 00 00" value="${profile.phone||''}"></div>
+    <div class="form-group"><label>Текущий PIN (только при смене PIN)</label>
+      <input id="ep-pin-old" type="password" inputmode="numeric" maxlength="4" placeholder="••••"></div>
     <div class="form-group"><label>Новый PIN (оставьте пустым чтобы не менять)</label>
       <input id="ep-pin" type="password" inputmode="numeric" maxlength="4" placeholder="••••"></div>
     <div class="form-group"><label>Подтвердите PIN</label>
@@ -173,15 +175,23 @@ async function renderTrainerEditProfile() {
 async function doSaveTrainerProfile() {
   const fio   = document.getElementById('ep-fio')?.value.trim();
   const phone = document.getElementById('ep-phone')?.value.trim();
-  const pin   = document.getElementById('ep-pin')?.value;
-  const pin2  = document.getElementById('ep-pin2')?.value;
+  const pin    = document.getElementById('ep-pin')?.value;
+  const pin2   = document.getElementById('ep-pin2')?.value;
+  const pinOld = document.getElementById('ep-pin-old')?.value;
   if (!fio) return toast('Введите ФИО','error');
   if (pin && !/^\d{4}$/.test(pin)) return toast('PIN: 4 цифры','error');
   if (pin && pin !== pin2) return toast('PIN не совпадает','error');
+  if (pin && !pinOld) return toast('Введите текущий PIN','error');
   try {
     const fields = {fio};
     if (phone) fields.phone = phone;
-    if (pin) await DB.changePin(STATE.profile.id, pin);
+    if (pin) {
+      try { await DB.changePin(STATE.profile.id, pin, pinOld); }
+      catch(e) {
+        if (String(e?.message||'').includes('WRONG_OLD_PIN')) return toast('Неверный текущий PIN','error');
+        throw e;
+      }
+    }
     await DB.updateProfile(STATE.profile.id, fields);
     STATE.profile = {...STATE.profile, ...fields};
     document.querySelector('.modal-overlay')?.remove();

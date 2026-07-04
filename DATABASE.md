@@ -66,7 +66,7 @@ schedule_slots → session_notes → workouts → client_transfers → training_
 |---|---|---|---|
 | `get_profile_by_tg_id` | `p_tg_id bigint` | json | профиль по Telegram ID (вход) |
 | `verify_pin` | `p_tg_id bigint, p_pin text` | boolean | проверка PIN |
-| `change_pin` | `p_profile_id int, p_pin text` | void | смена PIN (хеширует) |
+| `change_pin` | `p_profile_id int, p_pin text, p_old_pin text=NULL` | void | смена PIN: при существующем PIN обязателен старый (`WRONG_OLD_PIN`), первичная установка — без него (миграция 20260704140000) |
 | `claim_profile` | `p_profile_id int, p_tg_id bigint, p_pin text` | json | привязка существующего профиля к tg_id |
 | `increment_balance` | `client_id uuid, delta int` | void | атомарное изменение баланса; списание ниже нуля отклоняется (`INSUFFICIENT_BALANCE`), пополнение — всегда (миграция 20260704120000) |
 | `rename_branch` | `old_name text, new_name text` | void | переименование филиала во всех таблицах |
