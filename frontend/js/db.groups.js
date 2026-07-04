@@ -450,7 +450,7 @@ async unassignTrainerGroup(id) {
   // Групповые замены за месяц
   async getGroupSubstitutionsForMonth(branch, year, month) {
     const from = `${year}-${String(month).padStart(2,'0')}-01`;
-    const to   = new Date(year,month,1).toISOString().slice(0,10);
+    const to   = monthFirstDayStr(year, month+1);
     const {data,error} = await sb().from('group_substitutions')
       .select('*, original:profiles!original_trainer_id(fio), substitute:profiles!substitute_trainer_id(fio), trainer_groups(*, group_types(name, billing_model))')
       .gte('session_date',from).lt('session_date',to)
@@ -469,7 +469,7 @@ async unassignTrainerGroup(id) {
   },
   async getGroupSessions(trainerId, year, month) {
     const from = `${year}-${String(month).padStart(2,'0')}-01`;
-    const to   = new Date(year,month,1).toISOString().slice(0,10);
+    const to   = monthFirstDayStr(year, month+1);
     const {data,error} = await sb().from('group_sessions')
       .select('*, group_types(name,type,billing_model)')
       .eq('trainer_id',trainerId).gte('session_date',from).lt('session_date',to)

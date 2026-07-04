@@ -10,11 +10,11 @@ function _anRange(year, month) {
   const from    = new Date(year, month-1, 1).toISOString();
   const to      = new Date(year, month,   1).toISOString();
   const fromDay = `${year}-${String(month).padStart(2,'0')}-01`;
-  const toDay   = new Date(year, month, 1).toISOString().slice(0,10);
+  const toDay   = monthFirstDayStr(year, month+1);
   const py = month===1 ? year-1 : year;
   const pm = month===1 ? 12 : month-1;
   const pFromDay = `${py}-${String(pm).padStart(2,'0')}-01`;
-  const pToDay   = new Date(py, pm, 1).toISOString().slice(0,10);
+  const pToDay   = monthFirstDayStr(py, pm+1);
   return { from, to, fromDay, toDay, pFromDay, pToDay };
 }
 

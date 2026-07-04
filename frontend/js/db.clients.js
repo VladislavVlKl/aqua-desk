@@ -43,7 +43,10 @@ Object.assign(DB, {
     // Атомарное обновление через RPC чтобы избежать race condition
     const {data,error} = await sb().rpc('increment_balance', {client_id: clientId, delta: amount});
     if (error) {
-      // Fallback если RPC не создана
+      // Fallback ТОЛЬКО если RPC отсутствует. Прочие ошибки (INSUFFICIENT_BALANCE —
+      // защита от минуса) пробрасываем, иначе прямой update обошёл бы защиту.
+      const noFn = error.code==='42883' || error.code==='PGRST202';
+      if (!noFn) throw error;
       const {data:cl} = await sb().from('clients').select('balance').eq('id',clientId).single();
       const {data:d2,error:e2} = await sb().from('clients')
         .update({balance:(cl?.balance||0)+amount}).eq('id',clientId).select().single();
@@ -80,7 +83,14 @@ Object.assign(DB, {
       const cid = nonDebtNonDropin[0].client_id;
       // Атомарное списание через RPC — исключает race condition при двух устройствах
       const {error:balErr} = await sb().rpc('increment_balance', {client_id: cid, delta: -nonDebtNonDropin.length});
-      if (balErr) throw balErr;
+      if (balErr) {
+        // Баланс не списался (защита от минуса) — откатываем вставленные ПТ, иначе
+        // тренировка попала бы в ЗП тренера без списания у клиента
+        await sb().from('workouts').delete().in('id',(data||[]).map(w=>w.id));
+        if (String(balErr.message||'').includes('INSUFFICIENT_BALANCE'))
+          throw new Error('Баланс исчерпан — оформите «В долг» или новый пакет');
+        throw balErr;
+      }
       await sb().from('clients').update({last_used:new Date().toISOString()}).eq('id',cid);
     } else {
       await sb().from('clients')
@@ -226,7 +236,15 @@ Object.assign(DB, {
     if (we) throw we;
     // Списываем баланс клиента — ошибка пробрасывается наверх
     const {error:be} = await sb().rpc('increment_balance', {client_id: req.client_id, delta: -1});
-    if (be) throw be;
+    if (be) {
+      // Защита от минуса: откатываем только что вставленную ПТ, запрос остаётся pending
+      await sb().from('workouts').delete()
+        .eq('trainer_id',req.trainer_id).eq('client_id',req.client_id)
+        .eq('workout_date',req.workout_date).eq('pending_confirmation',false);
+      if (String(be.message||'').includes('INSUFFICIENT_BALANCE'))
+        throw new Error('Баланс клиента исчерпан — сначала оформите пакет или долг');
+      throw be;
+    }
     // Обновляем статус запроса
     const {error:ue} = await sb().from('late_workout_requests')
       .update({status:'approved', reviewed_by:reviewerId, reviewed_at:new Date().toISOString()})

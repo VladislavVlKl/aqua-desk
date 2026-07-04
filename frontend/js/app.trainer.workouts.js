@@ -174,6 +174,17 @@ async function _doLogWorkoutInner() {
   const branch=getBranch();
   if (!branch) return toast('Выберите филиал','error');
 
+  // Обычное списание не может превышать остаток пакета — минусовой баланс запрещён.
+  // Сценарий «клиент ещё не оплатил» оформляется типом «В долг» (баланс не трогает).
+  if (!isDropIn && !isDebt) {
+    const balRaw = opt?.dataset.bal;
+    const bal = (balRaw==null || balRaw==='') ? null : parseInt(balRaw);
+    if (bal!=null && count > bal)
+      return toast(bal<=0
+        ? '⛔ Баланс исчерпан — оформите «В долг» или новый пакет'
+        : `⛔ На балансе ${bal} ПТ, списать ${count} нельзя. Лишние — «В долг» или новый пакет`,'error');
+  }
+
   // Долговые конспекты соберём ниже — не блокируем здесь
   const notes=$('#wk-notes')?.value.trim()||'';
   if (count>1&&!notes) return toast('Введите примечание','error');

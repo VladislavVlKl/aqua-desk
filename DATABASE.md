@@ -68,7 +68,7 @@ schedule_slots → session_notes → workouts → client_transfers → training_
 | `verify_pin` | `p_tg_id bigint, p_pin text` | boolean | проверка PIN |
 | `change_pin` | `p_profile_id int, p_pin text` | void | смена PIN (хеширует) |
 | `claim_profile` | `p_profile_id int, p_tg_id bigint, p_pin text` | json | привязка существующего профиля к tg_id |
-| `increment_balance` | `client_id uuid, delta int` | void | атомарное изменение баланса |
+| `increment_balance` | `client_id uuid, delta int` | void | атомарное изменение баланса; списание ниже нуля отклоняется (`INSUFFICIENT_BALANCE`), пополнение — всегда (миграция 20260704120000) |
 | `rename_branch` | `old_name text, new_name text` | void | переименование филиала во всех таблицах |
 
 RLS включается автоматически на новых таблицах (event trigger `rls_auto_enable`).
@@ -169,6 +169,11 @@ rate_type (percent|flat|headcount) + rate_value · role (суша|вода|су�
 leader_name + leader_fee_percent · group_instance_id uuid · days_of_week text[] · session_time
 ```
 > `group_instance_id` связывает несколько trainer_groups в одну «физическую» группу (второй тренер).
+> ⚠️ Один активный тренер = ОДНА строка на инстанс: уникальный индекс
+> `trainer_groups_one_active_per_instance (trainer_id, group_instance_id) WHERE subscription_end IS NULL`
+> (миграция 20260704120100). Расчёт ЗП считает занятия тренера по каждой его строке —
+> вторая активная строка удваивала оплату. «Суша+вода» = две записи в group_sessions, не две строки.
+> Занятия относятся к строке только в окне [subscription_start, subscription_end) — см. calcChildGroupPayroll.
 
 **group_clients** — дети: `group_id, group_instance_id, name, age, start_date, monthly_price, level, is_active, subgroup`
 > `subgroup text NOT NULL DEFAULT ''` — подгруппа внутри группы (`''` = основная, иначе название, напр. `'16:00'`). Одна группа = N подгрупп с раздельными списками детей, общий вал/оплаты.

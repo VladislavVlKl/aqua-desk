@@ -207,7 +207,7 @@ async function renderCeoStats() {
         if (!firstSub[s.client_id]||s.start_date<firstSub[s.client_id]) firstSub[s.client_id]=s.start_date;
       });
       const mStart=`${year}-${String(month).padStart(2,'0')}-01`;
-      const mEnd=new Date(year,month,1).toISOString().slice(0,10);
+      const mEnd=monthFirstDayStr(year, month+1);
       const pStart=`${py}-${String(pm).padStart(2,'0')}-01`;
       const newCurr=Object.values(firstSub).filter(d=>d>=mStart&&d<mEnd).length;
       const newPrev=Object.values(firstSub).filter(d=>d>=pStart&&d<mStart).length;

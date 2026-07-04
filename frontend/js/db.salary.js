@@ -121,9 +121,19 @@ function calcChildGroupPayroll({payments=[], trainers=[], instanceSessions=[], s
   const flatTrainers    = trainers.filter(t=>t.rate_type==='flat');
   const allFlat         = percentTrainers.length===0 && flatTrainers.length>0;
 
+  // Занятие относится к строке членства, только если попадает в её окно действия
+  // [subscription_start, subscription_end). Иначе при перезаведении строки в середине
+  // месяца (старая закрыта 13-го, новая с 13-го) обе строки считали ВЕСЬ месяц → двойная
+  // оплата. Граничный день уходит новой строке. Строки без дат — как раньше, весь месяц.
+  const inRowWindow = (t, dateStr) => {
+    const d = String(dateStr).slice(0,10);
+    if (t.subscription_start && d <  String(t.subscription_start).slice(0,10)) return false;
+    if (t.subscription_end   && d >= String(t.subscription_end).slice(0,10))   return false;
+    return true;
+  };
   // Ставочник: каждое занятие по ставке на session_date (история), fallback 75 000
   const flatSessionsCost = t => (instanceSessions||[])
-    .filter(s=>s.trainer_id===t.trainer_id)
+    .filter(s=>s.trainer_id===t.trainer_id && inRowWindow(t, s.session_date))
     .reduce((acc,s)=>acc + (rateAt(t, s.session_date).value || 75000), 0);
   // Суммарные выплаты ставочников — вычитаются у процентных тренеров (арт-свим)
   const flatCost = flatTrainers.reduce((acc,ft)=>acc+flatSessionsCost(ft),0);
@@ -166,7 +176,7 @@ function calcChildGroupPayroll({payments=[], trainers=[], instanceSessions=[], s
 
   const subs = substitutions||[];
   const rows = trainers.map(t=>{
-    const mySessions   = (instanceSessions||[]).filter(s=>s.trainer_id===t.trainer_id);
+    const mySessions   = (instanceSessions||[]).filter(s=>s.trainer_id===t.trainer_id && inRowWindow(t, s.session_date));
     // Замены, где заменяли ЭТОГО тренера (вычитаются у него)
     const mySubs       = subs.filter(s=>s.original_trainer_id===t.trainer_id);
     const mySubCost    = mySubs.reduce((acc,s)=>acc+Number(s.rate||75000),0);

@@ -148,6 +148,16 @@ function todayStr() {
           String(d.getDate()).padStart(2,'0')].join('-');
 }
 
+/** Первое число месяца в виде YYYY-MM-01 (month 1-based, можно выходить за 1..12 —
+ *  нормализуется: 13 → январь следующего года). Строится локально, БЕЗ toISOString():
+ *  new Date(y,m,1).toISOString() в UTC+5 даёт предыдущий день → терялся последний
+ *  день месяца в выборках групп (ЗП). */
+function monthFirstDayStr(year, month) {
+  const y = year + Math.floor((month - 1) / 12);
+  const m = ((month - 1) % 12 + 12) % 12 + 1;
+  return `${y}-${String(m).padStart(2,'0')}-01`;
+}
+
 function daysUntil(dateStr) {
   if (!dateStr) return null;
   return Math.ceil((new Date(dateStr) - new Date(todayStr())) / 86400000);

@@ -2,7 +2,7 @@ Object.assign(DB, {
   // Статистика активности всех тренеров (для координатора)
   async getTrainersActivityStats(year, month) {
     const from = `${year}-${String(month).padStart(2,'0')}-01`;
-    const to   = new Date(year, month, 1).toISOString().slice(0,10);
+    const to   = monthFirstDayStr(year, month+1);
     const cutoff48 = new Date(Date.now()-48*3600000).toISOString();
 
     const [profilesR, workoutsR, dutiesR, notesR, workoutsAllR] = await Promise.all([
@@ -126,7 +126,7 @@ Object.assign(DB, {
     const from    = new Date(year,month-1,1).toISOString();
     const to      = new Date(year,month,  1).toISOString();
     const fromDay = `${year}-${String(month).padStart(2,'0')}-01`;
-    const toDay   = new Date(year,month,1).toISOString().slice(0,10);
+    const toDay   = monthFirstDayStr(year, month+1);
 
     // Предыдущий месяц
     const py = month===1 ? year-1 : year;
@@ -134,7 +134,7 @@ Object.assign(DB, {
     const pfrom    = new Date(py,pm-1,1).toISOString();
     const pto      = new Date(py,pm,  1).toISOString();
     const pfromDay = `${py}-${String(pm).padStart(2,'0')}-01`;
-    const ptoDay   = new Date(py,pm,1).toISOString().slice(0,10);
+    const ptoDay   = monthFirstDayStr(py, pm+1);
 
     // Запросы параллельно
     let currWQ = sb().from('workouts')
@@ -260,7 +260,7 @@ Object.assign(DB, {
     const from    = new Date(year,month-1,1).toISOString();
     const to      = new Date(year,month,  1).toISOString();
     const fromDay = `${year}-${String(month).padStart(2,'0')}-01`;
-    const toDay   = new Date(year,month,1).toISOString().slice(0,10);
+    const toDay   = monthFirstDayStr(year, month+1);
 
     let wq  = sb().from('workouts')
       .select('trainer_id,category_at_moment,branch,is_debt,debt_confirmed_at,is_drop_in,drop_in_category,workout_date,clients!client_id(age)')
@@ -467,7 +467,7 @@ Object.assign(DB, {
     const from    = new Date(year,month-1,1).toISOString();
     const to      = new Date(year,month,  1).toISOString();
     const fromDay = `${year}-${String(month).padStart(2,'0')}-01`;
-    const toDay   = new Date(year,month,1).toISOString().slice(0,10);
+    const toDay   = monthFirstDayStr(year, month+1);
     const [w,d,tg,gs,adj,gp,gsub,notes,trials,childAuto] = await Promise.all([
       sb().from('workouts').select('*, clients(fio,age), sub_profile:profiles!substitute_for(fio)')
         .eq('trainer_id',trainerId).gte('workout_date',from).lt('workout_date',to)
@@ -580,7 +580,7 @@ Object.assign(DB, {
   // Проданные абонементы за месяц (для выручки детских ПТ — по цене пакета).
   async getAnSubsRevenue(year, month, branch=null) {
     const fromDay = `${year}-${String(month).padStart(2,'0')}-01`;
-    const toDay   = new Date(year, month, 1).toISOString().slice(0,10);
+    const toDay   = monthFirstDayStr(year, month+1);
     const { data, error } = await sb().from('subscriptions')
       .select('start_date,initial_balance,trainer_id,clients(age,category),profiles!trainer_id(branches)')
       .gte('start_date', fromDay).lt('start_date', toDay);
@@ -606,8 +606,8 @@ Object.assign(DB, {
   // Абонементы за окно ~8 мес до конца месяца — карта «размер пакета клиента на дату»
   // для выручки по начислению (accrual).
   async getAnAllSubs(year, month) {
-    const toDay = new Date(year, month,   1).toISOString().slice(0,10);
-    const loDay = new Date(year, month-9, 1).toISOString().slice(0,10);
+    const toDay = monthFirstDayStr(year, month+1);
+    const loDay = monthFirstDayStr(year, month-8);
     const { data, error } = await sb().from('subscriptions')
       .select('client_id,start_date,initial_balance')
       .gte('start_date', loDay).lt('start_date', toDay);
