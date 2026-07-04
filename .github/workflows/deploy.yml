@@ -27,10 +27,17 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v6
 
-      - name: Prepare site files
-        run: |
-          mkdir -p _site
-          rsync -a frontend/ _site/
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Бандл: 31 js + 4 css → dist/app-<hash>.js|css, index.html переписывается на них.
+      # Скрипт сам копирует frontend/ в _site/ и валидирует бандл (node --check + глобальные
+      # имена). Падение сборки = падение деплоя, прод остаётся на прошлой версии.
+      # Откат к пофайловой раздаче: вернуть здесь rsync -a frontend/ _site/
+      - name: Prepare site files (bundle)
+        run: node scripts/build.js _site
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

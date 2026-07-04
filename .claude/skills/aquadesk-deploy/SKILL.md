@@ -28,6 +28,18 @@ done
 
 Если хоть один файл упал — **стоп**, покажи ошибку, не продолжай.
 
+### 1б. Проверка прод-сборки
+
+Прод собирается в CI (`deploy.yml` → `node scripts/build.js _site`). Прогони сборку локально,
+чтобы не уронить деплой:
+
+```bash
+node scripts/build.js /tmp/aquadesk-build-check && rm -rf /tmp/aquadesk-build-check
+```
+
+Скрипт сам делает `node --check` бандла и проверяет ключевые глобальные имена.
+Упала — **стоп**, покажи ошибку.
+
 ### 2. Показ изменений
 
 ```bash
@@ -46,8 +58,15 @@ cd /Users/vladislavklimov/aqua-desk && git add -A && git commit -m "<сообщ�
 
 ### 4. Подтверждение
 
-После успешного пуша скажи: "Задеплоено ✅ — GitHub Pages обновится через ~1 минуту."
-Если пуш упал — покажи ошибку и предложи что делать.
+После пуша деплой идёт через GitHub Actions (сборка бандла + publish). Проверь итог:
+
+```bash
+gh run list --workflow=deploy.yml -L1
+```
+
+Когда статус `completed success` — скажи: "Задеплоено ✅". Убедись, что Pages раздаёт
+новый бандл: `curl -s https://vladislavvlkl.github.io/aqua-desk/index.html | grep dist/app-`.
+Если workflow упал — покажи лог (`gh run view --log-failed`), прод остаётся на старой версии.
 
 ## Важно
 
