@@ -1,0 +1,44 @@
+-- Покрывающие индексы для всех FK без индекса (perf advisor: 41 находка).
+-- Ускоряют JOIN-ы сводки ЗП, отчётов и экспорта; на запись влияние незаметное (БД 18 МБ).
+-- Применено в прод 2026-07-04 (apply_migration fk_covering_indexes).
+CREATE INDEX IF NOT EXISTS idx_adult_group_clients_group_id ON public.adult_group_clients (group_id);
+CREATE INDEX IF NOT EXISTS idx_category_recalc_requests_client_id ON public.category_recalc_requests (client_id);
+CREATE INDEX IF NOT EXISTS idx_category_recalc_requests_reviewed_by ON public.category_recalc_requests (reviewed_by);
+CREATE INDEX IF NOT EXISTS idx_category_recalc_requests_trainer_id ON public.category_recalc_requests (trainer_id);
+CREATE INDEX IF NOT EXISTS idx_client_transfers_from_trainer_id ON public.client_transfers (from_trainer_id);
+CREATE INDEX IF NOT EXISTS idx_client_transfers_initiated_by ON public.client_transfers (initiated_by);
+CREATE INDEX IF NOT EXISTS idx_delete_requests_client_id ON public.delete_requests (client_id);
+CREATE INDEX IF NOT EXISTS idx_delete_requests_requested_by ON public.delete_requests (requested_by);
+CREATE INDEX IF NOT EXISTS idx_event_participants_trainer_id ON public.event_participants (trainer_id);
+CREATE INDEX IF NOT EXISTS idx_events_created_by ON public.events (created_by);
+CREATE INDEX IF NOT EXISTS idx_group_attendance_group_id ON public.group_attendance (group_id);
+CREATE INDEX IF NOT EXISTS idx_group_clients_group_id ON public.group_clients (group_id);
+CREATE INDEX IF NOT EXISTS idx_group_payments_group_id ON public.group_payments (group_id);
+CREATE INDEX IF NOT EXISTS idx_group_progress_notes_group_id ON public.group_progress_notes (group_id);
+CREATE INDEX IF NOT EXISTS idx_group_progress_notes_trainer_id ON public.group_progress_notes (trainer_id);
+CREATE INDEX IF NOT EXISTS idx_group_sessions_group_type_id ON public.group_sessions (group_type_id);
+CREATE INDEX IF NOT EXISTS idx_group_substitutions_group_id ON public.group_substitutions (group_id);
+CREATE INDEX IF NOT EXISTS idx_group_substitutions_original_trainer_id ON public.group_substitutions (original_trainer_id);
+CREATE INDEX IF NOT EXISTS idx_group_substitutions_substitute_trainer_id ON public.group_substitutions (substitute_trainer_id);
+CREATE INDEX IF NOT EXISTS idx_group_trainer_payouts_approved_by ON public.group_trainer_payouts (approved_by);
+CREATE INDEX IF NOT EXISTS idx_group_trainer_payouts_trainer_id ON public.group_trainer_payouts (trainer_id);
+CREATE INDEX IF NOT EXISTS idx_late_workout_requests_client_id ON public.late_workout_requests (client_id);
+CREATE INDEX IF NOT EXISTS idx_late_workout_requests_reviewed_by ON public.late_workout_requests (reviewed_by);
+CREATE INDEX IF NOT EXISTS idx_late_workout_requests_trainer_id ON public.late_workout_requests (trainer_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_queue_created_by ON public.notifications_queue (created_by);
+CREATE INDEX IF NOT EXISTS idx_ops_plans_created_by ON public.ops_plans (created_by);
+CREATE INDEX IF NOT EXISTS idx_schedule_confirmations_workout_id ON public.schedule_confirmations (workout_id);
+CREATE INDEX IF NOT EXISTS idx_schedule_slots_client_id ON public.schedule_slots (client_id);
+CREATE INDEX IF NOT EXISTS idx_schedule_slots_group_type_id ON public.schedule_slots (group_type_id);
+CREATE INDEX IF NOT EXISTS idx_session_notes_subscription_id ON public.session_notes (subscription_id);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_trainer_id ON public.subscriptions (trainer_id);
+CREATE INDEX IF NOT EXISTS idx_tech_issues_equipment_id ON public.tech_issues (equipment_id);
+CREATE INDEX IF NOT EXISTS idx_trainer_groups_group_type_id ON public.trainer_groups (group_type_id);
+CREATE INDEX IF NOT EXISTS idx_training_goals_client_id ON public.training_goals (client_id);
+CREATE INDEX IF NOT EXISTS idx_trial_delete_requests_trainer_id ON public.trial_delete_requests (trainer_id);
+CREATE INDEX IF NOT EXISTS idx_trial_delete_requests_trial_id ON public.trial_delete_requests (trial_id);
+CREATE INDEX IF NOT EXISTS idx_trial_sessions_trainer_id ON public.trial_sessions (trainer_id);
+CREATE INDEX IF NOT EXISTS idx_workout_delete_requests_trainer_id ON public.workout_delete_requests (trainer_id);
+CREATE INDEX IF NOT EXISTS idx_workout_delete_requests_workout_id ON public.workout_delete_requests (workout_id);
+CREATE INDEX IF NOT EXISTS idx_workouts_client_id ON public.workouts (client_id);
+CREATE INDEX IF NOT EXISTS idx_workouts_substitute_for ON public.workouts (substitute_for);

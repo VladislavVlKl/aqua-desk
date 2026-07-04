@@ -72,6 +72,7 @@ schedule_slots → session_notes → workouts → client_transfers → training_
 | `rename_branch` | `old_name text, new_name text` | void | переименование филиала во всех таблицах |
 
 RLS включается автоматически на новых таблицах (event trigger `rls_auto_enable`).
+Все одноколоночные FK покрыты индексами `idx_<таблица>_<колонка>` (миграция 20260704130000).
 
 ---
 

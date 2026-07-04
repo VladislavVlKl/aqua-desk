@@ -207,8 +207,9 @@ async function checkInAppNotifications() {
     }
   } catch(e) { console.error(e); }
 }
-// Периодически проверяем новые уведомления каждые 60 секунд
-setInterval(()=>{ if (STATE.profile?.tg_id) checkInAppNotifications(); }, 60000);
+// Периодически проверяем новые уведомления каждые 2 минуты (реже — меньше фоновых
+// запросов к базе; событийные пуши приходят через Telegram-бота и не зависят от этого)
+setInterval(()=>{ if (STATE.profile?.tg_id) checkInAppNotifications(); }, 120000);
 async function renderInAppNotifications() {
   try {
     const notifs = await DB.getMyNotifications(STATE.profile.tg_id);
