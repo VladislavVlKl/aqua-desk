@@ -473,6 +473,8 @@ function updateNcEndDate() {
   const preview = document.getElementById('nc-end-preview');
   if (!preview) return;
   if (!qty) { preview.textContent=''; return; }
+  const age = parseInt(document.getElementById('nc-age')?.value);
+  if (age > CHILD_MAX_AGE) { preview.textContent = '♾️ Бессрочно — ПТ не сгорают'; return; }
   preview.textContent = `📅 Действует до: ${calcSubEnd(start, qty, weekend)}`
     + (weekend ? ' · только сб/вс' : '');
 }

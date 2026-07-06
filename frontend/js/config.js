@@ -192,9 +192,9 @@ const SUB_PACKAGES = {
     {qty:5,  label:'Викенд · 5 ПТ', period:'1 месяц · только сб/вс', weekend:true},
   ],
   adult: [
-    {qty:5,  label:'5 ПТ',  period:'2 недели'},
-    {qty:10, label:'10 ПТ', period:'1 месяц'},
-    {qty:25, label:'25 ПТ', period:'3 месяца'},
+    {qty:5,  label:'5 ПТ',  period:'бессрочно'},
+    {qty:10, label:'10 ПТ', period:'бессрочно'},
+    {qty:25, label:'25 ПТ', period:'бессрочно'},
   ],
 };
 

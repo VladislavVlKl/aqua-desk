@@ -555,7 +555,7 @@ function renderBuyPackageModal(clientId, isChildClient, currentBalance) {
     </div>
     <div class="form-group"><label>Дата начала</label>
       <input id="pkg-start" type="date" value="${todayStr()}" oninput="updatePkgEndDate()"></div>
-    <div id="pkg-end-preview" class="hint" style="margin-bottom:12px"></div>
+    <div id="pkg-end-preview" class="hint" data-child="${isChildClient?'1':''}" style="margin-bottom:12px"></div>
     <button class="btn btn-primary btn-full"
       onclick="doBuyPackage('${clientId}',${isChildClient})">Оформить</button>
   </div>`;
@@ -578,6 +578,7 @@ function updatePkgEndDate() {
   const preview = document.getElementById('pkg-end-preview');
   if (!preview) return;
   if (!qty) { preview.textContent=''; return; }
+  if (preview.dataset.child !== '1') { preview.textContent = '♾️ Бессрочно — ПТ не сгорают'; return; }
   preview.textContent = `📅 Действует до: ${calcSubEnd(start, qty, weekend)}`
     + (weekend ? ' · только сб/вс' : '');
 }
