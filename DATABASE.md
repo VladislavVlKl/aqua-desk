@@ -73,6 +73,9 @@ schedule_slots → session_notes → workouts → client_transfers → training_
 
 RLS включается автоматически на новых таблицах (event trigger `rls_auto_enable`).
 Все одноколоночные FK покрыты индексами `idx_<таблица>_<колонка>` (миграция 20260704130000).
+JWT этап 2: у роли `authenticated` — зеркала всех anon-политик, `USING(true)`
+(миграция 20260704150000); фронт работает под JWT (`JWT_MODE='on'`), anon открыт
+как страховка до этапа 3 (закрытие anon по таблицам).
 
 ---
 
