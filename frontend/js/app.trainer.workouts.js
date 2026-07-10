@@ -357,7 +357,7 @@ async function doConfirmLogWorkout() {
       category: firstRow?.category_at_moment, is_drop_in: firstRow?.is_drop_in||false,
     }, firstRow?.branch);
   } catch(e) {
-    toast('Ошибка','error'); console.error(e);
+    toast(String(e?.message||'').includes('Баланс исчерпан')?e.message:'Ошибка','error'); console.error(e);
     if (btn) { btn.disabled=false; btn.textContent='✅ Списать'; }
   }
 }

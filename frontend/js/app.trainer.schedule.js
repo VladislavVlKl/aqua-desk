@@ -490,7 +490,7 @@ async function doConfirm(slotId,date,isPt,isAdult,clientId,category,branchEnc,gr
     }
     await DB.upsertConfirmation(slotId,date,{status:'confirmed',actual_headcount:headcount,workout_id:workoutId});
     toast('✅ Подтверждено','success'); renderTodayTab();
-  } catch(e) { toast('Ошибка','error'); console.error(e); }
+  } catch(e) { toast(String(e?.message||'').includes('Баланс исчерпан')?e.message:'Ошибка','error'); console.error(e); }
 }
 function doCancelSlot(slotId,date) {
   const m=el('div','modal-overlay');
