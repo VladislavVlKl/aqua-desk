@@ -79,9 +79,10 @@ function buildSheet(rows) {
 // tot — счётчики по категориям (c1..r3, dh), sal — результат calcSalary.
 function pushSalarySummaryBlock(rows, tot, sal) {
   rows.push(sr(['── Сводка ──','кол-во','','сумма'], hStyle(XL.BLUE_MID)));
-  const ptCount = tot.c1+tot.c2+tot.c3+tot.v1+tot.v2+tot.v3+tot.r1+tot.r2+tot.r3;
-  const ptSum   = sal.ptSum + (sal.dropInSum||0);
-  rows.push(sr(['ПТ всего',        ptCount,            '', mc(ptSum)],       rStyle(true)));
+  const trialN  = (sal.cat.trial1||0)+(sal.cat.trial2||0)+(sal.cat.trial3||0);
+  const ptCount = tot.c1+tot.c2+tot.c3+tot.v1+tot.v2+tot.v3+tot.r1+tot.r2+tot.r3+trialN;
+  const ptSum   = sal.ptSum + (sal.dropInSum||0) + (sal.trialSum||0);
+  rows.push(sr(['ПТ всего (вкл. пробные)', ptCount,   '', mc(ptSum)],       rStyle(true)));
   rows.push(sr(['Дежурства (ч)',   +tot.dh.toFixed(2), '', mc(sal.dutySum)], rStyle(false)));
   const other = sal.total - ptSum - sal.dutySum;
   if (other) rows.push(sr(['Прочее (группы, замены, премии/штрафы)','','',mc(other)], rStyle(true)));
@@ -138,14 +139,15 @@ function exportSummaryExcel(year, month, summaryData, branch) {
     const sal = calcSalary({workouts:pw, duties:pd, groupSessions:pgs, adjustment:adj,
                              childAutoSum:childAutoByTrainer[p.id]||0, groupSubstitutions:(groupSubstitutions||[]),
                              ptSubstitutions:(ptSubstitutions||[]), trialSessions:pts, trainerId:p.id});
-    const ptCount = sal.cat[1]+sal.cat[2]+sal.cat[3]+(sal.cat.dropIn1||0)+(sal.cat.dropIn2||0)+(sal.cat.dropIn3||0);
+    const ptCount = sal.cat[1]+sal.cat[2]+sal.cat[3]+(sal.cat.dropIn1||0)+(sal.cat.dropIn2||0)+(sal.cat.dropIn3||0)
+                    +(sal.cat.trial1||0)+(sal.cat.trial2||0)+(sal.cat.trial3||0);
     const adultGP = sal.adultSum;
 
     const row = sr([
       n++, p.fio,
       +sal.hours.toFixed(2), mc(sal.dutySum),
       mc(adultGP),
-      ptCount, mc(sal.ptSum+sal.dropInSum),
+      ptCount, mc(sal.ptSum+sal.dropInSum+(sal.trialSum||0)),
       mc(sal.bonus), mc(sal.penalty),
       mc(sal.total),
       '', // Система — пустая
@@ -328,6 +330,7 @@ function exportSummaryExcel(year, month, summaryData, branch) {
       ['Разовые 1кт',       tot.r1, mc(RATES.pt[1]), mc(tot.r1*RATES.pt[1])],
       ['Разовые 2кт',       tot.r2, mc(RATES.pt[2]), mc(tot.r2*RATES.pt[2])],
       ['Разовые 3кт',       tot.r3, mc(RATES.pt[3]), mc(tot.r3*RATES.pt[3])],
+      ...(((sal.cat.trial1||0)+(sal.cat.trial2||0)+(sal.cat.trial3||0)) ? [['Пробные', (sal.cat.trial1||0)+(sal.cat.trial2||0)+(sal.cat.trial3||0), '', mc(sal.trialSum)]] : []),
       ['Дежурство',         +tot.dh.toFixed(2), mc(RATES.duty_per_hour), mc(sal.dutySum)],
     ];
     if (sal.adultSum)  salLines.push(['Взрослые ГП','','',mc(sal.adultSum)]);
@@ -383,7 +386,7 @@ function buildWorkoutNumbers(numbering) {
   return map;
 }
 
-function exportTrainerExcel(trainerFio, year, month, workouts, duties, groupSessions, adjustment, numbering=null) {
+function exportTrainerExcel(trainerFio, year, month, workouts, duties, groupSessions, adjustment, numbering=null, trials=[]) {
   const XLSX = window.XLSX;
   const wb   = XLSX.utils.book_new();
   const numMap = buildWorkoutNumbers(numbering);
@@ -409,7 +412,7 @@ function exportTrainerExcel(trainerFio, year, month, workouts, duties, groupSess
 
   // Строит пару листов («По дням»+suffix, «По клиентам»+suffix) по подмножеству данных.
   // Возвращает {tot, sal} для сводного листа по филиалам.
-  function addBranchSheets(workouts, duties, groupSessions, adjustment, suffix) {
+  function addBranchSheets(workouts, duties, groupSessions, adjustment, suffix, trials=[]) {
   const byDay = {};
   workouts.forEach(w => {
     const day = new Date(w.workout_date).getDate();
@@ -453,7 +456,8 @@ function exportTrainerExcel(trainerFio, year, month, workouts, duties, groupSess
   rows.push([]);
 
   const pgs = (groupSessions||[]).filter(gs=>gs.group_types?.billing_model==='headcount');
-  const sal = calcSalary({workouts,duties,groupSessions:pgs,adjustment});
+  const sal = calcSalary({workouts,duties,groupSessions:pgs,adjustment,trialSessions:trials});
+  const trialN = (sal.cat.trial1||0)+(sal.cat.trial2||0)+(sal.cat.trial3||0);
 
   rows.push(sr(['── Расчёт зарплаты ──'], hStyle(XL.BLUE_DARK)));
   const salLines = [
@@ -466,6 +470,7 @@ function exportTrainerExcel(trainerFio, year, month, workouts, duties, groupSess
     ['Разовые 1кт',         tot.r1,mc(RATES.pt[1]),mc(tot.r1*RATES.pt[1])],
     ['Разовые 2кт',         tot.r2,mc(RATES.pt[2]),mc(tot.r2*RATES.pt[2])],
     ['Разовые 3кт',         tot.r3,mc(RATES.pt[3]),mc(tot.r3*RATES.pt[3])],
+    ...(trialN ? [['Пробные', trialN, '', mc(sal.trialSum)]] : []),
     ['Дежурство',           +tot.dh.toFixed(2),mc(RATES.duty_per_hour),mc(sal.dutySum)],
   ];
   if (sal.adultSum) salLines.push(['Взрослые ГП','','',mc(sal.adultSum)]);
@@ -579,7 +584,7 @@ function exportTrainerExcel(trainerFio, year, month, workouts, duties, groupSess
   } // конец addBranchSheets
 
   if (!multiBranch) {
-    addBranchSheets(workouts, duties, groupSessions, adjAgg, '');
+    addBranchSheets(workouts, duties, groupSessions, adjAgg, '', trials);
   } else {
     // Пара листов на каждый филиал; премия/штраф филиала — в его листах.
     // Легаси-строки без филиала (branch='') — отдельно на сводном листе.
@@ -588,7 +593,7 @@ function exportTrainerExcel(trainerFio, year, month, workouts, duties, groupSess
         (workouts||[]).filter(w=>w.branch===b),
         (duties||[]).filter(d=>d.branch===b),
         (groupSessions||[]).filter(g=>g.branch===b),
-        adjFor(b), ` — ${b}`);
+        adjFor(b), ` — ${b}`, (trials||[]).filter(t=>t.branch===b));
       return {branch:b, ...r};
     });
 
@@ -600,8 +605,9 @@ function exportTrainerExcel(trainerFio, year, month, workouts, duties, groupSess
 
     const g = {pt:0,ps:0,dh:0,ds:0,ot:0,tot:0};
     perBranch.forEach(({branch,tot,sal},i) => {
-      const ptCount = tot.c1+tot.c2+tot.c3+tot.v1+tot.v2+tot.v3+tot.r1+tot.r2+tot.r3;
-      const ptSum   = sal.ptSum + (sal.dropInSum||0);
+      const trialN  = (sal.cat.trial1||0)+(sal.cat.trial2||0)+(sal.cat.trial3||0);
+      const ptCount = tot.c1+tot.c2+tot.c3+tot.v1+tot.v2+tot.v3+tot.r1+tot.r2+tot.r3+trialN;
+      const ptSum   = sal.ptSum + (sal.dropInSum||0) + (sal.trialSum||0);
       const other   = sal.total - ptSum - sal.dutySum;
       sRows.push(sr([branch, ptCount, mc(ptSum), +tot.dh.toFixed(2), mc(sal.dutySum), mc(other), mc(sal.total)], rStyle(i%2===0)));
       g.pt+=ptCount; g.ps+=ptSum; g.dh+=tot.dh; g.ds+=sal.dutySum; g.ot+=other; g.tot+=sal.total;

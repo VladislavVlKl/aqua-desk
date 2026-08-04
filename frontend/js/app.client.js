@@ -477,7 +477,7 @@ async function doExportTrainer(trainerId,fioEnc,year,month) {
       }
     } catch(e) { console.error('[exportTrainer numbering]',e); }
     exportTrainerExcel(fio,year,month,d.workouts,d.duties,d.groupSessions,
-      d.adjustments?.length?d.adjustments:d.adjustment, numbering);
+      d.adjustments?.length?d.adjustments:d.adjustment, numbering, d.trialSessions||[]);
     return;
   }
   const m=el('div','modal-overlay');
