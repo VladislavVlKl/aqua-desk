@@ -1,6 +1,26 @@
+// ─── Этап B: reshape плоского API-ответа обратно в PostgREST-форму эмбедов,
+// которую ждут потребители (client.workouts[0].count, client.profiles.fio,
+// workout.clients.fio/.category/.age). Так app-код остаётся нетронутым.
+function _apiClient(row) {
+  if (!row) return row;
+  const out = { ...row, workouts: [{ count: row.workouts_count ?? 0 }] };
+  if (row.trainer_fio != null || row.trainer_branches != null) {
+    out.profiles = { fio: row.trainer_fio, branches: row.trainer_branches };
+  }
+  return out;
+}
+function _apiWorkout(row) {
+  if (!row) return row;
+  return { ...row, clients: { fio: row.client_fio, category: row.client_category, age: row.client_age } };
+}
+
 Object.assign(DB, {
   // ─── CLIENTS ─────────────────────────────────
   async getClients(trainerId) {
+    if (useApi('clients')) {
+      const rows = await api('/clients', { query: { trainer_id: trainerId } });
+      return (rows || []).map(_apiClient);
+    }
     const {data,error} = await sb().from('clients').select('*, workouts(count)')
       .eq('trainer_id',trainerId)
       .order('last_used',{ascending:false,nullsFirst:false});
@@ -8,6 +28,10 @@ Object.assign(DB, {
   },
   // Все клиенты всех тренеров за один запрос (для админа)
   async getAllClients() {
+    if (useApi('clients')) {
+      const rows = await api('/clients');
+      return (rows || []).map(_apiClient);
+    }
     const {data,error} = await sb().from('clients')
       .select('*, profiles!trainer_id(fio,branches), workouts(count)')
       .eq('is_archived',false)
@@ -15,6 +39,13 @@ Object.assign(DB, {
     if (error) throw error; return data||[];
   },
   async addClient(fio, category, trainerId, age, subStart, subEnd, isWeekend = false) {
+    if (useApi('clients')) {
+      return await api('/clients', { method:'POST', body:{
+        fio: fio.trim(), category, trainer_id: trainerId, age: age||null,
+        subscription_start: subStart||null, subscription_end: subEnd||null,
+        is_weekend: !!isWeekend,
+      }});
+    }
     const {data,error} = await sb().from('clients').insert({
       fio:fio.trim(), category, trainer_id:trainerId, balance:0,
       age:age||null, subscription_start:subStart||null, subscription_end:subEnd||null,
@@ -23,6 +54,9 @@ Object.assign(DB, {
     if (error) throw error; return data;
   },
   async updateClient(id, fields) {
+    if (useApi('clients')) {
+      return await api('/clients/'+id, { method:'PATCH', body: fields });
+    }
     const {data,error} = await sb().from('clients')
       .update(fields).eq('id',id).select().single();
     if (error) throw error; return data;
@@ -32,6 +66,12 @@ Object.assign(DB, {
   // fromDate (YYYY-MM-DD) ограничивает периодом; null = все тренировки клиента.
   // Разовые (is_drop_in) не трогаем — у них своя категория drop_in_category.
   async recalcWorkoutsCategory(clientId, newCat, fromDate=null) {
+    if (useApi('clients')) {
+      const data = await api('/clients/'+clientId+'/recalc-category', {
+        method:'POST', body:{ new_category: newCat, from_date: fromDate || null },
+      });
+      return data?.applied_count || 0;
+    }
     let q = sb().from('workouts').update({category_at_moment:newCat})
       .eq('client_id',clientId).eq('is_drop_in',false);
     if (fromDate) q = q.gte('workout_date', fromDate + 'T00:00:00');
@@ -40,6 +80,10 @@ Object.assign(DB, {
     return data?.length || 0;
   },
   async addBalance(clientId, amount) {
+    if (useApi('clients')) {
+      // Гард INSUFFICIENT_BALANCE — на бэкенде (POST /balance).
+      return await api('/clients/'+clientId+'/balance', { method:'POST', body:{ amount } });
+    }
     // Атомарное обновление через RPC чтобы избежать race condition
     const {data,error} = await sb().rpc('increment_balance', {client_id: clientId, delta: amount});
     if (error) {
@@ -57,6 +101,12 @@ Object.assign(DB, {
   // Списание ПТ из общего (зал+бассейн) пакета взрослого: тренер вносит, сколько
   // клиент отходил в ТЗ. Баланс уменьшается, остаток не уходит ниже 0. Пишем в audit_log.
   async deductGymSessions(clientId, count, actor) {
+    if (useApi('clients')) {
+      // Бэкенд сам пишет audit_log (gym_deduct); фронт-аудит не дублируем.
+      const data = await api('/clients/'+clientId+'/deduct-gym', { method:'POST', body:{ count: Math.max(1, parseInt(count)||0) } });
+      invalidateCache('clients');
+      return data; // {before, after, deducted}
+    }
     const n = Math.max(1, parseInt(count) || 0);
     const {data:cl} = await sb().from('clients')
       .select('balance,fio').eq('id',clientId).single();
@@ -76,6 +126,20 @@ Object.assign(DB, {
     // филиалов из RECEPTION_ENABLED_BRANCHES (пофилиальный запуск). Иначе остаются
     // confirmed по DB DEFAULT — у тренеров нет «ожидающего баланса».
     const rows2 = rows.map(r => (receptionEnabledForBranch(r.branch) ? {reception_status:'pending', ...r} : r));
+    if (useApi('clients')) {
+      // Бэкенд делает всё в одной транзакции (вставка → списание с гардом → откат,
+      // last_used, drop_in_used ребёнка). reception_status передаём вычисленным.
+      let data;
+      try {
+        data = await api('/workouts', { method:'POST', body: rows2 });
+      } catch (e) {
+        if (e.code === 'INSUFFICIENT_BALANCE')
+          throw new Error('Баланс исчерпан — оформите «В долг» или новый пакет');
+        throw e;
+      }
+      // Форма [{id}] — потребители читают result?.[0]?.id.
+      return (data?.ids || []).map(id => ({ id }));
+    }
     const {data,error} = await sb().from('workouts').insert(rows2).select();
     if (error) throw error;
     const nonDebtNonDropin = rows.filter(r=>!r.is_debt&&!r.is_drop_in);
@@ -105,6 +169,10 @@ Object.assign(DB, {
     return data;
   },
   async confirmDebt(workoutId, clientId) {
+    if (useApi('clients')) {
+      await api('/workouts/'+workoutId+'/confirm-debt', { method:'POST', body:{ client_id: clientId } });
+      return;
+    }
     const {error:e1} = await sb().from('workouts')
       .update({debt_confirmed_at:new Date().toISOString()}).eq('id',workoutId);
     if (e1) throw e1;
@@ -113,6 +181,10 @@ Object.assign(DB, {
       .update({balance:Math.max(0,(cl?.balance||0)-1)}).eq('id',clientId);
   },
   async getTodayWorkouts(trainerId, dateStr) {
+    if (useApi('clients')) {
+      const rows = await api('/workouts/today', { query: { trainer_id: trainerId, day: dateStr } });
+      return (rows || []).map(_apiWorkout);
+    }
     const from = dateStr + 'T00:00:00';
     const to   = dateStr + 'T23:59:59';
     const {data,error} = await sb().from('workouts')
@@ -122,6 +194,10 @@ Object.assign(DB, {
     if (error) throw error; return data||[];
   },
   async getWorkouts(trainerId, year, month) {
+    if (useApi('clients')) {
+      const rows = await api('/workouts', { query: { trainer_id: trainerId, year, month } });
+      return (rows || []).map(_apiWorkout);
+    }
     const from = new Date(year,month-1,1).toISOString();
     const to   = new Date(year,month,  1).toISOString();
     const {data,error} = await sb().from('workouts')
@@ -314,6 +390,12 @@ Object.assign(DB, {
       'cat_recalc_rejected');
   },
   async deleteWorkout(id) {
+    if (useApi('clients')) {
+      // Бэкенд повторяет всю логику: возврат баланса при списании, сброс drop_in_used
+      // ребёнка, удаление schedule_confirmations, затем удаление ПТ.
+      await api('/workouts/'+id+'/delete', { method:'POST' });
+      return;
+    }
     // Перед удалением вернуть баланс, если тренировка его списывала.
     // Списывали баланс: обычная ПТ (logWorkouts -1), подтверждённый долг (confirmDebt -1),
     // подтверждённая замена (resolveSubstitute -1). НЕ списывали: разовое, неподтверждённый
@@ -344,11 +426,19 @@ async deleteClient(id) {
     if (error) throw error;
   },
   async archiveClient(id, reason='') {
+    if (useApi('clients')) {
+      await api('/clients/'+id+'/archive', { method:'POST', query: { reason: reason || '' } });
+      return;
+    }
     const {error} = await sb().from('clients')
       .update({is_archived:true, archive_reason:reason||null}).eq('id',id);
     if (error) throw error;
   },
   async restoreClient(id) {
+    if (useApi('clients')) {
+      await api('/clients/'+id+'/restore', { method:'POST' });
+      return;
+    }
     const {error} = await sb().from('clients')
       .update({is_archived:false, archive_reason:null}).eq('id',id);
     if (error) throw error;
