@@ -524,10 +524,14 @@ async function renderReceptionOlder() {
 function recCard(it) {
   const cat = it._cat?`<span class="hi-cat cat-${it._cat}">Кат.${it._cat}</span>`:'';
   const typeBadge = `<span style="font-size:11px;background:rgba(124,58,237,.12);color:#a78bfa;padding:2px 8px;border-radius:8px">${_recTypeLabel(it)}</span>`;
+  // Номер списания в абонементе («3 из 10») — только для ПТ с известной нумерацией
+  const seqBadge = (it._kind==='w' && it._seq)
+    ? `<span style="font-size:11px;font-weight:600;background:rgba(59,130,246,.14);color:#60a5fa;padding:2px 8px;border-radius:8px">${it._seq}${it._total?'/'+it._total:''} ПТ</span>`
+    : '';
   const cnameEnc = encodeURIComponent(it._client);
   return `<div class="history-item" id="rec-card-${it._kind}-${it.id}">
     <div class="hi-main">
-      <span class="hi-client">${it._client}</span> ${cat} ${typeBadge}
+      <span class="hi-client">${it._client}</span> ${cat} ${typeBadge} ${seqBadge}
     </div>
     <div class="hi-sub">👤 ${it._trainer} · ${fmtTime(it._ts)}</div>
     <div style="display:flex;gap:8px;margin-top:8px">

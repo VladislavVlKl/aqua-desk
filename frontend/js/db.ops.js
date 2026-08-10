@@ -132,6 +132,55 @@ Object.assign(DB, {
     return [`${dateStr}T00:00:00+05:00`, `${dateStr}T23:59:59+05:00`];
   },
 
+  /**
+   * Обогащает pending-ПТ номером списания в абонементе: w._seq / w._total
+   * (например «3 из 10»). Абонемент тренировки = последний абонемент клиента
+   * со start_date <= дня ПТ; номер = счёт не-разовых, не-отклонённых тренировок
+   * внутри этого абонемента (у любого тренера) до данной включительно.
+   * total = initial_balance абонемента (размер пакета). Разовые — без номера.
+   * Мутирует переданный массив на месте.
+   */
+  async _enrichReceptionSeq(workouts) {
+    const nd = (workouts||[]).filter(w=>!w.is_drop_in && w.client_id);
+    if (!nd.length) return;
+    const clientIds = [...new Set(nd.map(w=>w.client_id))];
+    const {data:subs} = await sb().from('subscriptions')
+      .select('client_id,start_date,initial_balance').in('client_id',clientIds);
+    const subsBy = {};
+    (subs||[]).forEach(s=>{ (subsBy[s.client_id]=subsBy[s.client_id]||[]).push(s); });
+    Object.values(subsBy).forEach(a=>a.sort((x,y)=>x.start_date<y.start_date?-1:1));
+    const coverFor = (cid,day)=>{ let s=null; for (const x of (subsBy[cid]||[])) { if (x.start_date<=day) s=x; else break; } return s; };
+    // История нужна с начала самого раннего покрывающего абонемента среди pending
+    let minFrom=null, maxDay=null;
+    nd.forEach(w=>{
+      const day=String(w.workout_date).slice(0,10);
+      const s=coverFor(w.client_id,day); const f=s?s.start_date:day;
+      if (!minFrom||f<minFrom) minFrom=f;
+      if (!maxDay||day>maxDay) maxDay=day;
+    });
+    const {data:hist} = await sb().from('workouts')
+      .select('id,client_id,workout_date,is_drop_in,reception_status')
+      .in('client_id',clientIds).eq('pending_confirmation',false)
+      .gte('workout_date', new Date(minFrom).toISOString())
+      .lte('workout_date', `${maxDay}T23:59:59+05:00`)
+      .order('workout_date');
+    const histBy = {};
+    (hist||[]).filter(w=>!w.is_drop_in && w.reception_status!=='rejected')
+      .forEach(w=>{ (histBy[w.client_id]=histBy[w.client_id]||[]).push(w); });
+    const seqMap = {};
+    Object.entries(histBy).forEach(([cid,list])=>{
+      list.sort((a,b)=> a.workout_date<b.workout_date?-1 : a.workout_date>b.workout_date?1 : (a.id<b.id?-1:1));
+      const counters={};
+      list.forEach(w=>{
+        const day=String(w.workout_date).slice(0,10);
+        const s=coverFor(cid,day); const key=s?s.start_date:'nosub';
+        counters[key]=(counters[key]||0)+1;
+        seqMap[w.id]={seq:counters[key], total:s?s.initial_balance:null};
+      });
+    });
+    nd.forEach(w=>{ const info=seqMap[w.id]; if (info) { w._seq=info.seq; w._total=info.total; } });
+  },
+
   /** Очередь pending филиала за день: ПТ + пробные */
   async getReceptionPending(branch, dateStr) {
     const [from, to] = this._dayRange(dateStr);
@@ -147,7 +196,9 @@ Object.assign(DB, {
       .order('session_date',{ascending:true});
     const [w, t] = await Promise.all([wq, tq]);
     if (w.error) throw w.error; if (t.error) throw t.error;
-    return { workouts: w.data||[], trials: t.data||[] };
+    const workouts = w.data||[];
+    await this._enrichReceptionSeq(workouts);
+    return { workouts, trials: t.data||[] };
   },
 
   /** Количество pending за день (для бейджа) */
@@ -178,7 +229,9 @@ Object.assign(DB, {
       .order('session_date',{ascending:true});
     const [w, t] = await Promise.all([wq, tq]);
     if (w.error) throw w.error; if (t.error) throw t.error;
-    return { workouts: w.data||[], trials: t.data||[] };
+    const workouts = w.data||[];
+    await this._enrichReceptionSeq(workouts);
+    return { workouts, trials: t.data||[] };
   },
 
   /** Кол-во висящих за прошлые дни (для бейджа/баннера) */
