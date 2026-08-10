@@ -245,6 +245,12 @@ Object.assign(DB, {
   },
   // ─── ЗАПРОСЫ НА УДАЛЕНИЕ ПРОБНОЙ (паритет с workout_delete_requests) ──
   async requestTrialDelete(trialId, trainerId, clientName, sessionDate, branch) {
+    if (useApi('requests')) {
+      await api('/requests/trial-delete', { method:'POST', body:{
+        trial_id: trialId, client_name: clientName, session_date: sessionDate, branch,
+      }});
+      return;
+    }
     const {data:existing} = await sb().from('trial_delete_requests')
       .select('id').eq('trial_id',trialId).eq('status','pending').limit(1);
     if (existing?.length) throw new Error('already_pending');
@@ -254,6 +260,10 @@ Object.assign(DB, {
     if (error) throw error;
   },
   async getAllTrialDeleteRequests() {
+    if (useApi('requests')) {
+      const rows = await api('/requests/trial-delete', { query: { status: 'pending' } });
+      return (rows || []).map(r => ({ ...r, profiles: { fio: r.trainer_fio } }));
+    }
     const {data,error} = await sb().from('trial_delete_requests')
       .select('*, profiles!trainer_id(fio)')
       .eq('status','pending')
@@ -261,17 +271,24 @@ Object.assign(DB, {
     if (error) throw error; return data||[];
   },
   async approveTrialDeleteRequest(reqId, trialId) {
+    if (useApi('requests')) { await api('/requests/trial-delete/'+reqId+'/approve', { method:'POST' }); return; }
     // Закрываем все pending-запросы на эту пробную ДО удаления (иначе CASCADE сотрёт их)
     await sb().from('trial_delete_requests').update({status:'approved'}).eq('trial_id',trialId).eq('status','pending');
     await this.deleteTrialSession(trialId);
   },
   async rejectTrialDeleteRequest(reqId) {
+    if (useApi('requests')) { await api('/requests/trial-delete/'+reqId+'/reject', { method:'POST' }); return; }
     const {error} = await sb().from('trial_delete_requests').update({status:'rejected'}).eq('id',reqId);
     if (error) throw error;
   },
 
   // ─── ЗАПРОСЫ НА ПОЗДНИЕ ТРЕНИРОВКИ ──────────
   async addLateRequest(trainerId, clientId, branch, workoutDate, category, reason) {
+    if (useApi('requests')) {
+      return await api('/requests/late', { method:'POST', body:{
+        client_id: clientId, branch, workout_date: workoutDate, category, reason: reason.trim(),
+      }});
+    }
     const {data,error} = await sb().from('late_workout_requests')
       .insert({trainer_id:trainerId, client_id:clientId, branch,
                workout_date:workoutDate, category, reason: reason.trim()})
@@ -279,6 +296,12 @@ Object.assign(DB, {
     if (error) throw error; return data;
   },
   async getPendingLateRequests(branch) {
+    if (useApi('requests')) {
+      const rows = await api('/requests/late', { query: { status: 'pending', branch: branch || undefined } });
+      return (rows || []).map(r => ({ ...r,
+        profiles: { fio: r.trainer_fio, branches: r.trainer_branches },
+        clients: { fio: r.client_fio, category: r.client_category } }));
+    }
     let q = sb().from('late_workout_requests')
       .select('*, profiles!trainer_id(fio,branches), clients(fio,category)')
       .eq('status','pending').order('created_at',{ascending:false});
@@ -287,12 +310,17 @@ Object.assign(DB, {
     if (error) throw error; return data||[];
   },
   async getMyLateRequests(trainerId) {
+    if (useApi('requests')) {
+      const rows = await api('/requests/late', { query: { trainer_id: trainerId } });
+      return (rows || []).slice(0, 20).map(r => ({ ...r, clients: { fio: r.client_fio } }));
+    }
     const {data,error} = await sb().from('late_workout_requests')
       .select('*, clients(fio)')
       .eq('trainer_id',trainerId).order('created_at',{ascending:false}).limit(20);
     if (error) throw error; return data||[];
   },
   async approveLateRequest(requestId, reviewerId) {
+    if (useApi('requests')) { await api('/requests/late/'+requestId+'/approve', { method:'POST' }); return; }
     // Получаем данные запроса
     const {data:req,error:re} = await sb().from('late_workout_requests')
       .select('*').eq('id',requestId).single();
@@ -328,6 +356,7 @@ Object.assign(DB, {
     if (ue) throw ue;
   },
   async rejectLateRequest(requestId, reviewerId, note='') {
+    if (useApi('requests')) { await api('/requests/late/'+requestId+'/reject', { method:'POST', query: { note: note || '' } }); return; }
     const {error} = await sb().from('late_workout_requests')
       .update({status:'rejected', reviewed_by:reviewerId,
                reviewed_at:new Date().toISOString(), reject_note:note||null})
@@ -338,6 +367,12 @@ Object.assign(DB, {
   // ─── ЗАПРОСЫ НА ПЕРЕСЧЁТ КАТЕГОРИИ ПРОШЛЫХ ПТ ──
   // Тренер запрашивает → координатор/старший одобряет → category_at_moment обновляется.
   async addCategoryRecalcRequest(trainerId, clientId, clientFio, branch, newCategory, scope, fromDate) {
+    if (useApi('requests')) {
+      return await api('/requests/category-recalc', { method:'POST', body:{
+        client_id: clientId, client_fio: clientFio || '', branch: branch || '',
+        new_category: newCategory, scope, from_date: fromDate || null,
+      }});
+    }
     // Дедуп: один pending на клиента
     const {data:exist} = await sb().from('category_recalc_requests')
       .select('id').eq('client_id',clientId).eq('status','pending').maybeSingle();
@@ -349,6 +384,12 @@ Object.assign(DB, {
     if (error) throw error; return data;
   },
   async getPendingCategoryRecalcRequests(branch) {
+    if (useApi('requests')) {
+      const rows = await api('/requests/category-recalc', { query: { status: 'pending', branch: branch || undefined } });
+      return (rows || []).map(r => ({ ...r,
+        profiles: { fio: r.trainer_fio, branches: r.trainer_branches },
+        clients: { fio: r.client_fio, category: r.client_category } }));
+    }
     let q = sb().from('category_recalc_requests')
       .select('*, profiles!trainer_id(fio,branches), clients(fio,category)')
       .eq('status','pending').order('created_at',{ascending:false});
@@ -357,12 +398,20 @@ Object.assign(DB, {
     if (error) throw error; return data||[];
   },
   async getMyCategoryRecalcRequests(trainerId) {
+    if (useApi('requests')) {
+      const rows = await api('/requests/category-recalc', { query: { trainer_id: trainerId } });
+      return (rows || []).slice(0, 20).map(r => ({ ...r, clients: { fio: r.client_fio } }));
+    }
     const {data,error} = await sb().from('category_recalc_requests')
       .select('*, clients(fio)')
       .eq('trainer_id',trainerId).order('created_at',{ascending:false}).limit(20);
     if (error) throw error; return data||[];
   },
   async approveCategoryRecalcRequest(requestId, reviewerId) {
+    if (useApi('requests')) {
+      const data = await api('/requests/category-recalc/'+requestId+'/approve', { method:'POST' });
+      return data?.applied_count ?? 0;
+    }
     const {data:req,error:re} = await sb().from('category_recalc_requests')
       .select('*').eq('id',requestId).eq('status','pending').single();
     if (re) throw re;
@@ -378,6 +427,7 @@ Object.assign(DB, {
     return n;
   },
   async rejectCategoryRecalcRequest(requestId, reviewerId, note='') {
+    if (useApi('requests')) { await api('/requests/category-recalc/'+requestId+'/reject', { method:'POST', query: { note: note || '' } }); return; }
     const {data:req} = await sb().from('category_recalc_requests')
       .select('trainer_id,client_fio,new_category').eq('id',requestId).maybeSingle();
     const {error} = await sb().from('category_recalc_requests')

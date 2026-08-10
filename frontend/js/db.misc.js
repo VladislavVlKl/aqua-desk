@@ -104,6 +104,9 @@ Object.assign(DB, {
 
   // ─── ЗАПРОСЫ НА УДАЛЕНИЕ КЛИЕНТА ─────────────
   async createDeleteRequest(clientId, clientName, requestedBy, branch) {
+    if (useApi('requests')) {
+      return await api('/requests/delete', { method:'POST', body:{ client_id: clientId, client_name: clientName, branch } });
+    }
     const {data:existing} = await sb().from('delete_requests')
       .select('id').eq('client_id',clientId).eq('status','pending').limit(1);
     if (existing?.length) throw new Error('already_pending');
@@ -114,6 +117,10 @@ Object.assign(DB, {
     if (error) throw error; return data;
   },
   async getDeleteRequests(branch) {
+    if (useApi('requests')) {
+      const rows = await api('/requests/delete', { query: { status: 'pending', branch } });
+      return (rows || []).map(r => ({ ...r, profiles: { fio: r.requester_fio } }));
+    }
     const {data,error} = await sb().from('delete_requests')
       .select('*, profiles!requested_by(fio)')
       .eq('status','pending')
@@ -122,6 +129,12 @@ Object.assign(DB, {
     if (error) throw error; return data||[];
   },
   async getAllDeleteRequests() {
+    if (useApi('requests')) {
+      const rows = await api('/requests/delete', { query: { status: 'pending' } });
+      return (rows || []).map(r => ({ ...r,
+        profiles: { fio: r.requester_fio },
+        clients: { balance: r.client_balance, subscription_end: r.client_sub_end } }));
+    }
     const {data,error} = await sb().from('delete_requests')
       .select('*, profiles!requested_by(fio), clients!client_id(balance, subscription_end)')
       .eq('status','pending')
@@ -129,6 +142,8 @@ Object.assign(DB, {
     if (error) throw error; return data||[];
   },
   async approveDeleteRequest(requestId, clientId) {
+    // В api-режиме бэкенд делает и смену статуса, и forceDeleteClient (ручной каскад).
+    if (useApi('requests')) { await api('/requests/delete/'+requestId+'/approve', { method:'POST' }); return; }
     await sb().from('delete_requests').update({status:'approved'}).eq('id',requestId);
     await this.forceDeleteClient(clientId);
   },
@@ -154,6 +169,7 @@ Object.assign(DB, {
     if (error) throw error;
   },
   async rejectDeleteRequest(requestId) {
+    if (useApi('requests')) { await api('/requests/delete/'+requestId+'/reject', { method:'POST' }); return; }
     const {error} = await sb().from('delete_requests')
       .update({status:'rejected'}).eq('id',requestId);
     if (error) throw error;
@@ -161,6 +177,12 @@ Object.assign(DB, {
 
   // ─── ЗАПРОСЫ НА УДАЛЕНИЕ ТРЕНИРОВОК ─────────
   async requestWorkoutDelete(workoutId, trainerId, clientName, workoutDate, branch) {
+    if (useApi('requests')) {
+      await api('/requests/workout-delete', { method:'POST', body:{
+        workout_id: workoutId, client_name: clientName, workout_date: workoutDate, branch,
+      }});
+      return;
+    }
     const {data:existing} = await sb().from('workout_delete_requests')
       .select('id').eq('workout_id',workoutId).eq('status','pending').limit(1);
     if (existing?.length) throw new Error('already_pending');
@@ -170,6 +192,10 @@ Object.assign(DB, {
     if (error) throw error;
   },
   async getWorkoutDeleteRequests(branch) {
+    if (useApi('requests')) {
+      const rows = await api('/requests/workout-delete', { query: { status: 'pending', branch } });
+      return (rows || []).map(r => ({ ...r, profiles: { fio: r.trainer_fio } }));
+    }
     const {data,error} = await sb().from('workout_delete_requests')
       .select('*, profiles!trainer_id(fio)')
       .eq('status','pending').eq('branch',branch)
@@ -177,6 +203,10 @@ Object.assign(DB, {
     if (error) throw error; return data||[];
   },
   async getAllWorkoutDeleteRequests() {
+    if (useApi('requests')) {
+      const rows = await api('/requests/workout-delete', { query: { status: 'pending' } });
+      return (rows || []).map(r => ({ ...r, profiles: { fio: r.trainer_fio } }));
+    }
     const {data,error} = await sb().from('workout_delete_requests')
       .select('*, profiles!trainer_id(fio)')
       .eq('status','pending')
@@ -184,11 +214,13 @@ Object.assign(DB, {
     if (error) throw error; return data||[];
   },
   async approveWorkoutDeleteRequest(reqId, workoutId) {
+    if (useApi('requests')) { await api('/requests/workout-delete/'+reqId+'/approve', { method:'POST' }); return; }
     // Закрываем все pending-запросы на эту тренировку ДО удаления (иначе CASCADE сотрёт их)
     await sb().from('workout_delete_requests').update({status:'approved'}).eq('workout_id',workoutId).eq('status','pending');
     await this.deleteWorkout(workoutId);
   },
   async rejectWorkoutDeleteRequest(reqId) {
+    if (useApi('requests')) { await api('/requests/workout-delete/'+reqId+'/reject', { method:'POST' }); return; }
     const {error} = await sb().from('workout_delete_requests').update({status:'rejected'}).eq('id',reqId);
     if (error) throw error;
   },
