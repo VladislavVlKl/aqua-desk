@@ -290,6 +290,10 @@ function showLogWithNotesModal(overdueNotes, clientId, dates) {
 }
 
 async function doConfirmLogWorkout() {
+  // Гвард от двойного тапа: без него быстрый двойной клик по «✅ Списать»
+  // успевал запустить logWorkouts дважды → задвоенные тренировки (и конспекты).
+  // btn.disabled ставится позже и от гонки не спасает.
+  if (_pending.has('confirmLog')) return;
   if (!_pendingLogData) return toast('Ошибка: нет данных','error');
   const { rows, clientId, count, overdueNotes } = _pendingLogData;
 
@@ -299,6 +303,7 @@ async function doConfirmLogWorkout() {
     if (!acc) return toast('Заполните все долговые конспекты','error');
   }
 
+  _pending.add('confirmLog');
   const btn = document.getElementById('btn-confirm-log');
   if (btn) { btn.disabled=true; btn.textContent='Сохраняем...'; }
 
@@ -359,6 +364,8 @@ async function doConfirmLogWorkout() {
   } catch(e) {
     toast(String(e?.message||'').includes('Баланс исчерпан')?e.message:'Ошибка','error'); console.error(e);
     if (btn) { btn.disabled=false; btn.textContent='✅ Списать'; }
+  } finally {
+    _pending.delete('confirmLog');
   }
 }
 
