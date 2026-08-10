@@ -22,7 +22,52 @@ const CONFIG = {
   //   повторно по решению пользователя). Политики authenticated в БД на месте (45 зеркал).
   //   Откат в один шаг: вернуть 'diagnostic' и задеплоить (anon-страховка всё ещё открыта).
   JWT_MODE: 'on',
+
+  // ─── ЭТАП B: ПЕРЕКЛЮЧЕНИЕ ФРОНТА НА FastAPI-БЭКЕНД ───────────────
+  // Базовый URL нового API (модульный монолит aqua-desk-v2). Локальная разработка —
+  // docker на 127.0.0.1:8000; прод (после деплоя Hetzner+домен) — api.<домен>.
+  // Переопределяется через ?api= в URL (для быстрого теста) и localStorage 'aq_api_base'.
+  API_BASE: 'http://localhost:8000/api/v1',
+
+  // Пофайловый (по-доменный) переключатель источника данных. Пока идёт миграция,
+  // каждый домен независимо смотрит либо в Supabase (старое), либо в новый API.
+  //   'supabase' — старое поведение (sb().from/.rpc), как в проде.
+  //   'api'      — вызовы нового FastAPI через api()-хелпер (db.core.js).
+  // Ключ 'all' — глобальный дефолт для всех доменов, отдельный домен его переопределяет.
+  // Домены: auth, clients, schedule, groups, salary, requests, ops, analytics, misc.
+  // ОТКАТ на живом проде — вернуть нужный домен в 'supabase' и задеплоить.
+  API_MODE: {
+    all: 'supabase',
+    // auth: 'api',   // ← включается по мере готовности домена
+  },
 };
+
+// Переопределение из URL-параметров / localStorage (тест без пересборки/правки config):
+//   ?api=<url>                       — базовый URL API
+//   ?apimode=auth:api,clients:api    — включить домены на новый API (all:api — все)
+// Оба значения запоминаются в localStorage до явного сброса (?apimode=reset).
+(function _resolveApiOverrides() {
+  try {
+    const p = new URLSearchParams(location.search);
+    const q = p.get('api');
+    if (q) localStorage.setItem('aq_api_base', q);
+    const storedBase = localStorage.getItem('aq_api_base');
+    if (storedBase) CONFIG.API_BASE = storedBase;
+
+    const m = p.get('apimode');
+    if (m === 'reset') localStorage.removeItem('aq_api_mode');
+    else if (m) {
+      const map = {};
+      m.split(',').forEach(pair => {
+        const [d, mode] = pair.split(':');
+        if (d && mode) map[d.trim()] = mode.trim();
+      });
+      localStorage.setItem('aq_api_mode', JSON.stringify(map));
+    }
+    const storedMode = localStorage.getItem('aq_api_mode');
+    if (storedMode) Object.assign(CONFIG.API_MODE, JSON.parse(storedMode));
+  } catch (e) {}
+})();
 
 // Динамический URL — не ломается при переименовании репозитория
 const BASE_URL     = new URL('./', window.location.href).href;

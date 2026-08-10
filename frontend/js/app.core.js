@@ -410,10 +410,21 @@ async function init() {
     try { localStorage.removeItem('sb-nkwfvuhtpaoxsaczwsrg-auth-token'); } catch(e){}
     // JWT-аутентификация. В режиме CONFIG.JWT_MODE='off' (прод) — мгновенный no-op.
     // Никогда не бросает: при любой ошибке приложение продолжает работать под anon.
-    if (typeof ensureJwtSession === 'function') { try { await ensureJwtSession(); } catch(e){} }
+    // Этап B: в api-режиме auth вход идёт через новый бэкенд (getProfileByTgId →
+    // /auth/telegram выдаёт access-токен), Supabase-сессия не нужна — пропускаем.
+    if (!(typeof useApi === 'function' && useApi('auth'))
+        && typeof ensureJwtSession === 'function') { try { await ensureJwtSession(); } catch(e){} }
     const p=await DB.getProfileByTgId(STATE.tgId);
     if (!p) { renderRegister(); return; }
     STATE.profile=p;
+    // api-режим, браузерный dev-вход (?tgid=, без подписи Telegram): dev-login уже выдал
+    // access-токен → PIN-гейт не нужен, входим сразу. Боевой Telegram-поток сюда не попадает
+    // (там 'ok'+токен приходит только для профилей без PIN и идёт штатной веткой ниже).
+    if (typeof useApi === 'function' && useApi('auth')
+        && !(typeof _rawInitData === 'function' && _rawInitData())
+        && typeof getApiToken === 'function' && getApiToken() && p.id) {
+      enterApp(); return;
+    }
     if (p.has_pin) renderPinEntry();
     else if (!p.has_pin && p.tg_id) renderForcePinSetup(); // профиль привязан, но PIN не создан
     else enterApp();

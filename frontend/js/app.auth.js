@@ -88,7 +88,7 @@ function renderPinEntry() {
   setupBack(null); window._pin='';
   setScreen(`<div class="screen-pad center-screen">
     <div class="logo">🔐</div>
-    <h2>Привет, ${STATE.profile.fio.split(' ')[1]||STATE.profile.fio}!</h2>
+    <h2>Привет${(STATE.profile.fio ? ', ' + (STATE.profile.fio.split(' ')[1]||STATE.profile.fio) : '')}!</h2>
     <div class="pin-dots" id="pin-dots">
       <span></span><span></span><span></span><span></span>
     </div>

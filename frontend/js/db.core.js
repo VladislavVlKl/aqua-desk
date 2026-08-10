@@ -90,6 +90,121 @@ function _brFilter(q, branch) {
   return branch ? q.eq('branch', branch) : q;
 }
 
+// ═════════════════════════════════════════════════════════════════════
+// ЭТАП B — API-СЛОЙ: клиент нового FastAPI-бэкенда (aqua-desk-v2)
+// Сосуществует с Supabase. Каждый DB-метод сам решает, куда идти,
+// по CONFIG.API_MODE[domain] (см. useApi). Сигнатуры DB.* не меняются.
+// ═════════════════════════════════════════════════════════════════════
+
+// Домен переключён на новый API? ('api' у самого домена или у 'all').
+function useApi(domain) {
+  const m = (typeof CONFIG !== 'undefined' && CONFIG.API_MODE) || {};
+  return m[domain] === 'api' || (m.all === 'api' && m[domain] !== 'supabase');
+}
+
+// ─── ТОКЕНЫ ──────────────────────────────────
+// access — полноценный токен после PIN/входа (30 мин). preauth — короткий (5 мин),
+// живёт только в процессе входа (Telegram→PIN/claim), в localStorage не кладём.
+let _apiToken = null;
+let _apiPreauth = null;
+function getApiToken() {
+  if (_apiToken) return _apiToken;
+  try { _apiToken = localStorage.getItem('aq_api_token') || null; } catch (e) {}
+  return _apiToken;
+}
+function setApiToken(t) {
+  _apiToken = t || null;
+  try { t ? localStorage.setItem('aq_api_token', t) : localStorage.removeItem('aq_api_token'); } catch (e) {}
+}
+function setApiPreauth(t) { _apiPreauth = t || null; }
+
+// Реакция на протухший/невалидный access-токен. Рефреш-эндпоинта у бэкенда пока
+// нет (access живёт 30 мин) — при 401 сбрасываем токен и уводим на экран входа,
+// откуда повторный Telegram-логин выдаст свежий токен. Не бросает.
+let _apiReauthing = false;
+function onApiUnauthorized() {
+  if (_apiReauthing) return;
+  _apiReauthing = true;
+  setApiToken(null);
+  try {
+    if (typeof toast === 'function') toast('Сессия истекла, войдите заново', 'error');
+    // init() перезапустит поток входа (Telegram→PIN); в браузерном режиме — перезагрузка.
+    if (typeof init === 'function') { init().finally(() => { _apiReauthing = false; }); return; }
+  } catch (e) {}
+  _apiReauthing = false;
+}
+
+// Универсальный вызов нового API. Возвращает распарсенный JSON (или null для 204).
+// При !ok бросает Error(code), где code — бизнес-код из {"error":{"code"}} бэкенда
+// (INSUFFICIENT_BALANCE, WRONG_PIN, already_pending, ...). e.message === code —
+// совместимо с прежним разбором ошибок в app-коде (e?.message).
+async function api(path, opts = {}) {
+  const { method = 'GET', body, preauth = false, auth = true, query } = opts;
+  let url = CONFIG.API_BASE + path;
+  if (query && typeof query === 'object') {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(query)) {
+      if (v === undefined || v === null || v === '') continue;
+      if (Array.isArray(v)) v.forEach(x => qs.append(k, x));
+      else qs.append(k, v);
+    }
+    const s = qs.toString();
+    if (s) url += (url.includes('?') ? '&' : '?') + s;
+  }
+  const headers = {};
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  if (auth) {
+    const tok = preauth ? _apiPreauth : getApiToken();
+    if (tok) headers['Authorization'] = 'Bearer ' + tok;
+  }
+  const res = await fetch(url, {
+    method,
+    headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  const text = await res.text();
+  let payload = null;
+  if (text) { try { payload = JSON.parse(text); } catch (e) { payload = text; } }
+  if (!res.ok) {
+    const code = payload?.error?.code || payload?.detail || res.statusText || 'API_ERROR';
+    if (res.status === 401 && auth && !preauth) onApiUnauthorized();
+    const err = new Error(code);
+    err.code = code; err.status = res.status; err.payload = payload;
+    throw err;
+  }
+  return payload;
+}
+
+// Вход через новый API. Возвращает профиль в форме, которую ждёт boot-поток
+// (init()): объект профиля | null (нужна регистрация) | заглушка с has_pin
+// (нужен PIN). Побочно кладёт preauth/access-токены. Ошибок не глотает.
+async function _apiTelegramProfile(tgId) {
+  const initData = _rawInitData();
+  let data;
+  if (initData) {
+    // Боевой путь: подписанный Telegram initData → проверка HMAC на бэкенде.
+    data = await api('/auth/telegram', { method: 'POST', body: { init_data: initData }, auth: false });
+  } else {
+    // Браузерный dev-режим (?tgid=) — подписи нет. Dev-login (только environment=local
+    // на бэкенде) сразу выдаёт access-токен по tg_id, минуя Telegram и PIN.
+    data = await api('/auth/dev-login', { method: 'POST', body: { tg_id: Number(tgId) }, auth: false });
+  }
+  if (data.preauth_token) setApiPreauth(data.preauth_token);
+  if (data.access_token)  setApiToken(data.access_token);
+  if (data.status === 'needs_registration') return null;
+  if (data.status === 'needs_pin') {
+    // Профиль пока не отдан (только preauth). Заглушка ведёт boot к PIN-экрану;
+    // реальный профиль придёт из /auth/pin после ввода PIN (см. verifyPin).
+    return { id: null, tg_id: Number(tgId), fio: '', role: '', branches: [], has_pin: true };
+  }
+  // status 'ok' — профиль привязан и PIN не требуется (или dev-login).
+  if (data.profile) {
+    if (typeof STATE !== 'undefined') STATE.profile = data.profile;
+    return data.profile;
+  }
+  return null;
+}
+
 
 const DB = {};
 
@@ -112,10 +227,15 @@ Object.assign(DB, {
 
   // ─── AUTH ───────────────────────────────────
   async getProfileByTgId(id) {
+    if (useApi('auth')) return _apiTelegramProfile(id);
     const {data,error} = await sb().rpc('get_profile_by_tg_id',{p_tg_id:id});
     if (error) throw error; return data;
   },
   async getUnclaimedProfileByFio(fio) {
+    if (useApi('auth')) {
+      const data = await api('/auth/unclaimed', { query: { fio: fio.trim().replace(/\s+/g,' ') }, preauth: true });
+      return data || null;
+    }
     const normalized = fio.trim().replace(/\s+/g,' ');
     // Сначала ищем точное совпадение (case-insensitive)
     const {data:exact} = await sb().from('profiles')
@@ -141,14 +261,35 @@ Object.assign(DB, {
     return null;
   },
   async claimProfile(profileId, tgId, pin) {
+    if (useApi('auth')) {
+      const data = await api('/auth/claim', { method:'POST', body:{ profile_id: profileId, pin }, preauth: true });
+      setApiToken(data.access_token);
+      if (data.profile && typeof STATE !== 'undefined') STATE.profile = data.profile;
+      return data.profile;
+    }
     const {data,error} = await sb().rpc('claim_profile',{p_profile_id:profileId,p_tg_id:tgId,p_pin:pin});
     if (error) throw error; return data;
   },
   async verifyPin(tgId, pin) {
+    if (useApi('auth')) {
+      try {
+        const data = await api('/auth/pin', { method:'POST', body:{ pin }, preauth: true });
+        setApiToken(data.access_token);
+        if (data.profile && typeof STATE !== 'undefined') STATE.profile = data.profile;
+        return true;
+      } catch (e) {
+        if (e.code === 'WRONG_PIN') return false; // сохраняем bool-контракт метода
+        throw e;
+      }
+    }
     const {data,error} = await sb().rpc('verify_pin',{p_tg_id:tgId,p_pin:pin});
     if (error) throw error; return data;
   },
   async changePin(profileId, pin, oldPin=null) {
+    if (useApi('auth')) {
+      await api('/auth/pin/change', { method:'POST', body:{ pin, old_pin: oldPin } });
+      return;
+    }
     // Смена существующего PIN требует старый (WRONG_OLD_PIN при несовпадении);
     // первичная установка (pincode ещё NULL) проходит без него.
     const {error} = await sb().rpc('change_pin',{p_profile_id:profileId,p_pin:pin,p_old_pin:oldPin});
