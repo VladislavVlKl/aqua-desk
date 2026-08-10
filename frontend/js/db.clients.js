@@ -445,21 +445,30 @@ async deleteClient(id) {
   },
   // ─── DUTIES ──────────────────────────────────
   async getActiveDuty(trainerId) {
+    if (useApi('schedule')) return await api('/duties/active', { query: { trainer_id: trainerId } });
     const {data,error} = await sb().from('duties').select('*')
       .eq('trainer_id',trainerId).is('end_time',null).maybeSingle();
     if (error) throw error; return data;
   },
   async startDuty(trainerId, branch) {
+    if (useApi('schedule')) return await api('/duties/start', { method:'POST', body:{ trainer_id: trainerId, branch } });
     const {data,error} = await sb().from('duties')
       .insert({trainer_id:trainerId,branch}).select().single();
     if (error) throw error; return data;
   },
   async endDuty(dutyId) {
+    if (useApi('schedule')) return await api('/duties/'+dutyId+'/stop', { method:'POST' });
     const {data,error} = await sb().from('duties')
       .update({end_time:new Date().toISOString()}).eq('id',dutyId).select().single();
     if (error) throw error; return data;
   },
   async getDuties(trainerId, year, month) {
+    if (useApi('schedule')) {
+      // Бэкенд отдаёт дежурства за месяц (вкл. незакрытые); фронт показывает только
+      // завершённые — фильтруем end_time на клиенте, как раньше делал .not(end_time,is,null).
+      const rows = await api('/duties', { query: { trainer_id: trainerId, year, month } });
+      return (rows || []).filter(d => d.end_time != null);
+    }
     const from = new Date(year,month-1,1).toISOString();
     const to   = new Date(year,month,  1).toISOString();
     const {data,error} = await sb().from('duties').select('*')
@@ -468,6 +477,7 @@ async deleteClient(id) {
     if (error) throw error; return data||[];
   },
   async deleteDuty(id) {
+    if (useApi('schedule')) { await api('/duties/'+id+'/delete', { method:'POST' }); return; }
     const {error} = await sb().from('duties').delete().eq('id',id);
     if (error) throw error;
   },

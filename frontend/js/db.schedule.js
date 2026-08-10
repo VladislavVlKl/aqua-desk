@@ -96,6 +96,9 @@ Object.assign(DB, {
 
   /** События за неделю */
   async getEventsForWeek(weekStart, weekEnd, branch) {
+    if (useApi('schedule')) {
+      return await api('/events', { query: { week_start: weekStart, week_end: weekEnd, branch: branch || undefined } });
+    }
     let q = sb().from('events')
       .select('id,title,event_type,start_time,end_time,blocks_pool,branch')
       .gte('end_time', weekStart+'T00:00:00')
@@ -179,6 +182,12 @@ Object.assign(DB, {
 
   // ─── SUBSCRIPTIONS ───────────────────────────
   async freezeSubscription(subId, clientId, freezeStart, freezeEnd, newSubEnd) {
+    if (useApi('clients')) {
+      await api('/subscriptions/'+subId+'/freeze', { method:'POST', body:{
+        client_id: clientId, freeze_start: freezeStart, freeze_end: freezeEnd, new_sub_end: newSubEnd,
+      }});
+      return;
+    }
     const {error: e1} = await sb().from('subscriptions')
       .update({freeze_start: freezeStart, freeze_end: freezeEnd}).eq('id', subId);
     if (e1) throw e1;
@@ -187,6 +196,10 @@ Object.assign(DB, {
     if (e2) throw e2;
   },
   async unfreezeEarly(subId, clientId, newSubEnd) {
+    if (useApi('clients')) {
+      await api('/subscriptions/'+subId+'/unfreeze', { method:'POST', body:{ client_id: clientId, new_sub_end: newSubEnd } });
+      return;
+    }
     const {error: e1} = await sb().from('subscriptions')
       .update({freeze_start: null, freeze_end: null}).eq('id', subId);
     if (e1) throw e1;
@@ -195,6 +208,10 @@ Object.assign(DB, {
     if (e2) throw e2;
   },
   async getActiveSubscription(clientId) {
+    if (useApi('clients')) {
+      // Бэкенд возвращает абонемент с эмбедом training_goals (для карточки клиента).
+      return await api('/clients/'+clientId+'/subscriptions/active');
+    }
     const {data,error} = await sb().from('subscriptions')
       .select('*, training_goals(*)')
       .eq('client_id',clientId).eq('is_active',true)
@@ -230,6 +247,13 @@ Object.assign(DB, {
    *  - Ребёнок: закрывает старый (остаток сгорает), создаёт новый
    *  - Взрослый: добавляет ПТ к балансу, абонемент не закрывается */
   async buyNewPackage(clientId, trainerId, isChild, quantity, startDate, isWeekend = false) {
+    if (useApi('clients')) {
+      // Бэкенд сам определяет ребёнок/взрослый по возрасту и делает всю логику
+      // (закрыть старый + новый баланс/срок для ребёнка; суммировать для взрослого).
+      return await api('/clients/'+clientId+'/subscriptions/buy', { method:'POST', body:{
+        trainer_id: trainerId, quantity, start_date: startDate, is_weekend: !!isWeekend,
+      }});
+    }
     const endDate = calcSubEnd(startDate, quantity, isWeekend);
     if (isChild) {
       // Закрыть старый (баланс сгорает)
@@ -268,12 +292,20 @@ Object.assign(DB, {
     }
   },
   async closeSubscription(subId, closingNote, endDate) {
+    if (useApi('clients')) {
+      return await api('/subscriptions/'+subId+'/close', { method:'POST', body:{ closing_note: closingNote||'', end_date: endDate } });
+    }
     const {data,error} = await sb().from('subscriptions')
       .update({is_active:false,end_date:endDate,closing_note:closingNote||null})
       .eq('id',subId).select().single();
     if (error) throw error; return data;
   },
   async closeSubEarly(subId, clientId, isChild, closingNote, today) {
+    if (useApi('clients')) {
+      // isChild определяется на бэкенде по возрасту; обнуление баланса ребёнка — там же.
+      await api('/subscriptions/'+subId+'/close-early', { method:'POST', body:{ client_id: clientId, closing_note: closingNote||'', today } });
+      return;
+    }
     const note = closingNote || (isChild ? 'Досрочное закрытие. Остаток сгорел.' : 'Досрочное закрытие. Остаток сохранён.');
     const {error} = await sb().from('subscriptions')
       .update({is_active:false, end_date:today, closing_note:note})
@@ -287,12 +319,16 @@ Object.assign(DB, {
 
   // ─── TRAINING GOALS ──────────────────────────
   async addGoal(subscriptionId, clientId, goalText) {
+    if (useApi('clients')) {
+      return await api('/goals', { method:'POST', body:{ subscription_id: subscriptionId, client_id: clientId, goal_text: goalText } });
+    }
     const {data,error} = await sb().from('training_goals')
       .insert({subscription_id:subscriptionId,client_id:clientId,goal_text:goalText})
       .select().single();
     if (error) throw error; return data;
   },
   async deleteGoal(goalId) {
+    if (useApi('clients')) { await api('/goals/'+goalId+'/delete', { method:'POST' }); return; }
     const {error} = await sb().from('training_goals').delete().eq('id',goalId);
     if (error) throw error;
   },
