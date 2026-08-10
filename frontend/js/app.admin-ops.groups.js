@@ -591,6 +591,9 @@ async function renderGroupMonthReport(groupId, monthStr, view='full') {
     const {clients, payments, notes, attendance, payouts, trainers, instanceSessions, substitutions, groupTypeInfo} = report;
 
     const payMap  = Object.fromEntries(payments.map(p=>[p.group_client_id, p]));
+    // Статус «оплачено»/должник — по ПЕРИОДУ абонемента (не сбрасывается 1-го числа).
+    // Деньги/ЗП/выручка ниже остаются на строках месяца оплаты (payMap/payments).
+    const activePayMap = await DB.getActiveGroupPaymentsMap(groupId, monthStr);
     const noteMap = Object.fromEntries(notes.map(n=>[n.group_client_id, n]));
 
     // Уникальные даты занятий в месяце
@@ -651,7 +654,7 @@ async function renderGroupMonthReport(groupId, monthStr, view='full') {
       <!-- Сводка -->
       <div class="summary-cards" style="margin-bottom:16px">
         <div class="summary-card"><div class="s-val">${clients.filter(c=>c.is_active).length}</div><div class="s-lbl">Детей</div></div>
-        <div class="summary-card"><div class="s-val">${payments.filter(p=>p.paid).length}</div><div class="s-lbl">Оплатили</div></div>
+        <div class="summary-card"><div class="s-val">${clients.filter(c=>c.is_active&&activePayMap[c.id]).length}</div><div class="s-lbl">Оплатили</div></div>
         <div class="summary-card"><div class="s-val">${totalSessions}</div><div class="s-lbl">Занятий</div></div>
         <div class="summary-card accent"><div class="s-val">${fmt(totalPaid)}</div><div class="s-lbl">Сумма оплат</div></div>
       </div>
@@ -676,7 +679,7 @@ async function renderGroupMonthReport(groupId, monthStr, view='full') {
 
       <!-- Сигнал: ходят без оплаты -->
       ${(()=>{
-        const debtKids = clients.filter(c=>c.is_active && !(payMap[c.id]?.paid) && (attByClient[c.id]||0)>2);
+        const debtKids = clients.filter(c=>c.is_active && !activePayMap[c.id] && (attByClient[c.id]||0)>2);
         if (!debtKids.length || !(isAdmin||STATE.profile.role==='senior_trainer')) return '';
         return `<div class="warn-banner" style="background:rgba(239,68,68,.08);border-color:rgba(239,68,68,.35);margin-bottom:16px">
           <div style="font-weight:600;margin-bottom:6px">⚠️ Без оплаты, но ходят больше 2 занятий (${debtKids.length})</div>
@@ -701,10 +704,10 @@ async function renderGroupMonthReport(groupId, monthStr, view='full') {
             ${(()=>{
               const active = clients.filter(c=>c.is_active);
               const rowHtml = c=>{
-                const pay = payMap[c.id];
+                const pay = activePayMap[c.id];
                 const note = noteMap[c.id];
                 const att = attByClient[c.id]||0;
-                const paid = pay?.paid;
+                const paid = !!pay;
                 const debtAlert = !paid && att > 2;
                 return `<tr${debtAlert?' style="background:rgba(239,68,68,.06)"':''}>
                   <td style="font-weight:500">

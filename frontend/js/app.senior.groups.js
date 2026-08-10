@@ -369,8 +369,9 @@ async function renderGroupDetail(groupId) {
       DB.getGroupSubgroups(instanceId, groupId),
     ]);
     const dbSubgroups = subgData.names||[];
-    const paidMap = Object.fromEntries(payments.map(p=>[p.group_client_id, p]));
-    const debtors = clients.filter(c=>!paidMap[c.id]?.paid);
+    // Статус «оплачено» — по ПЕРИОДУ абонемента (не сбрасывается 1-го числа месяца)
+    const paidMap = await DB.getActiveGroupPaymentsMap(groupId, month, instanceId||null);
+    const debtors = clients.filter(c=>!paidMap[c.id]);
 
     // Подгруппы: персистентные (group_subgroups) ∪ те, в которые уже переведены дети
     const subgroups = [...new Set([...dbSubgroups, ...clients.map(c=>c.subgroup||'').filter(Boolean)])].sort();
@@ -771,7 +772,8 @@ async function renderGroupChildrenScreen(groupId) {
       DB.getGroupSubgroups(g.instanceId, g.groupId),
     ]);
     g.clients = clients;
-    g.paidMap = Object.fromEntries(payments.map(p=>[p.group_client_id, p]));
+    // Статус «оплачено» — по ПЕРИОДУ абонемента (не сбрасывается 1-го числа месяца)
+    g.paidMap = await DB.getActiveGroupPaymentsMap(g.groupId, g.month, g.instanceId||null);
     g.noteMap = Object.fromEntries(notes.map(n=>[n.group_client_id, n]));
     g.dbSubgroups = subgData.names||[];
     g.mainLabel = subgData.mainLabel||null;
@@ -782,7 +784,7 @@ async function renderGroupChildrenScreen(groupId) {
 
 function _childCardHtml(c) {
   const g = window._gd;
-  const pay = g.paidMap?.[c.id]; const paid = pay?.paid; const note = g.noteMap?.[c.id];
+  const pay = g.paidMap?.[c.id]; const paid = !!pay; const note = g.noteMap?.[c.id];
   return `<div class="staff-card" onclick="openChildMenu('${c.id}')" style="cursor:pointer">
     <div style="flex:1;min-width:0">
       <div class="staff-fio">${c.name}</div>

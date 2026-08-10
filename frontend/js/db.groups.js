@@ -265,6 +265,35 @@ async unassignTrainerGroup(id) {
               {onConflict:'group_client_id,month'});
     if (error) throw error;
   },
+  /**
+   * Оплаты, чей ПЕРИОД абонемента (sub_start..sub_end) пересекает месяц — для СТАТУСА
+   * «оплачено» (не для ЗП/выручки: те считаются по строке месяца оплаты).
+   * Пример: оплата 15.08 с sub_end 15.09 → активна и в августе, и в сентябре.
+   * Возвращает {group_client_id: payment} (при нескольких — с самым поздним sub_end).
+   * Legacy-строки без периода учитываются по точному месяцу.
+   */
+  async getActiveGroupPaymentsMap(groupId, monthStr, groupInstanceId=undefined) {
+    let inst = groupInstanceId;
+    if (inst === undefined) {
+      const {data:tg} = await sb().from('trainer_groups')
+        .select('group_instance_id').eq('id',groupId).maybeSingle();
+      inst = tg?.group_instance_id || null;
+    }
+    const first = monthStr;                                   // 'YYYY-MM-01'
+    const d = new Date(monthStr); d.setMonth(d.getMonth()+1); d.setDate(0);
+    const last = d.toISOString().slice(0,10);                 // последний день месяца
+    let q = sb().from('group_payments').select('*').eq('paid', true);
+    q = inst ? q.eq('group_instance_id', inst) : q.eq('group_id', groupId);
+    q = q.or(`and(sub_start.lte.${last},sub_end.gte.${first}),and(sub_end.is.null,month.eq.${monthStr})`);
+    const {data,error} = await q;
+    if (error) throw error;
+    const map = {};
+    (data||[]).forEach(p=>{
+      const k = p.group_client_id, cur = map[k];
+      if (!cur || String(p.sub_end||p.month) > String(cur.sub_end||cur.month)) map[k] = p;
+    });
+    return map;
+  },
 
   // ─── GROUP PROGRESS NOTES ─────────────────────
   async getGroupProgressNotes(groupId, month) {

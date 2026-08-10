@@ -332,18 +332,18 @@ Object.assign(DB, {
     const result = [];
     for (const g of uniq) {
       const inst = g.group_instance_id;
-      const [children, payments] = await Promise.all([
+      // Статус «оплачено» — по ПЕРИОДУ абонемента (не сбрасывается 1-го числа месяца)
+      const [children, payMap] = await Promise.all([
         inst ? this.getGroupClientsByInstance(inst) : this.getGroupClients(g.id),
-        inst ? this.getGroupPaymentsByInstance(inst, month) : this.getGroupPayments(g.id, month),
+        this.getActiveGroupPaymentsMap(g.id, month, inst || null),
       ]);
-      const payMap = Object.fromEntries(payments.map(p=>[p.group_client_id, p]));
       result.push({
         groupId: g.id, instanceId: inst,
         name: g.group_types?.name||'Группа', trainer: g.profiles?.fio||'',
         children: children.map(c=>({
           id: c.id, name: c.name,
           monthly_price: c.monthly_price||0,
-          paid: !!payMap[c.id]?.paid,
+          paid: !!payMap[c.id],
           amount: payMap[c.id]?.amount || c.monthly_price || 0,
         })),
       });
