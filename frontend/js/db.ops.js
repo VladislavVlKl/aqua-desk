@@ -329,36 +329,45 @@ Object.assign(DB, {
     tq = _brFilter(tq, branch);
     const [w, t] = await Promise.all([wq, tq]);
     if (w.error) throw w.error; if (t.error) throw t.error;
-    return { workouts:w.data||[], trials:t.data||[] };
+    const workouts = w.data||[];
+    await this._enrichReceptionSeq(workouts);
+    return { workouts, trials:t.data||[] };
   },
 
-  /** Подтверждённые за период (вкладка «История») */
+  /** Подтверждённые за период (вкладка «История»; branch — строка/массив/null). */
   async getReceptionConfirmed(branch, fromDate, toDate) {
     const from = `${fromDate}T00:00:00+05:00`, to = `${toDate}T23:59:59+05:00`;
-    const wq = sb().from('workouts')
+    let wq = sb().from('workouts')
       .select('*, clients(fio), profiles!trainer_id(fio)')
-      .eq('branch',branch).eq('reception_status','confirmed')
+      .eq('reception_status','confirmed')
       .gte('reception_at',from).lte('reception_at',to)
       .order('reception_at',{ascending:false}).limit(300);
-    const tq = sb().from('trial_sessions')
+    wq = _brFilter(wq, branch);
+    let tq = sb().from('trial_sessions')
       .select('*, profiles!trainer_id(fio)')
-      .eq('branch',branch).eq('reception_status','confirmed')
+      .eq('reception_status','confirmed')
       .gte('reception_at',from).lte('reception_at',to)
       .order('reception_at',{ascending:false}).limit(300);
+    tq = _brFilter(tq, branch);
     const [w, t] = await Promise.all([wq, tq]);
     if (w.error) throw w.error; if (t.error) throw t.error;
-    return { workouts:w.data||[], trials:t.data||[] };
+    const workouts = w.data||[];
+    await this._enrichReceptionSeq(workouts);
+    return { workouts, trials:t.data||[] };
   },
 
   /** Все висящие pending филиала (для эскалации в «Контроле» координатора) */
   async getReceptionHanging(branch) {
     let wq = sb().from('workouts')
-      .select('id,branch,workout_date,trainer_id,profiles!trainer_id(fio)')
+      .select('id,branch,workout_date,trainer_id,client_id,is_drop_in,clients(fio),profiles!trainer_id(fio)')
       .eq('reception_status','pending').eq('pending_confirmation',false)
       .order('workout_date',{ascending:true});
     wq = _brFilter(wq, branch);
     const {data,error} = await wq;
-    if (error) throw error; return data||[];
+    if (error) throw error;
+    const rows = data||[];
+    await this._enrichReceptionSeq(rows);
+    return rows;
   },
 
   /** Статистика подтверждено/отклонено по тренерам за месяц (для «Контроля») */
