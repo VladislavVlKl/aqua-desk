@@ -163,9 +163,14 @@ Object.assign(DB, {
   // Строк может быть несколько — по одной на филиал (branch='' — легаси/«без филиала»).
   // getAdjustment возвращает агрегат по всем филиалам (для calcSalary и отчёта тренера).
   async getAdjustment(trainerId, year, month) {
-    const {data,error} = await sb().from('month_adjustments').select('*')
-      .eq('trainer_id',trainerId).eq('year',year).eq('month',month);
-    if (error) throw error;
+    // Строк может быть несколько (по филиалам) — агрегируем в один bonus/penalty/notes.
+    const data = useApi('salary')
+      ? await api('/salary/adjustments', { query: { trainer_id: trainerId, year, month } })
+      : (await (async () => {
+          const {data,error} = await sb().from('month_adjustments').select('*')
+            .eq('trainer_id',trainerId).eq('year',year).eq('month',month);
+          if (error) throw error; return data;
+        })());
     if (!data?.length) return null;
     return data.reduce((m,a)=>({
       ...m, bonus:m.bonus+(a.bonus||0), penalty:m.penalty+(a.penalty||0),
@@ -173,6 +178,11 @@ Object.assign(DB, {
     }), {trainer_id:trainerId, year, month, bonus:0, penalty:0, notes:''});
   },
   async upsertAdjustment(trainerId, year, month, bonus, penalty, notes, branch='') {
+    if (useApi('salary')) {
+      return await api('/salary/adjustments', { method:'POST', body:{
+        trainer_id: trainerId, year, month, bonus, penalty, notes, branch,
+      }});
+    }
     const {data,error} = await sb().from('month_adjustments')
       .upsert({trainer_id:trainerId,year,month,bonus,penalty,notes,branch},
               {onConflict:'trainer_id,year,month,branch'})
