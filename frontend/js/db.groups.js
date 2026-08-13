@@ -548,12 +548,22 @@ async unassignTrainerGroup(id) {
   // ─── GROUP SESSIONS ──────────────────────────
   async logGroupSession(trainerId, groupTypeId, branch, date, headcount) {
     invalidateCachePrefix('grp:');
+    if (useApi('groups')) {
+      return await api('/group-sessions', { method:'POST', body:{
+        trainer_id: trainerId, group_type_id: groupTypeId, branch, session_date: date, headcount,
+      }});
+    }
     const {data,error} = await sb().from('group_sessions')
       .insert({trainer_id:trainerId,group_type_id:groupTypeId,branch,session_date:date,headcount})
       .select().single();
     if (error) throw error; return data;
   },
   async getGroupSessions(trainerId, year, month) {
+    if (useApi('groups')) {
+      // Бэкенд флэтит group_name/kind/billing_model → тот же reshape, что у trainer-groups.
+      const rows = await api('/group-sessions', { query: { trainer_id: trainerId, year, month } });
+      return (rows || []).map(_apiTrainerGroup);
+    }
     const from = `${year}-${String(month).padStart(2,'0')}-01`;
     const to   = monthFirstDayStr(year, month+1);
     const {data,error} = await sb().from('group_sessions')
