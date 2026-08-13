@@ -1,6 +1,7 @@
 Object.assign(DB, {
   // ─── УВЕДОМЛЕНИЯ ─────────────────────────────
   async getNotificationRules() {
+    if (useApi('notifications')) return await api('/notifications/rules');
     const {data,error} = await sb().from('notification_rules').select('*').order('id');
     if (error) throw error; return data||[];
   },
@@ -21,6 +22,7 @@ Object.assign(DB, {
     if (error) throw error; return rows.length;
   },
   async getRecentNotifications(limit=30) {
+    if (useApi('notifications')) return await api('/notifications', { query: { limit } });
     const {data,error} = await sb().from('notifications_queue')
       .select('*').order('created_at',{ascending:false}).limit(limit);
     if (error) throw error; return data||[];
@@ -80,6 +82,12 @@ Object.assign(DB, {
 
   /** Инициировать передачу клиента */
   async initiateTransfer(clientId, fromId, toId, initiatedBy, note='') {
+    if (useApi('transfers')) {
+      // Пуш тренеру Б пока не шлём (нет notifications-write эндпоинта; воркер-стуб).
+      return await api('/transfers/initiate', { method:'POST', body:{
+        client_id: clientId, from_trainer_id: fromId, to_trainer_id: toId, note: note || '',
+      }});
+    }
     const {data,error} = await sb().from('client_transfers')
       .insert({client_id:clientId,from_trainer_id:fromId,to_trainer_id:toId,
                initiated_by:initiatedBy,status:'pending',note:note||null})
@@ -95,6 +103,12 @@ Object.assign(DB, {
 
   /** Входящие запросы на передачу (для тренера Б) */
   async getIncomingTransfers(trainerId) {
+    if (useApi('transfers')) {
+      const rows = await api('/transfers/incoming', { query: { trainer_id: trainerId } });
+      return (rows || []).map(r => ({ ...r,
+        clients: { fio: r.client_fio, category: r.client_category, balance: r.client_balance },
+        profiles: { fio: r.from_fio } }));
+    }
     const {data,error} = await sb().from('client_transfers')
       .select('*, clients(fio,category,balance), profiles!from_trainer_id(fio)')
       .eq('to_trainer_id',trainerId).eq('status','pending')
@@ -104,6 +118,12 @@ Object.assign(DB, {
 
   /** Подтвердить/отклонить передачу */
   async resolveTransfer(transferId, clientId, toTrainerId, confirmed) {
+    if (useApi('transfers')) {
+      await api('/transfers/'+transferId+'/resolve', { method:'POST', body:{
+        client_id: clientId, to_trainer_id: toTrainerId, confirmed,
+      }});
+      return;
+    }
     const status = confirmed ? 'confirmed' : 'rejected';
     const {error:e1} = await sb().from('client_transfers')
       .update({status,resolved_at:new Date().toISOString()}).eq('id',transferId);
@@ -117,6 +137,13 @@ Object.assign(DB, {
 
   /** Административная передача без подтверждения */
   async adminTransfer(clientId, toTrainerId, adminId, note='') {
+    if (useApi('transfers')) {
+      // from_trainer_id на бэкенде = текущий тренер клиента (не 0), см. extra.admin_transfer.
+      await api('/transfers/admin', { method:'POST', body:{
+        client_id: clientId, to_trainer_id: toTrainerId, note: note || '',
+      }});
+      return;
+    }
     await sb().from('client_transfers')
       .insert({client_id:clientId,from_trainer_id:0,to_trainer_id:toTrainerId,
                initiated_by:adminId,status:'admin',note:note||null});
