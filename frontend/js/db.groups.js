@@ -1,17 +1,31 @@
+// Этап B: бэкенд /trainer-groups отдаёт поля типа плоско (group_name/group_kind/
+// billing_model), а фронт ждёт вложенный tg.group_types{name,type,billing_model}
+// (единственные читаемые поля). Восстанавливаем объект.
+function _apiTrainerGroup(row) {
+  if (!row) return row;
+  return { ...row, group_types: {
+    name: row.group_name, type: row.group_kind, billing_model: row.billing_model,
+  }};
+}
+
 Object.assign(DB, {
   // ─── GROUP TYPES ─────────────────────────────
   async getGroupTypes() {
+    if (useApi('groups')) return await api('/group-types');
     const {data,error} = await sb().from('group_types').select('*').order('name');
     if (error) throw error; return data||[];
   },
 
   async updateGroupType(id, fields) {
     invalidateCachePrefix('grp:');
+    if (useApi('groups')) { await api('/group-types/'+id+'/update', { method:'POST', body: fields }); return; }
     const {error} = await sb().from('group_types').update(fields).eq('id',id);
     if (error) throw error;
   },
   async deleteGroupType(id) {
     invalidateCachePrefix('grp:');
+    // Бэкенд сам снимает всех тренеров (subscription_end) перед удалением типа.
+    if (useApi('groups')) { await api('/group-types/'+id+'/delete', { method:'POST' }); return; }
     // Unassign all trainers first
     await sb().from('trainer_groups')
       .update({subscription_end: new Date().toISOString().slice(0,10)})
@@ -21,6 +35,7 @@ Object.assign(DB, {
   },
   async addGroupType(fields) {
     invalidateCachePrefix('grp:');
+    if (useApi('groups')) return await api('/group-types', { method:'POST', body: fields });
     const {data,error} = await sb().from('group_types').insert(fields).select().single();
     if (error) throw error; return data;
   },
@@ -34,6 +49,10 @@ async getAssignedTrainers(groupTypeId) {
   
   // ─── TRAINER GROUPS ──────────────────────────
   async getTrainerGroups(trainerId) {
+    if (useApi('groups')) {
+      const rows = await api('/trainer-groups', { query: { trainer_id: trainerId } });
+      return (rows || []).map(_apiTrainerGroup);
+    }
     const {data,error} = await sb().from('trainer_groups')
       .select('*, group_types(*)').eq('trainer_id',trainerId)
       .is('subscription_end',null).order('subscription_start',{ascending:false});
@@ -41,6 +60,13 @@ async getAssignedTrainers(groupTypeId) {
   },
   async addTrainerGroup(trainerId, groupTypeId, branch, startDate, rateType='percent', rateValue=40, role=null, groupInstanceId=null) {
     invalidateCachePrefix('grp:');
+    if (useApi('groups')) {
+      // Бэкенд генерит group_instance_id, если не передан. Возврат — голая строка tg.
+      return await api('/trainer-groups', { method:'POST', body:{
+        trainer_id: trainerId, group_type_id: groupTypeId, branch, start_date: startDate,
+        rate_type: rateType, rate_value: rateValue, role, group_instance_id: groupInstanceId || null,
+      }});
+    }
     const {data,error} = await sb().from('trainer_groups')
       .insert({trainer_id:trainerId, group_type_id:groupTypeId, branch,
                subscription_start:startDate, rate_type:rateType,
@@ -51,18 +77,21 @@ async getAssignedTrainers(groupTypeId) {
   },
   async updateTrainerGroupSchedule(id, daysOfWeek, sessionTime) {
     invalidateCachePrefix('grp:');
+    if (useApi('groups')) { await api('/trainer-groups/'+id+'/schedule', { method:'POST', body:{ days_of_week: daysOfWeek, session_time: sessionTime } }); return; }
     const {error} = await sb().from('trainer_groups')
       .update({days_of_week: daysOfWeek, session_time: sessionTime}).eq('id',id);
     if (error) throw error;
   },
   async updateTrainerGroupRate(id, rateType, rateValue) {
     invalidateCachePrefix('grp:');
+    if (useApi('groups')) { await api('/trainer-groups/'+id+'/rate', { method:'POST', body:{ rate_type: rateType, rate_value: rateValue } }); return; }
     const {error} = await sb().from('trainer_groups')
       .update({rate_type: rateType, rate_value: rateValue}).eq('id',id);
     if (error) throw error;
   },
   async updateTrainerGroupLeader(id, leaderName, leaderFeePct) {
     invalidateCachePrefix('grp:');
+    if (useApi('groups')) { await api('/trainer-groups/'+id+'/leader', { method:'POST', body:{ leader_name: leaderName||null, leader_fee_pct: leaderFeePct||0 } }); return; }
     const {error} = await sb().from('trainer_groups')
       .update({leader_name: leaderName||null, leader_fee_percent: leaderFeePct||0}).eq('id',id);
     if (error) throw error;
@@ -84,6 +113,7 @@ async getAssignedTrainers(groupTypeId) {
   // Клиенты по instance (общий список)
   async getGroupClientsByInstance(groupInstanceId) {
     return cached(`grp:cli:i:${groupInstanceId}`, async () => {
+      if (useApi('groups')) return await api('/groups/'+groupInstanceId+'/clients');
       const {data,error} = await sb().from('group_clients')
         .select('*').eq('group_instance_id', groupInstanceId)
         .eq('is_active',true).order('name');
@@ -92,12 +122,14 @@ async getAssignedTrainers(groupTypeId) {
   },
   async getGroupPaymentsByInstance(groupInstanceId, month) {
     return cached(`grp:pay:i:${groupInstanceId}:${month}`, async () => {
+      if (useApi('groups')) return await api('/groups/'+groupInstanceId+'/payments', { query: { month } });
       const {data,error} = await sb().from('group_payments')
         .select('*').eq('group_instance_id', groupInstanceId).eq('month',month);
       if (error) throw error; return data||[];
     });
   },
   async getGroupAttendanceByInstance(groupInstanceId, date) {
+    if (useApi('groups')) return await api('/groups/'+groupInstanceId+'/attendance', { query: { date } });
     const {data,error} = await sb().from('group_attendance')
       .select('*').eq('group_instance_id', groupInstanceId).eq('session_date',date);
     if (error) throw error; return data||[];
@@ -124,6 +156,7 @@ async getAssignedTrainers(groupTypeId) {
   },
 async unassignTrainerGroup(id) {
     invalidateCachePrefix('grp:');
+    if (useApi('groups')) { await api('/trainer-groups/'+id+'/unassign', { method:'POST' }); return; }
     const {error} = await sb().from('trainer_groups')
       .update({subscription_end: todayStr()}).eq('id',id);
     if (error) throw error;
@@ -140,6 +173,12 @@ async unassignTrainerGroup(id) {
   async addGroupClient(groupId, name, age, monthlyPrice, startDate, groupInstanceId=null, subgroup='') {
     invalidateCachePrefix('grp:');
     // subgroup: '' = основная подгруппа (колонка group_clients.subgroup, NOT NULL DEFAULT '')
+    if (useApi('groups')) {
+      return await api('/group-clients', { method:'POST', body:{
+        group_id: groupId, name, age: age||null, monthly_price: monthlyPrice||0,
+        start_date: startDate, group_instance_id: groupInstanceId, subgroup: subgroup||'',
+      }});
+    }
     const {data,error} = await sb().from('group_clients')
       .insert({group_id:groupId, name, age:age||null,
                monthly_price:monthlyPrice||0, start_date:startDate,
@@ -150,17 +189,20 @@ async unassignTrainerGroup(id) {
   },
   async updateGroupClient(id, fields) {
     invalidateCachePrefix('grp:');
+    if (useApi('groups')) { await api('/group-clients/'+id+'/update', { method:'POST', body: fields }); return; }
     const {error} = await sb().from('group_clients').update(fields).eq('id',id);
     if (error) throw error;
   },
   async archiveGroupClient(id) {
     invalidateCachePrefix('grp:');
+    if (useApi('groups')) { await api('/group-clients/'+id+'/update', { method:'POST', body:{ is_active: false } }); return; }
     const {error} = await sb().from('group_clients')
       .update({is_active:false}).eq('id',id);
     if (error) throw error;
   },
   async restoreGroupClient(id) {
     invalidateCachePrefix('grp:');
+    if (useApi('groups')) { await api('/group-clients/'+id+'/update', { method:'POST', body:{ is_active: true } }); return; }
     const {error} = await sb().from('group_clients')
       .update({is_active:true}).eq('id',id);
     if (error) throw error;
@@ -178,6 +220,7 @@ async unassignTrainerGroup(id) {
 
   async deleteGroupClient(id) {
     invalidateCachePrefix('grp:');
+    if (useApi('groups')) { await api('/group-clients/'+id+'/delete', { method:'POST' }); return; }
     const {error} = await sb().from('group_clients').delete().eq('id',id);
     if (error) throw error;
   },
@@ -204,6 +247,12 @@ async unassignTrainerGroup(id) {
   },
   async saveGroupAttendance(groupId, groupClientId, date, attended, groupInstanceId=null) {
     invalidateCachePrefix('grp:');
+    if (useApi('groups')) {
+      await api('/group-attendance', { method:'POST', body:{
+        group_id: groupId, group_client_id: groupClientId, date, attended, group_instance_id: groupInstanceId,
+      }});
+      return;
+    }
     const {error} = await sb().from('group_attendance')
       .upsert({group_id:groupId, group_client_id:groupClientId,
                session_date:date, attended,
@@ -251,6 +300,14 @@ async unassignTrainerGroup(id) {
   },
   async setGroupPayment(groupId, groupClientId, month, amount, paid, subStart=null, subEnd=null, groupInstanceId=null) {
     invalidateCachePrefix('grp:');
+    if (useApi('groups')) {
+      // paid_at сохраняется на бэкенде (set_payment, onConflict group_client_id,month).
+      await api('/group-payments', { method:'POST', body:{
+        group_id: groupId, group_client_id: groupClientId, month, amount, paid,
+        sub_start: subStart||null, sub_end: subEnd||null, group_instance_id: groupInstanceId,
+      }});
+      return;
+    }
     // Сохраняем оригинальную дату оплаты если уже была оплачена
     const {data:existing} = await sb().from('group_payments')
       .select('paid_at').eq('group_client_id',groupClientId).eq('month',month).maybeSingle();
