@@ -420,12 +420,14 @@ async function renderAddSecondTrainerModal(groupTypeId, groupNameEnc, branch, gr
           <option value="">— выберите —</option>
           ${_trainerOptionsWithFlags(allT)}
         </select></div>
-      ${isArtSwim?`<div class="form-group"><label>Роль</label>
+      ${!isAdult?`<div class="form-group"><label>Станция (суша/вода) — необязательно</label>
         <select id="st2-role">
+          <option value="">— без станции —</option>
           <option value="суша">Суша</option>
           <option value="вода">Вода</option>
           <option value="суша+вода">Суша + Вода</option>
-        </select></div>`:'<input type="hidden" id="st2-role" value="">'}
+        </select>
+        <p class="hint" style="margin-top:4px">Можно выбрать ТОГО ЖЕ тренера с другой станцией — станции одного тренера в группе считаются как одна ЗП (без удвоения).</p></div>`:'<input type="hidden" id="st2-role" value="">'}
       ${isAdult?`<div style="background:rgba(16,185,129,.1);border-radius:8px;padding:10px;font-size:12px;color:var(--hint);margin-bottom:12px">
         ✅ Взрослая группа: ставка по явке</div>`:`
       <div class="form-group"><label>Ставка за занятие (сум)</label>
@@ -491,12 +493,14 @@ async function renderAssignGroupForm() {
       <div id="ag-date-wrap" class="form-group"><label>Начало</label>
         <input type="date" id="ag-start" value="${todayStr()}"></div>
       <div id="ag-artswim-role" class="form-group" style="display:none">
-        <label>Роль (Art-swim)</label>
+        <label>Станция (суша/вода) — необязательно</label>
         <select id="ag-role">
+          <option value="">— без станции —</option>
           <option value="суша">Суша</option>
           <option value="вода">Вода</option>
           <option value="суша+вода">Суша + Вода</option>
-        </select></div>
+        </select>
+        <p class="hint" style="margin-top:4px">Это первая станция группы. Вторую станцию тому же тренеру (напр. суша 09:00 + вода 08:00) добавьте в карточке группы → «Второй тренер», выбрав того же тренера — она попадёт в тот же инстанс.</p></div>
       <div id="ag-rate-section">
         <div class="form-group"><label>Тип ставки</label>
           <select id="ag-rate-type" onchange="onRateTypeChange(this)">
@@ -518,13 +522,13 @@ if (sel) onAgTypeChange(sel);
 function onAgTypeChange(sel) {
   const opt = sel.options[sel.selectedIndex];
   const isChildren = opt?.dataset.type === 'children';
-  const isArtSwim  = opt?.dataset.name?.toLowerCase().includes('art');
   const dateWrap   = document.getElementById('ag-date-wrap');
   const roleWrap   = document.getElementById('ag-artswim-role');
   const rateSection = document.getElementById('ag-rate-section');
   const adultNote   = document.getElementById('ag-adult-note');
   if (dateWrap)   dateWrap.style.display   = isChildren ? '' : 'none';
-  if (roleWrap)   roleWrap.style.display   = isArtSwim  ? '' : 'none';
+  // Станция (суша/вода) — для любых детских групп, не только Art-swim
+  if (roleWrap)   roleWrap.style.display   = isChildren ? '' : 'none';
   if (rateSection) rateSection.style.display = isChildren ? '' : 'none';
   if (adultNote)   adultNote.style.display   = isChildren ? 'none' : '';
 }

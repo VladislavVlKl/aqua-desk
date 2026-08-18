@@ -174,11 +174,14 @@ rate_type (percent|flat|headcount) + rate_value · role (суша|вода|су�
 leader_name + leader_fee_percent · group_instance_id uuid · days_of_week text[] · session_time
 ```
 > `group_instance_id` связывает несколько trainer_groups в одну «физическую» группу (второй тренер).
-> ⚠️ Один активный тренер = ОДНА строка на инстанс: уникальный индекс
-> `trainer_groups_one_active_per_instance (trainer_id, group_instance_id) WHERE subscription_end IS NULL`
-> (миграция 20260704120100). Расчёт ЗП считает занятия тренера по каждой его строке —
-> вторая активная строка удваивала оплату. «Суша+вода» = две записи в group_sessions, не две строки.
-> Занятия относятся к строке только в окне [subscription_start, subscription_end) — см. calcChildGroupPayroll.
+> ⚠️ Уникальность активных строк: индекс
+> `trainer_groups_one_active_per_instance (trainer_id, group_instance_id, coalesce(role,'')) WHERE subscription_end IS NULL`
+> (миграция 20260818120000; ранее без role — 20260704120100). Один тренер может вести
+> суша+вода (две станции/часа) как ДВЕ строки одного инстанса (разные role/session_time);
+> для строк без роли правило «одна активная на инстанс» сохранено (coalesce → '').
+> 🔑 Двойной оплаты нет: `calcChildGroupPayroll` (db.salary.js) через `_collapseTrainerRows`
+> схлопывает строки одного тренера в одном окне [subscription_start, subscription_end) в
+> ОДНУ ЗП-строку. Разные окна (перезаведение в середине месяца) остаются раздельными.
 
 **group_clients** — дети: `group_id, group_instance_id, name, age, start_date, monthly_price, level, is_active, subgroup`
 > `subgroup text NOT NULL DEFAULT ''` — подгруппа внутри группы (`''` = основная, иначе название, напр. `'16:00'`). Одна группа = N подгрупп с раздельными списками детей, общий вал/оплаты.
