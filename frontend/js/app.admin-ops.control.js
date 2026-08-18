@@ -4,8 +4,22 @@
 // ============================================================
 // ── КОНТРОЛЬ: очередь действий (inbox координатора) ──
 // Наблюдательные метрики вынесены в renderAdminMonitoring («Ещё»).
+// Память раскрытости наблюдательных блоков «Контроля» (переживает перерисовку/обновление)
+function _ctrlOpenState() {
+  try { return JSON.parse(localStorage.getItem('ctrl_open')||'{}'); } catch(e) { return {}; }
+}
+function _ctrlSetOpen(key, val) {
+  const s = _ctrlOpenState(); s[key] = !!val;
+  try { localStorage.setItem('ctrl_open', JSON.stringify(s)); } catch(e) {}
+}
+
 async function renderAdminControl(force=false) {
-  $('#tab-content').innerHTML=`<div class="tab-pad">
+  // При обновлении (🔄 или после действия) не показываем спиннер и сохраняем скролл,
+  // чтобы страница не «прыгала» наверх и блоки не схлопывались.
+  const scroller = document.getElementById('tab-content');
+  const savedTop = force ? (scroller?.scrollTop||0) : 0;
+  const savedWin = force ? (window.scrollY||0) : 0;
+  if (!force) $('#tab-content').innerHTML=`<div class="tab-pad">
     <div class="section-header"><h3>Контроль</h3>
       <button class="btn-icon" onclick="renderAdminControl(true)" title="Обновить">🔄</button></div>
     <div class="center-screen"><div class="spinner"></div></div></div>`;
@@ -34,9 +48,10 @@ async function renderAdminControl(force=false) {
       return {lateRequests, workoutDelReqs, deleteReqs, recHanging, recRejected, recConfirmed, pendingSubs, catRecalcReqs, trialDelReqs};
     }, 60000);
     const {lateRequests, workoutDelReqs, deleteReqs, recHanging, recRejected, recConfirmed, pendingSubs, catRecalcReqs, trialDelReqs} = D;
-    const sections=[];
+    const actionSections=[];   // ⚡ требует решения (кнопки Одобрить/Отклонить/Удалить)
+    const monitorSections=[];  // 👁 контроль/наблюдение (сворачиваемое)
     // 🔄 Запросы на замену (подтверждает координатор или старший — кто первый)
-    if (pendingSubs.length) sections.push(`<div class="control-section">
+    if (pendingSubs.length) actionSections.push(`<div class="control-section">
       <div class="control-title warn">🔄 Запросы на замену (${pendingSubs.length})</div>
       ${pendingSubs.map(s=>{
         const sugg = (s.trainer_groups?.group_types?.billing_model==='headcount' && s.headcount) ? getAdultGroupRate(s.headcount) : '';
@@ -54,17 +69,23 @@ async function renderAdminControl(force=false) {
     // Списания ресепшн: три раскрывающихся блока (несписанные / отказанные / списанные).
     // Номер списания в абонементе (N/M) — у всех; пробные без номера.
     const seqStr = it => (it._kind!=='t' && it._seq) ? ` · ${it._seq}${it._total?'/'+it._total:''} ПТ` : '';
-    const collapse = (title, cls, open, inner) => `<details class="control-section"${open?' open':''}>
-      <summary class="control-title ${cls}" style="cursor:pointer">${title}</summary>${inner}</details>`;
+    // Наблюдательный блок: <details> с запоминанием раскрытости (по умолчанию свёрнут).
+    const _open = _ctrlOpenState();
+    const collapse = (key, title, cls, inner) => {
+      const isOpen = (key in _open) ? _open[key] : false;
+      return `<details class="control-section" data-sec="${key}"${isOpen?' open':''}
+        ontoggle="_ctrlSetOpen('${key}', this.open)">
+        <summary class="control-title ${cls}" style="cursor:pointer">${title}</summary>${inner}</details>`;
+    };
 
     // 🛎 НЕСПИСАННЫЕ — висящие подтверждения ресепшн (эскалация >24ч)
     if (recHanging.length) {
       const escThreshold = Date.now() - RECEPTION_ESCALATE_HRS*3600000;
       const overdue = recHanging.filter(w=>new Date(w.workout_date).getTime() < escThreshold);
       const ageStr = (d)=>{ const h=Math.floor((Date.now()-new Date(d))/3600000); return h<24?`${h} ч`:`${Math.floor(h/24)} дн.`; };
-      sections.push(collapse(
+      monitorSections.push(collapse('hanging',
         `🛎 Несписанные — висят у ресепшн (${recHanging.length}${overdue.length?` · ⏰ ${overdue.length} > ${RECEPTION_ESCALATE_HRS}ч`:''})`,
-        overdue.length?'danger':'warn', true,
+        overdue.length?'danger':'warn',
         recHanging.slice(0,30).map(w=>{
           const esc=new Date(w.workout_date).getTime()<escThreshold;
           return `<div class="control-item" ${esc?'style="border-left:3px solid var(--danger)"':''}>
@@ -80,8 +101,8 @@ async function renderAdminControl(force=false) {
       ...(recRejected.trials||[]).map(t=>({...t, _kind:'t', fio:`${t.first_name}${t.last_name?' '+t.last_name:''}`, trainer:t.profiles?.fio||'?',
         branch:t.branch||'', wdate:t.session_date, ts:t.reception_at, reason:t.reception_reason})),
     ].sort((a,b)=>new Date(b.ts)-new Date(a.ts));
-    if (recRej.length) sections.push(collapse(
-      `🔴 Отказанные списания (${recRej.length})`, 'danger', true,
+    if (recRej.length) monitorSections.push(collapse('rejected',
+      `🔴 Отказанные списания (${recRej.length})`, 'danger',
       recRej.map(q=>`<div class="control-item">
         <div class="ci-main">${q.fio} <span class="hint">← ${q.trainer}</span>${q._kind==='t'?' <span class="hint">(пробное)</span>':''}${seqStr(q)}</div>
         <div class="ci-sub">🏊 ${q.branch||'—'} · ПТ ${fmtDT(q.wdate)}</div>
@@ -94,15 +115,15 @@ async function renderAdminControl(force=false) {
       ...(recConfirmed.trials||[]).map(t=>({...t, _kind:'t', fio:`${t.first_name}${t.last_name?' '+t.last_name:''}`, trainer:t.profiles?.fio||'?',
         branch:t.branch||'', wdate:t.session_date, ts:t.reception_at})),
     ].sort((a,b)=>new Date(b.ts)-new Date(a.ts));
-    if (recConf.length) sections.push(collapse(
-      `🧾 Списанные за 3 дня (${recConf.length})`, '', false,
+    if (recConf.length) monitorSections.push(collapse('confirmed',
+      `🧾 Списанные за 3 дня (${recConf.length})`, '',
       recConf.slice(0,100).map(q=>`<div class="control-item">
         <div class="ci-main">${q.fio} <span class="hint">← ${q.trainer}</span>${q._kind==='t'?' <span class="hint">(пробное)</span>':''}${seqStr(q)}</div>
         <div class="ci-sub">🏊 ${q.branch||'—'} · ПТ ${fmtDT(q.wdate)}</div>
       </div>`).join('')
       + (recConf.length>100?`<div class="ci-sub" style="padding:8px 0;color:var(--hint)">…показаны первые 100 из ${recConf.length}</div>`:'')));
     // ⏰ Запросы на поздние тренировки
-    if (lateRequests.length) sections.push(`<div class="control-section">
+    if (lateRequests.length) actionSections.push(`<div class="control-section">
       <div class="control-title danger">⏰ Запросы на поздние тренировки (${lateRequests.length})</div>
       ${lateRequests.map(r=>`<div class="control-item">
         <div class="ci-main"><b>${r.clients?.fio||'?'}</b> · кат.${r.category} · ${r.profiles?.fio||'?'}</div>
@@ -115,7 +136,7 @@ async function renderAdminControl(force=false) {
       </div>`).join('')}
     </div>`);
     // 🔄 Запросы на пересчёт категории прошлых ПТ
-    if (catRecalcReqs.length) sections.push(`<div class="control-section">
+    if (catRecalcReqs.length) actionSections.push(`<div class="control-section">
       <div class="control-title warn">🔄 Пересчёт категории прошлых ПТ (${catRecalcReqs.length})</div>
       ${catRecalcReqs.map(r=>`<div class="control-item">
         <div class="ci-main"><b>${r.clients?.fio||r.client_fio||'?'}</b> · Кат.${r.clients?.category||'?'} → Кат.${r.new_category}</div>
@@ -127,7 +148,7 @@ async function renderAdminControl(force=false) {
       </div>`).join('')}
     </div>`);
     // 🗑 Запросы на удаление ПТ
-    if (workoutDelReqs.length) sections.push(`<div class="control-section">
+    if (workoutDelReqs.length) actionSections.push(`<div class="control-section">
       <div class="control-title danger">🗑 Запросы на удаление ПТ (${workoutDelReqs.length})</div>
       ${workoutDelReqs.map(r=>`<div class="control-item">
         <div class="ci-main">${r.client_name||'—'} · ${fmtDate(r.workout_date)}</div>
@@ -140,7 +161,7 @@ async function renderAdminControl(force=false) {
       </div>`).join('')}
     </div>`);
     // 🗑 Запросы на удаление пробной
-    if (trialDelReqs.length) sections.push(`<div class="control-section">
+    if (trialDelReqs.length) actionSections.push(`<div class="control-section">
       <div class="control-title danger">🗑 Запросы на удаление пробной (${trialDelReqs.length})</div>
       ${trialDelReqs.map(r=>`<div class="control-item">
         <div class="ci-main">${r.client_name||'—'} · ${fmtDate(r.session_date)}</div>
@@ -153,7 +174,7 @@ async function renderAdminControl(force=false) {
       </div>`).join('')}
     </div>`);
     // 🗑 Запросы на удаление клиента
-    if (deleteReqs.length) sections.push(`<div class="control-section">
+    if (deleteReqs.length) actionSections.push(`<div class="control-section">
       <div class="control-title danger">🗑 Запросы на удаление (${deleteReqs.length})</div>
       ${deleteReqs.map(r=>`<div class="control-item">
         <div class="ci-main">${r.client_name} <span class="hint">← ${r.profiles?.fio||'?'}</span></div>
@@ -168,12 +189,22 @@ async function renderAdminControl(force=false) {
       </div>`).join('')}
     </div>`);
 
+    const nothing = !actionSections.length && !monitorSections.length;
     $('#tab-content').innerHTML=`<div class="tab-pad">
       <div class="section-header"><h3>Контроль</h3>
         <button class="btn-icon" onclick="renderAdminControl(true)" title="Обновить">🔄</button></div>
       <p class="hint" style="margin-bottom:16px">На ${todayStr()} · очередь действий</p>
-      ${sections.length?sections.join(''):'<div class="empty-state">✅<p>Очередь пуста</p></div>'}
+      ${nothing ? '<div class="empty-state">✅<p>Очередь пуста</p></div>' : `
+        ${actionSections.length
+          ? `<div style="font-size:12px;font-weight:700;color:var(--hint);letter-spacing:.03em;margin:0 0 8px">⚡ ТРЕБУЕТ РЕШЕНИЯ</div>${actionSections.join('')}`
+          : '<div class="empty-state" style="padding:16px">✅<p style="margin:4px 0 0">Активных запросов нет</p></div>'}
+        ${monitorSections.length
+          ? `<div style="border-top:1px solid var(--border);margin:18px 0 10px"></div>
+             <div style="font-size:12px;font-weight:700;color:var(--hint);letter-spacing:.03em;margin:0 0 8px">👁 КОНТРОЛЬ · НАБЛЮДЕНИЕ</div>${monitorSections.join('')}`
+          : ''}`}
     </div>`;
+    // Восстанавливаем позицию прокрутки после обновления (без прыжка наверх)
+    if (force) { if (scroller) scroller.scrollTop = savedTop; if (savedWin) window.scrollTo(0, savedWin); }
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 
