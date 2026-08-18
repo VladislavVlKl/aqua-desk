@@ -17,7 +17,8 @@ async function renderSeniorApp(initialTab='home') {
   <nav class="bottom-nav">
     <button class="nav-btn" onclick="seniorTab('home')"><span>🏠</span>Главная</button>
     <button class="nav-btn" onclick="seniorTab('clients')"><span>👥</span>Клиенты</button>
-    <button class="nav-btn" onclick="seniorTab('today')"><span>✅</span>Сегодня</button>
+    <button class="nav-btn" onclick="seniorTab('today')"><span>✅</span>Списание</button>
+    <button class="nav-btn" onclick="seniorTab('schedule')"><span>📅</span>Расписание</button>
     <button class="nav-btn" onclick="seniorTab('groups')"><span>🏊</span>Группы</button>
     <button class="nav-btn" onclick="seniorTab('more')"><span>⋯</span>Ещё</button>
   </nav>`);
@@ -73,7 +74,7 @@ function seniorTab(tab) {
   // Порядок строго совпадает с кнопками .nav-btn в renderSeniorApp (5 шт),
   // иначе подсветка active съезжает. Под-экраны из «Ещё» (branch/schedule/…) не в навбаре.
   // «Главная» = личный отчёт (renderReportTab), отдельной вкладки «Отчёт» нет.
-  const tabs=['home','clients','today','groups','more'];
+  const tabs=['home','clients','today','schedule','groups','more'];
   $$('.nav-btn').forEach((b,i)=>b.classList.toggle('active',tabs[i]===tab));
   if (tab==='home')     renderReportTab();
   if (tab==='clients')  renderClientsTab();
@@ -91,8 +92,6 @@ function renderSeniorMore() {
   $('#tab-content').innerHTML=`<div class="tab-pad">
     <h3 style="margin-bottom:16px">Ещё</h3>
     <div style="display:flex;flex-direction:column;gap:10px">
-      <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);text-align:left;padding:14px 16px;border-radius:12px"
-        onclick="seniorTab('schedule')">📅 Расписание</button>
       <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);text-align:left;padding:14px 16px;border-radius:12px"
         onclick="seniorTab('branch')">🏢 Отчёт филиала</button>
       <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);text-align:left;padding:14px 16px;border-radius:12px"

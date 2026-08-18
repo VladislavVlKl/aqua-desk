@@ -34,7 +34,7 @@ function renderTrainerShell(tab) {
   <nav class="bottom-nav">
     <button class="nav-btn" onclick="switchTab('home')"><span>🏠</span>Главная</button>
       <button class="nav-btn" onclick="switchTab('clients')"><span>👥</span>Клиенты</button>
-      <button class="nav-btn" onclick="switchTab('today')"><span>✅</span>Сегодня</button>
+      <button class="nav-btn" onclick="switchTab('today')"><span>✅</span>Списание</button>
       <button class="nav-btn" onclick="switchTab('schedule')"><span>📅</span>Расписание</button>
       <button class="nav-btn" onclick="switchTab('events')"><span>🏆</span>События</button>
       <button class="nav-btn" onclick="switchTab('groups')"><span>🏊</span>Группы</button>

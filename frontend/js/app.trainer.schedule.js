@@ -386,7 +386,7 @@ async function renderTodayTab() {
 
     $('#tab-content').innerHTML=`<div class="tab-pad">
       <div class="section-header">
-        <div><h3>Сегодня</h3><p class="hint">${dayName}, ${date}</p></div>
+        <div><h3>Списание</h3><p class="hint">${dayName}, ${date}</p></div>
         <div style="display:flex;align-items:center;gap:8px">
           ${pending>0?`<div class="pending-badge">${pending}</div>`:''}
           <button onclick="renderMissedSlotsPanel()" style="background:${missedSlots.length?'rgba(239,68,68,.15)':'rgba(255,255,255,.07)'};color:${missedSlots.length?'#ef4444':'var(--hint)'};border:1px solid ${missedSlots.length?'rgba(239,68,68,.3)':'var(--border)'};border-radius:10px;padding:4px 10px;font-size:12px;font-weight:600;cursor:pointer">
