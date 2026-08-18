@@ -320,9 +320,8 @@ const STATION_META = { 'суша': {icon:'☀️', dot:'#eab308'}, 'вода': {
 // ═══ ОБЩИЕ ВИЗУАЛЬНЫЕ ХЕЛПЕРЫ ХАБА ГРУППЫ (детские + взрослые — единый стиль) ═══
 const groupHubInfoRow = (label, val) => `<div style="display:flex;justify-content:space-between;align-items:center">
   <span style="color:var(--hint);font-size:13px">${label}</span>${val}</div>`;
-const groupHubSection = t => `<div style="font-size:12px;font-weight:600;color:var(--hint);text-transform:uppercase;letter-spacing:.4px;margin:6px 2px 2px">${t}</div>`;
-const groupHubBigBtn = (icon, title, sub, onclick) => `
-  <button class="staff-card" style="width:100%;cursor:pointer;text-align:left;display:flex;align-items:center;gap:12px;border:1px solid var(--border);background:var(--card)"
+const groupHubBigBtn = (icon, title, sub, onclick, primary) => `
+  <button class="staff-card" style="width:100%;cursor:pointer;text-align:left;display:flex;align-items:center;gap:12px;border:1px solid ${primary?'var(--accent)':'var(--border)'};background:${primary?'rgba(124,58,237,.18)':'var(--card)'}"
     onclick="${onclick}">
     <span style="font-size:22px">${icon}</span>
     <span style="flex:1;min-width:0">
@@ -403,33 +402,14 @@ async function renderGroupDetail(groupId) {
               onclick="renderGroupDebtorsModal(${JSON.stringify(debtors.map(c=>c.name)).replace(/"/g,'&quot;')})">⚠️ ${debtors.length}</button>`
           : `<span style="font-weight:600;font-size:13px;color:#10b981">нет</span>`)}
       </div>
-      ${(()=>{
-        const grpHdr = t => `<div style="font-size:12px;font-weight:600;color:var(--hint);text-transform:uppercase;letter-spacing:.4px;margin:6px 2px 2px">${t}</div>`;
-        return `
-        ${grpHdr('Управление')}
-        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px">
-          ${canPayroll?bigBtn('👥','Персонал','тренеры · ставки · расписание',`openSeniorGroupPersonnel('${groupId}')`):''}
-          ${bigBtn('👶',`Список детей (${clients.length})`, subgroups.length?'по подгруппам · оплаты · заметки':'добавление · оплаты · заметки',`renderGroupChildrenScreen('${groupId}')`)}
-        </div>
-
-        ${grpHdr('Занятия')}
-        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px">
-          ${bigBtn('✅','Занятие сегодня',`${fmtDate(today)} · кто на станции`,`renderGroupSessionScreen('${groupId}')`)}
-          ${bigBtn('📅','История занятий','по датам · явка · кто проводил',`renderGroupHistoryScreen('${groupId}')`)}
-          ${bigBtn('🔄','История замен','прошедшие и текущие замены',`renderGroupSubstitutionsHistory('${groupId}')`)}
-        </div>
-
-        ${grpHdr('Финансы и отчёты')}
-        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px">
-          ${bigBtn('📊','Отчёт по детям','посещаемость · оплаты · Excel',`openGroupReport('${groupId}','${month}','detail')`)}
-          ${canPayroll?bigBtn('💰','ЗП за месяц','авто-расчёт · премии/штрафы',`openGroupReport('${groupId}','${month}','detail','payroll')`):''}
-        </div>
-
-        ${grpHdr('Прочее')}
-        <div style="display:flex;flex-direction:column;gap:8px">
-          ${bigBtn('📦','Архив детей','вернуть ребёнка в группу',`renderGroupArchiveModal('${groupId}','${instanceId||''}')`)}
-        </div>`;
-      })()}
+      <div style="display:flex;flex-direction:column;gap:8px">
+        ${bigBtn('✅','Занятие сегодня',`${fmtDate(today)} · отметить детей · кто на станции`,`renderGroupSessionScreen('${groupId}')`, true)}
+        ${canPayroll?bigBtn('👥','Персонал','тренеры · ставки · расписание',`openSeniorGroupPersonnel('${groupId}')`):''}
+        ${bigBtn('👶',`Список детей (${clients.length})`, subgroups.length?'по подгруппам · оплаты · заметки · архив':'оплаты · заметки · архив',`renderGroupChildrenScreen('${groupId}')`)}
+        ${bigBtn('📅','История занятий','по датам · явка · кто проводил · замены',`renderGroupHistoryScreen('${groupId}')`)}
+        ${bigBtn('📊','Отчёт по детям','посещаемость · оплаты · Excel',`openGroupReport('${groupId}','${month}','detail')`)}
+        ${canPayroll?bigBtn('💰','ЗП за месяц','авто-расчёт · премии/штрафы',`openGroupReport('${groupId}','${month}','detail','payroll')`):''}
+      </div>
     </div></div>`);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
@@ -560,17 +540,18 @@ function renderGroupSessionScreenHtml() {
       <div id="cnd-summary" style="font-size:13px;line-height:1.6">${_cndSummaryInner(g, sub)}</div>
     </div>
 
-    <button class="btn btn-sm btn-full" style="background:var(--card);border:1px solid var(--border);margin-bottom:12px"
-      onclick="repeatLastConducted('${g.groupId}')">🔁 Повторить прошлое занятие</button>
-
     <div style="font-size:13px;font-weight:600;margin-bottom:8px">Кто на какой станции${hasSubs?` — ${subLabel(sub)}`:''}</div>
     ${stationCards}
     <div style="font-size:11px;color:var(--hint);margin:2px 0 12px">Тап по имени — отметить на станции, повторный тап — снять. Можно отметить тренера на обеих станциях. Кого не было — не отмечайте. Процентникам ЗП идёт независимо от присутствия.</div>
 
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn btn-sm" style="flex:1;min-width:160px;background:var(--card);border:1px solid var(--border)"
+    <button class="btn btn-sm btn-full" style="background:var(--card);border:1px solid var(--border)"
+      onclick="const m=document.getElementById('sess-more');m.style.display=m.style.display==='none'?'flex':'none'">⋯ Ещё</button>
+    <div id="sess-more" style="display:none;flex-direction:column;gap:8px;margin-top:8px">
+      <button class="btn btn-sm btn-full" style="background:var(--card);border:1px solid var(--border)"
+        onclick="repeatLastConducted('${g.groupId}')">🔁 Повторить прошлое занятие</button>
+      <button class="btn btn-sm btn-full" style="background:var(--card);border:1px solid var(--border)"
         onclick="renderGroupAttendanceByDate('${g.groupId}')">📅 Посещаемость за другую дату</button>
-      <button class="btn btn-sm" style="flex:1;min-width:160px;background:var(--card);border:1px solid var(--border)"
+      <button class="btn btn-sm btn-full" style="background:var(--card);border:1px solid var(--border)"
         onclick="renderConductedByDate('${g.groupId}')">✏️ Кто проводил — другая дата</button>
     </div>
   </div></div>`);
@@ -805,6 +786,8 @@ function renderGroupChildrenScreenHtml() {
     ${backBtn()}
     <div class="app-title">Список детей</div>
     <div style="display:flex;gap:6px">
+      <button class="btn btn-sm" style="font-size:12px;background:var(--card);border:1px solid var(--border)"
+        onclick="renderGroupArchiveModal('${g.groupId}','${g.instanceId||''}')">📦 Архив</button>
       <button class="btn btn-sm" style="font-size:12px;background:var(--card);border:1px solid var(--border)"
         onclick="openSubgroupManager('${g.groupId}','children')">👥 Подгруппы</button>
       <button class="btn btn-sm btn-primary" style="font-size:12px"

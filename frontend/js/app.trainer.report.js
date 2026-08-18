@@ -480,7 +480,7 @@ async function doResolveSubstitute(workoutId, clientId, confirmed) {
   try {
     await DB.resolveSubstitute(workoutId, clientId, confirmed);
     toast(confirmed ? '✅ Замена принята — ПТ в вашей ведомости' : 'Замена отклонена', confirmed?'success':'info');
-    renderReportTab();
+    refreshTrainerScreen();
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 
@@ -488,7 +488,7 @@ async function doResolveTransfer(transferId, clientId, toTrainerId, confirmed) {
   try {
     await DB.resolveTransfer(transferId, clientId, toTrainerId, confirmed);
     toast(confirmed ? '✅ Клиент принят' : 'Передача отклонена', confirmed?'success':'info');
-    renderReportTab();
+    refreshTrainerScreen();
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 

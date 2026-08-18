@@ -3,8 +3,8 @@
 // SECTION: TRAINER:WORKOUTS — renderWorkoutsTab, doLogWorkout
 // ============================================================
 async function renderWorkoutsTab() {
-  // Алиас — открывает главную
-  renderHomeTab();
+  // Алиас — обновляет текущий экран (после списания из модалки)
+  refreshTrainerScreen();
 }
 
 function onWkTypeChange(sel) {
@@ -12,14 +12,20 @@ function onWkTypeChange(sel) {
   const isDropIn=sel.value.startsWith('dropin');
   const isTrial=sel.value==='trial';
   if (reg) reg.style.display=(isDropIn||isTrial)?'none':'';
-  // При выборе "Пробная" — сразу открываем модал ввода данных
+  // «Пробная» и «Старше 72ч» — отдельные сценарии: закрываем модалку списания
+  // и открываем свою модалку (иначе они наложатся друг на друга).
+  // Филиал захватываем ДО закрытия (иначе у мультифилиального теряется выбор).
   if (isTrial) {
     sel.value='regular';
+    window._wkBranch = getBranch('sel-branch');
+    document.getElementById('log-workout-modal')?.remove();
     renderTrialSessionModal();
   }
   const isLate = sel.value==='late_request';
   if (isLate) {
     sel.value='regular';
+    window._wkBranch = getBranch('sel-branch');
+    document.getElementById('log-workout-modal')?.remove();
     renderLateRequestModal();
   }
 }
@@ -231,7 +237,7 @@ async function _doLogWorkoutInner() {
     try {
       await DB.logSubstituteWorkout(rows, STATE.profile.id, subTrainerId);
       toast('✅ Замена записана — тренер получит уведомление для подтверждения','success');
-      renderHomeTab();
+      refreshTrainerScreen();
     } catch(e) { toast('Ошибка','error'); console.error(e); }
     return;
   }
@@ -239,7 +245,7 @@ async function _doLogWorkoutInner() {
     try {
       await DB.logWorkouts(rows);
       toast(isDebt?'✅ В долг':'✅ Разовое','success');
-      renderWorkoutsTab();
+      refreshTrainerScreen();
     } catch(e) { toast('Ошибка','error'); console.error(e); }
     return;
   }
@@ -354,7 +360,7 @@ async function doConfirmLogWorkout() {
         }
       }, 600);
     }
-    renderWorkoutsTab();
+    refreshTrainerScreen();
     // Реестр: одна запись на весь батч (вне try — fire-and-forget)
     const firstRow = rows[0];
     DB.auditLog('workout_add', STATE.profile.id, STATE.profile.fio, clientId, 'workout', {

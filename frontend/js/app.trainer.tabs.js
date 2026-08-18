@@ -58,7 +58,7 @@ function switchTab(tab) {
 
 // Проверяем наличие незакрытых конспектов — батч запрос
 // ============================================================
-// SECTION: TRAINER:HOME — renderHomeTab, checkNoteBadge, doLogDutyHome
+// SECTION: TRAINER:HOME — renderHomeTab (дашборд), checkNoteBadge, renderLogWorkoutModal
 // ============================================================
 async function checkNoteBadge() {
   try {
@@ -76,135 +76,178 @@ async function checkNoteBadge() {
   } catch(e) { /* тихо */ }
 }
 
-// ── ТАБ: ГЛАВНАЯ (Списание + Дежурство) ──────
+// ── ТАБ: ГЛАВНАЯ (дашборд) ────────────────────
+// Главная больше не содержит форм. Запись занятия и дежурства — через модалки
+// (renderLogWorkoutModal / renderDutyModal), доступные и здесь, и во вкладке «Сегодня».
 async function renderHomeTab() {
   $('#tab-content').innerHTML=`<div class="center-screen"><div class="spinner"></div></div>`;
-  const clients  = await DB.getClients(STATE.profile.id);
-  const branches = STATE.profile.branches||[];
-  const now      = new Date();
+  const now = new Date(), y = now.getFullYear(), mo = now.getMonth()+1;
+  const [clients, duties, workouts, pending, transfers] = await Promise.all([
+    DB.getClients(STATE.profile.id),
+    DB.getDuties(STATE.profile.id, y, mo),
+    DB.getWorkouts(STATE.profile.id, y, mo).catch(()=>[]),
+    DB.getPendingConfirmations(STATE.profile.id).catch(()=>[]),
+    DB.getIncomingTransfers(STATE.profile.id).catch(()=>[]),
+  ]);
+  const t0 = todayStr();
   const expiring = clients.filter(c=>{
     if (c.is_archived) return false;
     const d=daysUntil(c.subscription_end);
     return d!==null&&d<=SUBSCRIPTION_WARN_DAYS&&d>=0;
   });
-  const duties   = await DB.getDuties(STATE.profile.id,now.getFullYear(),now.getMonth()+1);
-  const _p2 = n => String(n).padStart(2,'0');
-  const _ymd = `${now.getFullYear()}-${_p2(now.getMonth()+1)}-${_p2(now.getDate())}`;
-  const defStart = `${_ymd}T07:00`;
-  const defEnd   = `${_ymd}T${_p2(now.getHours())}:00`;
+  const activeCount = clients.filter(c=>{
+    if (c.is_archived || (c.balance||0)<=0) return false;
+    if (c.subscription_end && c.subscription_end < t0) return false;
+    if (c.freeze_start && c.freeze_end && t0>=c.freeze_start && t0<=c.freeze_end) return false;
+    return true;
+  }).length;
+  const ptCount = workouts.filter(w=>!w.is_debt).length;
+  const dutyH   = duties.reduce((s,d)=>s+hoursFromDuty(d.start_time,d.end_time),0);
 
   $('#tab-content').innerHTML=`<div class="tab-pad">
+    <div class="summary-cards" style="margin-bottom:14px">
+      <div class="summary-card"><div class="s-val">${ptCount}</div><div class="s-lbl">ПТ за месяц</div></div>
+      <div class="summary-card"><div class="s-val">${dutyH.toFixed(1)}ч</div><div class="s-lbl">Дежурства</div></div>
+      <div class="summary-card"><div class="s-val" style="color:#10b981">${activeCount}</div><div class="s-lbl">Активных</div></div>
+    </div>
 
     ${expiring.length?`<div class="warn-banner">
       ⚠️ Абонемент истекает: ${expiring.map(c=>`<b>${c.fio.split(' ')[0]}</b> (${daysUntil(c.subscription_end)} дн.)`).join(', ')}
     </div>`:''}
 
-    <!-- БЛОК: Списание ПТ -->
-    <div class="home-block">
-      <div class="home-block-title">📋 Списание ПТ</div>
-      ${branchSelect('sel-branch',branches)}
-      <div class="form-group" style="position:relative">
-        <label>Клиент</label>
-        <select id="wk-client" style="display:none">
-          <option value="">— выберите —</option>
-          ${clients.map(c=>{
-            const days=daysUntil(c.subscription_end);
-            const warn=days!==null&&days<=SUBSCRIPTION_WARN_DAYS&&days>=0?' ⚠️':'';
-            const isFrozen = c.freeze_start && c.freeze_end && todayStr() >= c.freeze_start && todayStr() <= c.freeze_end;
-            return `<option value="${c.id}" data-cat="${c.category}" data-bal="${c.balance}"
-              data-age="${c.age||''}" data-di="${c.drop_in_used}" data-archived="${c.is_archived?'1':''}" data-frozen="${isFrozen?'1':''}" data-weekend="${c.is_weekend?'1':''}">
-              ${c.is_archived?'[Архив] ':isFrozen?'[Заморожен] ':''}${c.fio}${warn}</option>`;
-          }).join('')}
-        </select>
-        <div id="wk-client-chip" style="display:none;padding:10px 12px;background:var(--card);border:1px solid var(--accent);border-radius:8px;justify-content:space-between;align-items:center;cursor:pointer;margin-bottom:0">
-          <span id="wk-client-chip-name" style="font-size:14px;font-weight:500"></span>
-          <span style="font-size:16px;color:var(--hint);padding:0 4px" onclick="wkClientClear()">✕</span>
-        </div>
-        <input type="text" id="wk-client-search" autocomplete="off" placeholder="🔍 Введите имя клиента..."
-          style="width:100%;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);font-size:14px;box-sizing:border-box"
-          oninput="wkClientInput(this)">
-        <div id="wk-client-drop" style="display:none;position:absolute;z-index:100;left:0;right:0;border-radius:0 0 12px 12px;max-height:220px;overflow-y:auto;
-          background:#1e1e2e;border:1.5px solid rgba(124,58,237,.5);border-top:none;
-          box-shadow:0 12px 40px rgba(0,0,0,.7);"></div>
-        <div id="wk-client-backdrop" style="display:none;position:fixed;inset:0;z-index:99;background:rgba(0,0,0,.35)" ontouchstart="wkClientClear()" onclick="wkClientClear()"></div>
-      </div>
-      <div class="form-group"><label>Тип тренировки</label>
-        <select id="wk-type" onchange="onWkTypeChange(this)">
-          <option value="regular">Обычная ПТ</option>
-          <option value="dropin1">Разовое 1кт (${fmt(RATES.pt[1])} сум)</option>
-          <option value="dropin2">Разовое 2кт (${fmt(RATES.pt[2])} сум)</option>
-          <option value="dropin3">Разовое 3кт (${fmt(RATES.pt[3])} сум)</option>
-          <option value="trial">🆕 Пробная тренировка</option>
-          <option value="late_request">⏰ Старше 72ч — запросить одобрение</option>
-          <option value="debt">В долг</option>
-        </select>
-      </div>
-      <div id="wk-regular-opts">
-        <div class="form-group"><label>Количество ПТ</label>
-          <select id="wk-count" onchange="renderDateFields()">
-            ${[1,2,3,4,5].map(n=>`<option>${n}</option>`).join('')}
-          </select>
-        </div>
-      </div>
-      <div id="wk-dates"></div>
-      <div id="wk-notes-wrap" style="display:none" class="form-group">
-        <label>Примечание <span class="required">*</span></label>
-        <textarea id="wk-notes" rows="2" placeholder="Причина пакетного списания"></textarea>
-      </div>
-      <!-- Замена: запись на другого тренера -->
-      <div class="debt-toggle" style="margin-bottom:0">
-        <label class="toggle-row">
-          <input type="checkbox" id="wk-substitute" onchange="toggleSubstitute(this)">
-          <span class="toggle-track"><span class="toggle-thumb"></span></span>
-          <span>Записать на другого тренера (замена)</span>
-        </label>
-      </div>
-      <div id="wk-substitute-wrap" style="display:none;margin-top:10px">
-        <div class="form-group"><label>Тренер Б <span class="required">*</span></label>
-          <select id="wk-sub-trainer">
-            <option value="">— выберите тренера —</option>
-            ${(await cached('profiles',()=>DB.getAllProfiles())).filter(p=>p.role!=='admin'&&p.id!==STATE.profile.id)
-              .sort((a,b)=>a.fio.localeCompare(b.fio,'ru'))
-              .map(p=>`<option value="${p.id}">${p.fio}</option>`).join('')}
-          </select>
-        </div>
-        <p class="hint">Тренер получит уведомление для подтверждения. ЗП пойдёт ему.</p>
-      </div>
+    ${_pendingActionsBanner(pending, transfers)}
 
-      <button class="btn btn-primary btn-full" onclick="doLogWorkout()">Списать</button>
-    </div>
-
-    <!-- БЛОК: Дежурство -->
-    <div class="home-block" style="margin-top:16px">
-      <div class="home-block-title">⏱ Запись дежурства</div>
-      ${branchSelect('duty-branch',branches)}
-      ${dutyShiftSelect('duty-branch')}
-      <div class="form-group" style="display:flex;gap:10px">
-        <div style="flex:1"><label>Начало</label>
-          <input type="datetime-local" id="duty-start" value="${defStart}" step="3600"
-            onchange="this.value=this.value.slice(0,13)+':00'"></div>
-        <div style="flex:1"><label>Конец</label>
-          <input type="datetime-local" id="duty-end" value="${defEnd.slice(0,13)+':00'}" step="3600"
-            onchange="this.value=this.value.slice(0,13)+':00'"></div>
-      </div>
-      <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border)"
-        onclick="doLogDutyHome()">Записать дежурство</button>
-      ${duties.length?`<div style="margin-top:10px">
-        <div class="hint" style="margin-bottom:6px">За этот месяц: ${duties.length} дежурств ·
-        ${fmt(Math.round(duties.reduce((s,d)=>s+hoursFromDuty(d.start_time,d.end_time),0)*RATES.duty_per_hour))} сум</div>
-        ${duties.map(d=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px">
-          <span>${new Date(d.start_time).toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit'})} · ${hoursFromDuty(d.start_time,d.end_time).toFixed(1)}ч</span>
-          <button class="btn btn-sm btn-danger" style="padding:2px 8px;font-size:11px"
-            onclick="doDeleteDuty('${d.id}')">✕</button>
-        </div>`).join('')}
-      </div>`:''}
-        
-    </div>
-
+    <button class="btn btn-primary btn-full" style="margin-bottom:10px;font-size:15px;padding:14px" onclick="renderLogWorkoutModal()">➕ Записать занятие</button>
+    <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);padding:12px" onclick="renderDutyModal()">⏱ Записать дежурство</button>
   </div>`;
+}
+
+// Баннер входящих действий (замены на подтверждение / передачи клиента)
+function _pendingActionsBanner(pending, transfers) {
+  let html = '';
+  if (pending?.length) html += `<div class="warn-banner" style="background:rgba(124,58,237,.1);border-color:rgba(124,58,237,.3);color:var(--text)">
+    <b>⚡ ${pending.length} замен(а) ждут подтверждения</b>
+    ${pending.map(w=>`<div class="sub-confirm-row">
+      <div><span class="hi-client">${w.clients?.fio||'?'}</span>
+        <span class="hint"> · от ${w.profiles?.fio||'?'} · ${fmtDate(w.workout_date)}</span></div>
+      <div style="display:flex;gap:6px;margin-top:6px">
+        <button class="btn btn-sm btn-primary" onclick="doResolveSubstitute('${w.id}','${w.client_id}',true)">✓ Принять</button>
+        <button class="btn btn-sm btn-danger"  onclick="doResolveSubstitute('${w.id}','${w.client_id}',false)">✗ Отклонить</button>
+      </div></div>`).join('')}
+  </div>`;
+  if (transfers?.length) html += `<div class="warn-banner" style="background:rgba(16,185,129,.08);border-color:rgba(16,185,129,.3);color:var(--text)">
+    <b>👤 ${transfers.length} запрос(а) на передачу клиента</b>
+    ${transfers.map(t=>`<div class="sub-confirm-row">
+      <div><span class="hi-client">${t.clients?.fio||'?'}</span>
+        <span class="hint"> · от ${t.profiles?.fio||'?'}</span>
+        ${t.note?`<div class="hint">${t.note}</div>`:''}</div>
+      <div style="display:flex;gap:6px;margin-top:6px">
+        <button class="btn btn-sm btn-primary" onclick="doResolveTransfer('${t.id}','${t.client_id}',${t.to_trainer_id},true)">✓ Принять</button>
+        <button class="btn btn-sm btn-danger"  onclick="doResolveTransfer('${t.id}','${t.client_id}',${t.to_trainer_id},false)">✗ Отклонить</button>
+      </div></div>`).join('')}
+  </div>`;
+  return html;
+}
+
+// Закрыть модалки и перерисовать текущий экран тренера/старшего (после списания/действия)
+function refreshTrainerScreen() {
+  document.querySelectorAll('.modal-overlay').forEach(m=>m.remove());
+  const map = { home:renderHomeTab, today:renderTodayTab, report:renderReportTab, clients:renderClientsTab };
+  (map[STATE.currentTab] || renderTodayTab)();
+}
+
+// ── МОДАЛКА: ЗАПИСАТЬ ЗАНЯТИЕ (списание ПТ) ───
+async function renderLogWorkoutModal() {
+  const [clients, subProfiles] = await Promise.all([
+    DB.getClients(STATE.profile.id),
+    cached('profiles',()=>DB.getAllProfiles()),
+  ]);
+  const branches = STATE.profile.branches||[];
+  const subs = subProfiles.filter(p=>p.role!=='admin'&&p.id!==STATE.profile.id)
+    .sort((a,b)=>a.fio.localeCompare(b.fio,'ru'));
+  const m = el('div','modal-overlay'); m.id='log-workout-modal';
+  m.innerHTML=`<div class="modal" style="max-height:92vh;overflow-y:auto">
+    <div class="modal-header"><h3>➕ Записать занятие</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    ${_logWorkoutFormInner(clients, branches, subs)}
+  </div>`;
+  document.body.appendChild(m);
   renderDateFields();
-  wireDutyShift('duty-branch');
-  // Закрывать дропдаун при касании/клике вне поля поиска
+  _wireWkClientClose();
+}
+
+function _logWorkoutFormInner(clients, branches, subs) {
+  return `
+    ${branchSelect('sel-branch',branches)}
+    <div class="form-group" style="position:relative">
+      <label>Клиент</label>
+      <select id="wk-client" style="display:none">
+        <option value="">— выберите —</option>
+        ${clients.map(c=>{
+          const days=daysUntil(c.subscription_end);
+          const warn=days!==null&&days<=SUBSCRIPTION_WARN_DAYS&&days>=0?' ⚠️':'';
+          const isFrozen = c.freeze_start && c.freeze_end && todayStr() >= c.freeze_start && todayStr() <= c.freeze_end;
+          return `<option value="${c.id}" data-cat="${c.category}" data-bal="${c.balance}"
+            data-age="${c.age||''}" data-di="${c.drop_in_used}" data-archived="${c.is_archived?'1':''}" data-frozen="${isFrozen?'1':''}" data-weekend="${c.is_weekend?'1':''}">
+            ${c.is_archived?'[Архив] ':isFrozen?'[Заморожен] ':''}${c.fio}${warn}</option>`;
+        }).join('')}
+      </select>
+      <div id="wk-client-chip" style="display:none;padding:10px 12px;background:var(--card);border:1px solid var(--accent);border-radius:8px;justify-content:space-between;align-items:center;cursor:pointer;margin-bottom:0">
+        <span id="wk-client-chip-name" style="font-size:14px;font-weight:500"></span>
+        <span style="font-size:16px;color:var(--hint);padding:0 4px" onclick="wkClientClear()">✕</span>
+      </div>
+      <input type="text" id="wk-client-search" autocomplete="off" placeholder="🔍 Введите имя клиента..."
+        style="width:100%;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);font-size:14px;box-sizing:border-box"
+        oninput="wkClientInput(this)">
+      <div id="wk-client-drop" style="display:none;position:absolute;z-index:100;left:0;right:0;border-radius:0 0 12px 12px;max-height:220px;overflow-y:auto;
+        background:#1e1e2e;border:1.5px solid rgba(124,58,237,.5);border-top:none;
+        box-shadow:0 12px 40px rgba(0,0,0,.7);"></div>
+      <div id="wk-client-backdrop" style="display:none;position:fixed;inset:0;z-index:99;background:rgba(0,0,0,.35)" ontouchstart="wkClientClear()" onclick="wkClientClear()"></div>
+    </div>
+    <div class="form-group"><label>Тип тренировки</label>
+      <select id="wk-type" onchange="onWkTypeChange(this)">
+        <option value="regular">Обычная ПТ</option>
+        <option value="dropin1">Разовое 1кт (${fmt(RATES.pt[1])} сум)</option>
+        <option value="dropin2">Разовое 2кт (${fmt(RATES.pt[2])} сум)</option>
+        <option value="dropin3">Разовое 3кт (${fmt(RATES.pt[3])} сум)</option>
+        <option value="trial">🆕 Пробная тренировка</option>
+        <option value="late_request">⏰ Старше 72ч — запросить одобрение</option>
+        <option value="debt">В долг</option>
+      </select>
+    </div>
+    <div id="wk-regular-opts">
+      <div class="form-group"><label>Количество ПТ</label>
+        <select id="wk-count" onchange="renderDateFields()">
+          ${[1,2,3,4,5].map(n=>`<option>${n}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div id="wk-dates"></div>
+    <div id="wk-notes-wrap" style="display:none" class="form-group">
+      <label>Примечание <span class="required">*</span></label>
+      <textarea id="wk-notes" rows="2" placeholder="Причина пакетного списания"></textarea>
+    </div>
+    <div class="debt-toggle" style="margin-bottom:0">
+      <label class="toggle-row">
+        <input type="checkbox" id="wk-substitute" onchange="toggleSubstitute(this)">
+        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        <span>Записать на другого тренера (замена)</span>
+      </label>
+    </div>
+    <div id="wk-substitute-wrap" style="display:none;margin-top:10px">
+      <div class="form-group"><label>Тренер Б <span class="required">*</span></label>
+        <select id="wk-sub-trainer">
+          <option value="">— выберите тренера —</option>
+          ${subs.map(p=>`<option value="${p.id}">${p.fio}</option>`).join('')}
+        </select>
+      </div>
+      <p class="hint">Тренер получит уведомление для подтверждения. ЗП пойдёт ему.</p>
+    </div>
+    <button class="btn btn-primary btn-full" style="margin-top:14px" onclick="doLogWorkout()">Списать</button>`;
+}
+
+// Закрытие дропдауна клиента при касании/клике вне поля поиска
+function _wireWkClientClose() {
   const _closeWkDrop = (e) => {
     const drop = document.getElementById('wk-client-drop');
     if (!drop) { document.removeEventListener('touchstart',_closeWkDrop); document.removeEventListener('mousedown',_closeWkDrop); return; }
@@ -216,26 +259,6 @@ async function renderHomeTab() {
   };
   document.addEventListener('touchstart', _closeWkDrop, {passive:true});
   document.addEventListener('mousedown',  _closeWkDrop);
-}
-
-async function doLogDutyHome() {
-  const start  = document.getElementById('duty-start')?.value;
-  const end    = document.getElementById('duty-end')?.value;
-  const branch = document.getElementById('duty-branch')?.value||STATE.profile.branches?.[0]||'';
-  if (!start||!end) return toast('Введите время','error');
-  if (start>=end)   return toast('Конец позже начала','error');
-  if (!branch)      return toast('Выберите филиал','error');
-  const h = hoursFromDuty(new Date(start),new Date(end));
-  if (h>16) return toast('Не более 16 часов','error');
-  try {
-    await sb().from('duties').insert({
-      trainer_id:STATE.profile.id,branch,
-      start_time: new Date(start).toISOString(),
-end_time:   new Date(end).toISOString(),
-    });
-    toast(`✅ ${h.toFixed(1)}ч = ${fmt(Math.round(h*RATES.duty_per_hour))} сум`,'success');
-    renderHomeTab();
-  } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 
 // ── ТАБ: КЛИЕНТЫ ──────────────────────────────

@@ -615,21 +615,12 @@ async function renderAdultGroupDetail(groupId) {
         ${groupHubInfoRow('Участников', `<span style="font-weight:600;font-size:13px">${clients.length}</span>`)}
         ${groupHubInfoRow('Занятий в этом месяце', `<span style="font-weight:600;font-size:13px">${sessions.length}${monthTotal?` · ${fmt(monthTotal)} сум`:''}</span>`)}
       </div>
-      ${groupHubSection('Управление')}
-      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px">
+      <div style="display:flex;flex-direction:column;gap:8px">
+        ${groupHubBigBtn('📊','Отметить занятие','кто был · ставка по явке',`renderAdultGroupHeadcount('${groupId}')`, true)}
         ${canPayroll?groupHubBigBtn('👥','Персонал','тренеры · ставки · расписание',`openSeniorGroupPersonnel('${groupId}')`):''}
         ${groupHubBigBtn('👤',`Участники (${clients.length})`,'добавление · архив',`renderAdultGroupMembers('${groupId}')`)}
-      </div>
-
-      ${groupHubSection('Занятия')}
-      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px">
-        ${groupHubBigBtn('📊','Отметить занятие','кто был · ставка по явке',`renderAdultGroupHeadcount('${groupId}')`)}
         ${groupHubBigBtn('📅','История занятий','по месяцам · правка/удаление',`renderAdultGroupHistory('${groupId}')`)}
         ${groupHubBigBtn('🔄','История замен','прошедшие и текущие замены',`renderGroupSubstitutionsHistory('${groupId}')`)}
-      </div>
-
-      ${groupHubSection('Финансы и отчёты')}
-      <div style="display:flex;flex-direction:column;gap:8px">
         ${groupHubBigBtn('💰','Отчёт за месяц','занятия · сумма по тренерам',`renderAdultGroupReport('${groupId}')`)}
       </div>
     </div></div>`);

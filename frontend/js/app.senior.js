@@ -70,6 +70,7 @@ async function renderSeniorAnalytics() {
 }
 
 function seniorTab(tab) {
+  STATE.currentTab = tab;
   // Порядок строго совпадает с кнопками .nav-btn в renderSeniorApp (6 шт),
   // иначе подсветка active съезжает. Под-экраны из «Ещё» (branch/schedule/…) не в навбаре.
   const tabs=['home','clients','today','report','groups','more'];

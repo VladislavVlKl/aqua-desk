@@ -9,13 +9,13 @@
 //   CORE:INIT           — init(), enterApp()
 //   AUTH                — регистрация, PIN-вход, привязка профиля
 //   TRAINER:SHELL       — renderTrainerApp, renderTrainerShell, switchTab
-//   TRAINER:HOME        — renderHomeTab, checkNoteBadge, doLogDutyHome
+//   TRAINER:HOME        — renderHomeTab (дашборд), checkNoteBadge, renderLogWorkoutModal
 //   TRAINER:CLIENTS     — _findDuplicates, renderClientsTab, renderOverdueNotesModal
 //   TRAINER:CLIENTS:ADD — renderAddClientModal, doAddClient
 //   TRAINER:WORKOUTS    — renderWorkoutsTab, doLogWorkout
 //   TRAINER:SCHEDULE    — renderScheduleTab, loadScheduleWeek, renderAddSlotModal
 //   TRAINER:TODAY       — renderTodayTab, doConfirm
-//   TRAINER:DUTIES      — renderDutyTab, doLogDuty, renderLateRequestModal
+//   TRAINER:DUTIES      — renderDutyModal, doLogDuty, renderLateRequestModal
 //   TRAINER:EVENTS      — renderEventsTab
 //   TRAINER:REPORT      — loadTrainerReport
 //   CLIENT:PROFILE      — renderClientProfile, подписки, заморозка, цели
@@ -165,7 +165,7 @@ function branchSelect(id, branches) {
 
 // ─── СМЕНЫ ДЕЖУРСТВ ──────────────────────────
 // Селект «Смена» автозаполняет duty-start/duty-end по DUTY_SHIFTS.
-// branchId — id поля филиала ('duty-branch' на Главной, 'sel-branch' в табе Дежурства).
+// branchId — id поля филиала (в модалке дежурства — 'duty-branch').
 function dutyShiftSelect(branchId) {
   return `<div class="form-group"><label>Смена</label>
     <select id="duty-shift" onchange="applyDutyShift('${branchId}')">

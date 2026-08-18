@@ -394,6 +394,10 @@ async function renderTodayTab() {
           </button>
         </div>
       </div>
+      <div style="display:flex;gap:8px;margin-bottom:14px">
+        <button class="btn btn-primary" style="flex:1;padding:12px" onclick="renderLogWorkoutModal()">➕ Записать занятие</button>
+        <button class="btn" style="background:var(--card);border:1px solid var(--border);padding:12px 14px" onclick="renderDutyModal()">⏱ Дежурство</button>
+      </div>
       ${todayEvents.map(ev=>`<div class="today-card event-card-mini ${ev.blocks_pool?'event-blocking':''}">
         <span>${EVENT_TYPES[ev.event_type]||'📌'} <b>${ev.title}</b></span>
         <span class="hint">${fmtTime(ev.start_time)}–${fmtTime(ev.end_time)}</span>
@@ -512,11 +516,11 @@ async function doConfirmCancel(slotId,date) {
   } catch(e) { console.error(e); toast('Ошибка','error'); }
 }
 
-// ── ТАБ: ДЕЖУРСТВО (РУЧНОЙ ВВОД) ────────────
+// ── МОДАЛКА: ДЕЖУРСТВО (ручной ввод / смены) ─
 // ============================================================
-// SECTION: TRAINER:DUTIES — renderDutyTab, doLogDuty, renderLateRequestModal
+// SECTION: TRAINER:DUTIES — renderDutyModal, doLogDuty, renderLateRequestModal
 // ============================================================
-async function renderDutyTab() {
+async function renderDutyModal() {
   const branches=STATE.profile.branches||[];
   const now=new Date();
   const _p2=n=>String(n).padStart(2,'0');
@@ -525,11 +529,13 @@ async function renderDutyTab() {
   const defEnd=`${_ymd}T${_p2(now.getHours())}:00`;
   const duties=await DB.getDuties(STATE.profile.id,now.getFullYear(),now.getMonth()+1);
 
-  $('#tab-content').innerHTML=`<div class="tab-pad">
-    <h3>Записать дежурство</h3>
-    <p class="hint" style="margin-bottom:16px">Выберите смену или введите время вручную.</p>
-    ${branchSelect('sel-branch',branches)}
-    ${dutyShiftSelect('sel-branch')}
+  const m=el('div','modal-overlay'); m.id='duty-modal';
+  m.innerHTML=`<div class="modal" style="max-height:92vh;overflow-y:auto">
+    <div class="modal-header"><h3>⏱ Дежурство</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <p class="hint" style="margin-bottom:12px">Выберите смену или введите время вручную.</p>
+    ${branchSelect('duty-branch',branches)}
+    ${dutyShiftSelect('duty-branch')}
     <div class="form-group" style="display:flex;gap:10px">
       <div style="flex:1"><label>Начало</label>
         <input type="datetime-local" id="duty-start" value="${defStart}" step="3600"
@@ -561,12 +567,20 @@ async function renderDutyTab() {
       </div>`;
     }).join('')}
   </div>`;
-  wireDutyShift('sel-branch');
+  document.body.appendChild(m);
+  wireDutyShift('duty-branch');
+}
+// Перерисовать модалку дежурства после записи/правки/удаления
+function _refreshDutyModal() {
+  const m = document.getElementById('duty-modal');
+  if (!m) return;
+  m.remove();
+  renderDutyModal();
 }
 async function doLogDuty() {
   const start=document.getElementById('duty-start')?.value;
   const end=document.getElementById('duty-end')?.value;
-  const branch=getBranch();
+  const branch=getBranch('duty-branch');
   if (!start||!end) return toast('Введите время','error');
   if (start>=end) return toast('Конец позже начала','error');
   if (!branch) return toast('Выберите филиал','error');
@@ -579,7 +593,7 @@ async function doLogDuty() {
       end_time:new Date(end).toISOString(),
     });
     toast(`✅ ${h.toFixed(1)}ч = ${fmt(Math.round(h*RATES.duty_per_hour))} сум`,'success');
-    renderDutyTab();
+    _refreshDutyModal();
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 
@@ -616,7 +630,7 @@ async function doSendLateRequest() {
   const reason   = document.getElementById('lr-reason')?.value.trim();
   const clientOpt= document.getElementById('lr-client');
   const cat      = parseInt(clientOpt?.options[clientOpt.selectedIndex]?.dataset.cat||'1');
-  const branch   = getBranch();
+  const branch   = window._wkBranch || getBranch();
   if (!clientId) return toast('Выберите клиента','error');
   if (!dateVal)  return toast('Укажите дату тренировки','error');
   if (!reason)   return toast('Напишите причину','error');
@@ -737,7 +751,7 @@ async function doAddTrialSession() {
   const phone = document.getElementById('tr-phone')?.value.trim();
   const age   = parseInt(document.getElementById('tr-age')?.value)||null;
   const cat   = parseInt(document.querySelector('.cat-btn.active')?.dataset.cat||'1');
-  const branch = getBranch();
+  const branch = window._wkBranch || getBranch();
   if (!fname) return toast('Введите имя','error');
   if (!branch) return toast('Выберите филиал','error');
   try {
@@ -748,7 +762,7 @@ async function doAddTrialSession() {
 }
 
 function renderEditDutyModal(dutyId, start, end, branch) {
-  const m=el('div','modal-overlay');
+  const m=el('div','modal-overlay'); m.id='duty-edit-modal';
   m.innerHTML=`<div class="modal">
     <div class="modal-header"><h3>Редактировать дежурство</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
@@ -773,16 +787,16 @@ async function doEditDuty(dutyId) {
       start_time:new Date(start).toISOString(),
       end_time:new Date(end).toISOString(),
     }).eq('id',dutyId);
-    document.querySelector('.modal-overlay')?.remove();
+    document.getElementById('duty-edit-modal')?.remove();
     toast(`✅ ${h.toFixed(1)}ч сохранено`,'success');
-    renderDutyTab();
+    _refreshDutyModal();
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 async function doDeleteDuty(dutyId) {
   if (!confirm('Удалить дежурство?')) return;
   try {
     await sb().from('duties').delete().eq('id',dutyId);
-    toast('Удалено','success'); renderDutyTab();
+    toast('Удалено','success'); _refreshDutyModal();
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 
