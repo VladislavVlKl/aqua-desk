@@ -9,7 +9,7 @@
 //   CORE:INIT           — init(), enterApp()
 //   AUTH                — регистрация, PIN-вход, привязка профиля
 //   TRAINER:SHELL       — renderTrainerApp, renderTrainerShell, switchTab
-//   TRAINER:HOME        — renderHomeTab (дашборд), checkNoteBadge, renderLogWorkoutModal
+//   TRAINER:HOME        — Главная = отчёт (renderReportTab); checkNoteBadge, renderLogWorkoutModal
 //   TRAINER:CLIENTS     — _findDuplicates, renderClientsTab, renderOverdueNotesModal
 //   TRAINER:CLIENTS:ADD — renderAddClientModal, doAddClient
 //   TRAINER:WORKOUTS    — renderWorkoutsTab, doLogWorkout

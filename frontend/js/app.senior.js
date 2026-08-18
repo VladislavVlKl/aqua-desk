@@ -18,7 +18,6 @@ async function renderSeniorApp(initialTab='home') {
     <button class="nav-btn" onclick="seniorTab('home')"><span>🏠</span>Главная</button>
     <button class="nav-btn" onclick="seniorTab('clients')"><span>👥</span>Клиенты</button>
     <button class="nav-btn" onclick="seniorTab('today')"><span>✅</span>Сегодня</button>
-    <button class="nav-btn" onclick="seniorTab('report')"><span>📊</span>Отчёт</button>
     <button class="nav-btn" onclick="seniorTab('groups')"><span>🏊</span>Группы</button>
     <button class="nav-btn" onclick="seniorTab('more')"><span>⋯</span>Ещё</button>
   </nav>`);
@@ -71,11 +70,12 @@ async function renderSeniorAnalytics() {
 
 function seniorTab(tab) {
   STATE.currentTab = tab;
-  // Порядок строго совпадает с кнопками .nav-btn в renderSeniorApp (6 шт),
+  // Порядок строго совпадает с кнопками .nav-btn в renderSeniorApp (5 шт),
   // иначе подсветка active съезжает. Под-экраны из «Ещё» (branch/schedule/…) не в навбаре.
-  const tabs=['home','clients','today','report','groups','more'];
+  // «Главная» = личный отчёт (renderReportTab), отдельной вкладки «Отчёт» нет.
+  const tabs=['home','clients','today','groups','more'];
   $$('.nav-btn').forEach((b,i)=>b.classList.toggle('active',tabs[i]===tab));
-  if (tab==='home')     renderHomeTab();
+  if (tab==='home')     renderReportTab();
   if (tab==='clients')  renderClientsTab();
   if (tab==='today')    renderTodayTab();
   if (tab==='schedule') renderScheduleTab();

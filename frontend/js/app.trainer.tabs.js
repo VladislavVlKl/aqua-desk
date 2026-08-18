@@ -36,8 +36,7 @@ function renderTrainerShell(tab) {
       <button class="nav-btn" onclick="switchTab('clients')"><span>👥</span>Клиенты</button>
       <button class="nav-btn" onclick="switchTab('today')"><span>✅</span>Сегодня</button>
       <button class="nav-btn" onclick="switchTab('schedule')"><span>📅</span>Расписание</button>
-      <button class="nav-btn" onclick="switchTab('report')"><span>📊</span>Отчёт</button>
-<button class="nav-btn" onclick="switchTab('events')"><span>🏆</span>События</button>
+      <button class="nav-btn" onclick="switchTab('events')"><span>🏆</span>События</button>
       <button class="nav-btn" onclick="switchTab('groups')"><span>🏊</span>Группы</button>
     </nav>`);
   switchTab(tab);
@@ -45,20 +44,20 @@ function renderTrainerShell(tab) {
 
 function switchTab(tab) {
   STATE.currentTab=tab;
-  const tabs=['home','clients','today','schedule','report','events','groups'];
+  // «Главная» показывает личный отчёт (ЗП/статистика/входящие) — отдельной вкладки «Отчёт» нет.
+  const tabs=['home','clients','today','schedule','events','groups'];
   $$('.nav-btn').forEach((b,i)=>b.classList.toggle('active',tabs[i]===tab));
-  if (tab==='home')     renderHomeTab();
+  if (tab==='home')     renderReportTab();
   if (tab==='clients')  renderClientsTab();
   if (tab==='today')    renderTodayTab();
   if (tab==='schedule') renderScheduleTab();
-  if (tab==='report')   renderReportTab();
   if (tab==='events')   renderEventsTab();
   if (tab==='groups')   renderSeniorGroups();
 }
 
 // Проверяем наличие незакрытых конспектов — батч запрос
 // ============================================================
-// SECTION: TRAINER:HOME — renderHomeTab (дашборд), checkNoteBadge, renderLogWorkoutModal
+// SECTION: TRAINER:HOME — Главная = отчёт (renderReportTab); checkNoteBadge, renderLogWorkoutModal
 // ============================================================
 async function checkNoteBadge() {
   try {
@@ -76,83 +75,14 @@ async function checkNoteBadge() {
   } catch(e) { /* тихо */ }
 }
 
-// ── ТАБ: ГЛАВНАЯ (дашборд) ────────────────────
-// Главная больше не содержит форм. Запись занятия и дежурства — через модалки
-// (renderLogWorkoutModal / renderDutyModal), доступные и здесь, и во вкладке «Сегодня».
-async function renderHomeTab() {
-  $('#tab-content').innerHTML=`<div class="center-screen"><div class="spinner"></div></div>`;
-  const now = new Date(), y = now.getFullYear(), mo = now.getMonth()+1;
-  const [clients, duties, workouts, pending, transfers] = await Promise.all([
-    DB.getClients(STATE.profile.id),
-    DB.getDuties(STATE.profile.id, y, mo),
-    DB.getWorkouts(STATE.profile.id, y, mo).catch(()=>[]),
-    DB.getPendingConfirmations(STATE.profile.id).catch(()=>[]),
-    DB.getIncomingTransfers(STATE.profile.id).catch(()=>[]),
-  ]);
-  const t0 = todayStr();
-  const expiring = clients.filter(c=>{
-    if (c.is_archived) return false;
-    const d=daysUntil(c.subscription_end);
-    return d!==null&&d<=SUBSCRIPTION_WARN_DAYS&&d>=0;
-  });
-  const activeCount = clients.filter(c=>{
-    if (c.is_archived || (c.balance||0)<=0) return false;
-    if (c.subscription_end && c.subscription_end < t0) return false;
-    if (c.freeze_start && c.freeze_end && t0>=c.freeze_start && t0<=c.freeze_end) return false;
-    return true;
-  }).length;
-  const ptCount = workouts.filter(w=>!w.is_debt).length;
-  const dutyH   = duties.reduce((s,d)=>s+hoursFromDuty(d.start_time,d.end_time),0);
-
-  $('#tab-content').innerHTML=`<div class="tab-pad">
-    <div class="summary-cards" style="margin-bottom:14px">
-      <div class="summary-card"><div class="s-val">${ptCount}</div><div class="s-lbl">ПТ за месяц</div></div>
-      <div class="summary-card"><div class="s-val">${dutyH.toFixed(1)}ч</div><div class="s-lbl">Дежурства</div></div>
-      <div class="summary-card"><div class="s-val" style="color:#10b981">${activeCount}</div><div class="s-lbl">Активных</div></div>
-    </div>
-
-    ${expiring.length?`<div class="warn-banner">
-      ⚠️ Абонемент истекает: ${expiring.map(c=>`<b>${c.fio.split(' ')[0]}</b> (${daysUntil(c.subscription_end)} дн.)`).join(', ')}
-    </div>`:''}
-
-    ${_pendingActionsBanner(pending, transfers)}
-
-    <button class="btn btn-primary btn-full" style="margin-bottom:10px;font-size:15px;padding:14px" onclick="renderLogWorkoutModal()">➕ Записать занятие</button>
-    <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);padding:12px" onclick="renderDutyModal()">⏱ Записать дежурство</button>
-  </div>`;
-}
-
-// Баннер входящих действий (замены на подтверждение / передачи клиента)
-function _pendingActionsBanner(pending, transfers) {
-  let html = '';
-  if (pending?.length) html += `<div class="warn-banner" style="background:rgba(124,58,237,.1);border-color:rgba(124,58,237,.3);color:var(--text)">
-    <b>⚡ ${pending.length} замен(а) ждут подтверждения</b>
-    ${pending.map(w=>`<div class="sub-confirm-row">
-      <div><span class="hi-client">${w.clients?.fio||'?'}</span>
-        <span class="hint"> · от ${w.profiles?.fio||'?'} · ${fmtDate(w.workout_date)}</span></div>
-      <div style="display:flex;gap:6px;margin-top:6px">
-        <button class="btn btn-sm btn-primary" onclick="doResolveSubstitute('${w.id}','${w.client_id}',true)">✓ Принять</button>
-        <button class="btn btn-sm btn-danger"  onclick="doResolveSubstitute('${w.id}','${w.client_id}',false)">✗ Отклонить</button>
-      </div></div>`).join('')}
-  </div>`;
-  if (transfers?.length) html += `<div class="warn-banner" style="background:rgba(16,185,129,.08);border-color:rgba(16,185,129,.3);color:var(--text)">
-    <b>👤 ${transfers.length} запрос(а) на передачу клиента</b>
-    ${transfers.map(t=>`<div class="sub-confirm-row">
-      <div><span class="hi-client">${t.clients?.fio||'?'}</span>
-        <span class="hint"> · от ${t.profiles?.fio||'?'}</span>
-        ${t.note?`<div class="hint">${t.note}</div>`:''}</div>
-      <div style="display:flex;gap:6px;margin-top:6px">
-        <button class="btn btn-sm btn-primary" onclick="doResolveTransfer('${t.id}','${t.client_id}',${t.to_trainer_id},true)">✓ Принять</button>
-        <button class="btn btn-sm btn-danger"  onclick="doResolveTransfer('${t.id}','${t.client_id}',${t.to_trainer_id},false)">✗ Отклонить</button>
-      </div></div>`).join('')}
-  </div>`;
-  return html;
-}
+// ── ТАБ: ГЛАВНАЯ ──────────────────────────────
+// «Главная» показывает личный отчёт (renderReportTab): ЗП, статистика за месяц,
+// входящие замены/передачи. Запись занятия и дежурства — во вкладке «Сегодня».
 
 // Закрыть модалки и перерисовать текущий экран тренера/старшего (после списания/действия)
 function refreshTrainerScreen() {
   document.querySelectorAll('.modal-overlay').forEach(m=>m.remove());
-  const map = { home:renderHomeTab, today:renderTodayTab, report:renderReportTab, clients:renderClientsTab };
+  const map = { home:renderReportTab, today:renderTodayTab, clients:renderClientsTab };
   (map[STATE.currentTab] || renderTodayTab)();
 }
 
