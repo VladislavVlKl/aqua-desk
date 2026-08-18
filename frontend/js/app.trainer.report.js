@@ -628,9 +628,13 @@ function renderEditClientModal(clientId, fioEnc, cat, age, subStart, subEnd, bal
       </select></div>
     <div class="form-group"><label>Возраст (лет)</label>
       <input id="ec-age" type="number" min="1" max="99" value="${age||''}"></div>
-    <div class="form-group"><label>Баланс ПТ (текущий: ${balance||0})</label>
-      <input id="ec-balance" type="number" min="0" value="${balance||0}">
-      <p class="hint" style="margin-top:4px">Изменение баланса не влияет на ЗП за прошлые ПТ</p></div>
+    <div class="form-group"><label>Баланс ПТ</label>
+      <div style="display:flex;align-items:center;gap:12px">
+        <div style="font-weight:700;font-size:18px">${balance||0} ПТ</div>
+        <button type="button" class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
+          onclick="this.closest('.modal-overlay').remove();renderBalanceCorrectionModal('${clientId}',${balance||0},'${fioEnc}')">⚙ Коррекция</button>
+      </div>
+      <p class="hint" style="margin-top:6px">Пополнение — только через «Купить пакет». «Коррекция» — для исправления ошибки, с записью в аудит.</p></div>
     <div class="form-group"><label>Начало абонемента</label>
       <input id="ec-sub-start" type="date" value="${subStart||''}"></div>
     <div class="form-group"><label>Конец абонемента</label>
@@ -643,14 +647,12 @@ async function doEditClient(clientId, oldBalance, oldCat) {
   const fio       = document.getElementById('ec-fio')?.value.trim();
   const category  = parseInt(document.getElementById('ec-cat')?.value)||1;
   const age       = parseInt(document.getElementById('ec-age')?.value)||null;
-  const newBalance= parseInt(document.getElementById('ec-balance')?.value||'0');
   const subStart  = document.getElementById('ec-sub-start')?.value||null;
   const subEnd    = document.getElementById('ec-sub-end')?.value||null;
   if (!fio) return toast('Введите ФИО','error');
   try {
+    // Баланс здесь НЕ меняем — только через «Купить пакет» или «Коррекцию остатка» (аудит).
     const fields = {fio, category, age, subscription_start:subStart, subscription_end:subEnd};
-    // Если баланс изменился — обновляем напрямую
-    if (newBalance !== oldBalance) fields.balance = newBalance;
     await DB.updateClient(clientId, fields);
     document.querySelector('.modal-overlay')?.remove();
     toast('✅ Данные сохранены','success');
@@ -661,6 +663,40 @@ async function doEditClient(clientId, oldBalance, oldCat) {
       renderClientProfile(clientId, STATE.currentTab||'clients');
     }
   } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+
+// Коррекция остатка — явное исправление ошибки (не пополнение!). Пишется в аудит.
+// Пополнение оформляется через «Купить пакет» (создаёт абонемент). Требует причину.
+function renderBalanceCorrectionModal(clientId, curBalance, fioEnc) {
+  const fio = decodeURIComponent(fioEnc||'');
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>Коррекция остатка</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <p class="hint" style="margin-bottom:14px">${fio} · текущий остаток <b>${curBalance} ПТ</b>.<br>Только для исправления ошибки. Обычное пополнение — через «Купить пакет».</p>
+    <div class="form-group"><label>Новый остаток, ПТ</label>
+      <input id="bc-value" type="number" min="0" value="${curBalance}"></div>
+    <div class="form-group"><label>Причина (обязательно)</label>
+      <input id="bc-reason" type="text" placeholder="Напр.: задвоение при внесении"></div>
+    <button class="btn btn-primary btn-full" onclick="doBalanceCorrection('${clientId}',${curBalance})">Применить</button>
+  </div>`;
+  document.body.appendChild(m);
+}
+async function doBalanceCorrection(clientId, curBalance) {
+  if (_pending.has('balcorr_'+clientId)) return;
+  const nb = parseInt(document.getElementById('bc-value')?.value);
+  const reason = document.getElementById('bc-reason')?.value.trim()||'';
+  if (isNaN(nb) || nb < 0) return toast('Введите остаток (0 или больше)','error');
+  if (!reason) return toast('Укажите причину коррекции','error');
+  if (nb === curBalance) return toast('Остаток не изменился','info');
+  _pending.add('balcorr_'+clientId);
+  try {
+    await DB.correctBalance(clientId, nb, reason, STATE.profile);
+    document.querySelector('.modal-overlay')?.remove();
+    toast('✅ Остаток скорректирован','success');
+    renderClientProfile(clientId, STATE.currentTab||'clients');
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+  finally { _pending.delete('balcorr_'+clientId); }
 }
 
 // Спросить, пересчитывать ли категорию у уже проведённых тренировок клиента.

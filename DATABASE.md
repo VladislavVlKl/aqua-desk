@@ -69,6 +69,7 @@ schedule_slots → session_notes → workouts → client_transfers → training_
 | `change_pin` | `p_profile_id int, p_pin text, p_old_pin text=NULL` | void | смена PIN: при существующем PIN обязателен старый (`WRONG_OLD_PIN`), первичная установка — без него (миграция 20260704140000) |
 | `claim_profile` | `p_profile_id int, p_tg_id bigint, p_pin text` | json | привязка существующего профиля к tg_id |
 | `increment_balance` | `client_id uuid, delta int` | void | атомарное изменение баланса; списание ниже нуля отклоняется (`INSUFFICIENT_BALANCE`), пополнение — всегда (миграция 20260704120000) |
+| `deduct_balance` | `client_id uuid, n int` | integer (новый остаток) | атомарное списание n ПТ с защитой от минуса, ВОЗВРАЩАЕТ новый остаток — для снимка `workouts.balance_after`. Используется в `logWorkouts`/`approveLateRequest`/`restoreRejectedWorkout` (миграция 20260818130000) |
 | `rename_branch` | `old_name text, new_name text` | void | переименование филиала во всех таблицах |
 
 RLS включается автоматически на новых таблицах (event trigger `rls_auto_enable`).
@@ -122,6 +123,7 @@ id uuid PK · trainer_id · client_id · category_at_moment · branch · workout
 is_debt + debt_confirmed_at · is_drop_in + drop_in_category · substitute_for (id тренера) + substitute_rate
 pending_confirmation · notes
 reception_status (pending|confirmed|rejected) · reception_reason · reception_by (profiles.id) · reception_at
+balance_before / balance_after (снимок остатка ПТ на момент списания — ресепшн показывает «−1 · остаток N» вместо реконструкции N/M; NULL у старых ПТ, миграция 20260818130000)
 ```
 > `pending_confirmation` — подтверждение ЗАМЕНЫ тренером-заменяемым (тренер→тренер, см. `logSubstituteWorkout`/`resolveSubstitute`). Не путать с ресепшеном.
 > `reception_status` — подтверждение списания РЕСЕПШЕНОМ (Шаг 1 интеграции с 1С). Новые ПТ создаются `pending`, ресепшн подтверждает (`confirmed`) или отклоняет (`rejected` + откат баланса). В ЗП тренера идёт только `confirmed`; `rejected` исключается. Замена попадает в очередь ресепшена только после подтверждения тренером Б (`pending_confirmation=false`). Индекс `idx_workouts_reception (branch, reception_status, workout_date)`.

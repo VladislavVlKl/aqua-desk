@@ -68,7 +68,7 @@ async function renderAdminControl(force=false) {
     </div>`);
     // Списания ресепшн: три раскрывающихся блока (несписанные / отказанные / списанные).
     // Номер списания в абонементе (N/M) — у всех; пробные без номера.
-    const seqStr = it => (it._kind!=='t' && it._seq) ? ` · ${it._seq}${it._total?'/'+it._total:''} ПТ` : '';
+    const seqStr = it => (it._kind!=='t' && it.balance_after!=null) ? ` · остаток ${it.balance_after} ПТ` : '';
     // Наблюдательный блок: <details> с запоминанием раскрытости (по умолчанию свёрнут).
     const _open = _ctrlOpenState();
     const collapse = (key, title, cls, inner) => {
@@ -103,10 +103,13 @@ async function renderAdminControl(force=false) {
     ].sort((a,b)=>new Date(b.ts)-new Date(a.ts));
     if (recRej.length) monitorSections.push(collapse('rejected',
       `🔴 Отказанные списания (${recRej.length})`, 'danger',
-      recRej.map(q=>`<div class="control-item">
+      recRej.map(q=>`<div class="control-item" id="recrej-${q._kind}-${q.id}">
         <div class="ci-main">${q.fio} <span class="hint">← ${q.trainer}</span>${q._kind==='t'?' <span class="hint">(пробное)</span>':''}${seqStr(q)}</div>
         <div class="ci-sub">🏊 ${q.branch||'—'} · ПТ ${fmtDT(q.wdate)}</div>
         <div class="ci-sub">✗ отклонено ${fmtDT(q.ts)}${q.reason?` · ${RECEPTION_REJECT_REASONS[q.reason]||q.reason}`:''}</div>
+        ${q._kind==='w'?`<div style="margin-top:8px">
+          <button class="btn btn-sm btn-primary" onclick="doRestoreRejectedWorkout('${q.id}')" title="Отклонили ошибочно — заново списать ПТ и засчитать в ЗП">↩︎ Вернуть списание</button>
+        </div>`:''}
       </div>`).join('')));
     // 🧾 СПИСАННЫЕ — подтверждённые за последние 3 дня (потом переносятся в архив/выгрузку)
     const recConf=[
@@ -227,6 +230,23 @@ async function doApproveSubstitutionAdmin(id) {
     invalidateCachePrefix('adm_control'); renderAdminControl(true);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
   finally { _pending.delete('asub_'+id); }
+}
+
+// Вернуть ошибочно отклонённое ресепшном списание: rejected → confirmed + заново списать ПТ.
+// Если баланс 0 — оформляется долгом (в минус не уводим).
+async function doRestoreRejectedWorkout(id) {
+  if (_pending.has('recrestore_'+id)) return;
+  if (!confirm('Вернуть это списание? ПТ снова спишется у клиента и попадёт в ЗП тренера.')) return;
+  _pending.add('recrestore_'+id);
+  try {
+    const res = await DB.restoreRejectedWorkout(id, STATE.profile.id, STATE.profile.fio);
+    document.getElementById(`recrej-w-${id}`)?.remove();
+    toast(res.wentDebt ? '↩︎ Возвращено · баланс 0 → оформлено долгом' : '↩︎ Списание возвращено', 'success');
+    invalidateCachePrefix('adm_control'); renderAdminControl(true);
+  } catch(e) {
+    toast(String(e.message||'').includes('not_rejected') ? 'Уже обработано' : 'Ошибка','error');
+    console.error(e);
+  } finally { _pending.delete('recrestore_'+id); }
 }
 
 // ── МОНИТОРИНГ: наблюдательные метрики координатора (открывается из «Ещё») ──
