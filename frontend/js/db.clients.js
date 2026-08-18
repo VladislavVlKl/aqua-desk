@@ -150,12 +150,13 @@ Object.assign(DB, {
     return data;
   },
   async confirmDebt(workoutId, clientId) {
-    const {error:e1} = await sb().from('workouts')
-      .update({debt_confirmed_at:new Date().toISOString()}).eq('id',workoutId);
-    if (e1) throw e1;
     const {data:cl} = await sb().from('clients').select('balance').eq('id',clientId).single();
-    await sb().from('clients')
-      .update({balance:Math.max(0,(cl?.balance||0)-1)}).eq('id',clientId);
+    const before = cl?.balance||0, after = Math.max(0, before-1);
+    const {error:e1} = await sb().from('workouts')
+      .update({debt_confirmed_at:new Date().toISOString(),
+               balance_before:before, balance_after:after}).eq('id',workoutId);
+    if (e1) throw e1;
+    await sb().from('clients').update({balance:after}).eq('id',clientId);
   },
   async getTodayWorkouts(trainerId, dateStr) {
     const from = dateStr + 'T00:00:00';

@@ -63,14 +63,18 @@ Object.assign(DB, {
   /** Подтвердить/отклонить замену */
   async resolveSubstitute(workoutId, clientId, confirmed) {
     if (confirmed) {
-      // Подтвердить — снять с баланса клиента
+      // Подтвердить — снять с баланса клиента. Замена входит в очередь ресепшна именно
+      // сейчас (pending_confirmation=false) → пишем снимок остатка для карточки «−1 · остаток N».
       const {error} = await sb().from('workouts')
         .update({pending_confirmation:false}).eq('id',workoutId);
       if (error) throw error;
       const {data:cl} = await sb().from('clients').select('balance').eq('id',clientId).single();
+      const before = cl?.balance||0, after = Math.max(0, before-1);
       await sb().from('clients')
-        .update({balance:Math.max(0,(cl?.balance||0)-1),last_used:new Date().toISOString()})
+        .update({balance:after, last_used:new Date().toISOString()})
         .eq('id',clientId);
+      await sb().from('workouts')
+        .update({balance_before:before, balance_after:after}).eq('id',workoutId);
     } else {
       // Отклонить — удалить запись
       const {error} = await sb().from('workouts').delete().eq('id',workoutId);
