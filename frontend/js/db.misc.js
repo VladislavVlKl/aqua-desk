@@ -107,12 +107,14 @@ Object.assign(DB, {
 
   // ─── УВЕДОМЛЕНИЯ ВНУТРИ ПРИЛОЖЕНИЯ ───────────
   async getMyNotifications(tgId) {
+    if (useApi('notifications')) return await api('/notifications', { query: { recipient_tg_id: tgId, limit: 30 } });
     const {data,error} = await sb().from('notifications_queue')
       .select('*').eq('recipient_tg_id', tgId)
       .order('created_at',{ascending:false}).limit(30);
     if (error) throw error; return data||[];
   },
   async markNotificationsRead(tgId) {
+    if (useApi('notifications')) { await api('/notifications/read', { method:'POST', body:{ recipient_tg_id: tgId } }); return; }
     const {error} = await sb().from('notifications_queue')
       .update({read_at: new Date().toISOString()})
       .eq('recipient_tg_id', tgId).is('read_at', null);
@@ -258,6 +260,9 @@ Object.assign(DB, {
     } catch(e) { console.error('[audit]', e); }
   },
   async getAuditLog({ branch, actorId, action, limit = 200 } = {}) {
+    if (useApi('audit')) {
+      return await api('/audit', { query: { branch: branch || undefined, action: action || undefined, actor_id: actorId || undefined, limit } });
+    }
     let q = sb().from('audit_log').select('*')
       .order('created_at', { ascending: false }).limit(limit);
     if (branch)   q = q.eq('branch', branch);

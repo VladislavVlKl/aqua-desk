@@ -216,9 +216,14 @@ Object.assign(DB, {
     const device = /iPhone|iPad/.test(ua) ? 'iOS'
                  : /Android/.test(ua)     ? 'Android'
                  : /Macintosh|Windows|Linux/.test(ua) ? 'Desktop' : 'Unknown';
+    if (useApi('staff')) {
+      await api('/sessions', { method:'POST', body:{ tg_id: tgId, fio, role, device, js_version: jsVersion } });
+      return;
+    }
     await sb().from('user_sessions').insert({tg_id:tgId, fio, role, device, js_version:jsVersion});
   },
   async getRecentSessions(days=30) {
+    if (useApi('staff')) return await api('/sessions', { query: { days, limit: 100 } });
     const since = new Date(Date.now() - days*86400000).toISOString();
     const {data,error} = await sb().from('user_sessions')
       .select('*').gte('opened_at',since).order('opened_at',{ascending:false}).limit(100);
@@ -298,6 +303,7 @@ Object.assign(DB, {
 
   // ─── PROFILES ────────────────────────────────
   async getAllProfiles() {
+    if (useApi('staff')) return await api('/profiles');
     const {data,error} = await sb().from('profiles')
       .select('*').eq('is_archived', false).order('fio');
     if (error) {
@@ -308,15 +314,18 @@ Object.assign(DB, {
     return data||[];
   },
   async getProfilesByRole(role) {
+    if (useApi('staff')) return await api('/profiles', { query: { role } });
     const {data,error} = await sb().from('profiles').select('*').eq('role',role).order('fio');
     if (error) throw error; return data||[];
   },
   async addTrainer(fio, branches, role='trainer') {
+    if (useApi('staff')) return await api('/profiles', { method:'POST', body:{ fio: fio.trim(), branches, role } });
     const {data,error} = await sb().from('profiles')
       .insert({fio:fio.trim(),branches,role}).select().single();
     if (error) throw error; return data;
   },
   async updateProfile(id, fields) {
+    if (useApi('staff')) return await api('/profiles/'+id, { method:'PATCH', body: fields });
     const {data,error} = await sb().from('profiles')
       .update(fields).eq('id',id).select().single();
     if (error) throw error; return data;
@@ -324,6 +333,7 @@ Object.assign(DB, {
 
   /** Архивировать тренера: закрывает доступ, история сохраняется */
   async archiveTrainer(id) {
+    if (useApi('staff')) { await api('/profiles/'+id+'/archive', { method:'POST' }); return; }
     const {error} = await sb().from('profiles')
       .update({ tg_id: null, pincode: null, is_archived: true })
       .eq('id', id);
@@ -332,6 +342,8 @@ Object.assign(DB, {
 
   /** Удалить тренера: полное удаление (только если нет workouts) */
   async deleteTrainer(id) {
+    // Бэкенд сам проверяет наличие workouts → 400 has_history (api() бросит Error('has_history')).
+    if (useApi('staff')) { await api('/profiles/'+id+'/delete', { method:'POST' }); return; }
     const {data: wk} = await sb().from('workouts')
       .select('id').eq('trainer_id', id).limit(1);
     if (wk?.length) throw new Error('has_history');
@@ -341,25 +353,33 @@ Object.assign(DB, {
 
   // ─── BRANCHES ────────────────────────────────
   async getBranches() {
+    if (useApi('staff')) return await api('/branches');
     const {data,error} = await sb().from('branches').select('*').order('name');
     if (error) throw error; return data||[];
   },
   async addBranch(name) {
+    if (useApi('staff')) return await api('/branches', { method:'POST', body:{ name: name.trim() } });
     const {data,error} = await sb().from('branches')
       .insert({name:name.trim()}).select().single();
     if (error) throw error; return data;
   },
   async deleteBranch(id) {
+    if (useApi('staff')) { await api('/branches/'+id+'/delete', { method:'POST' }); return; }
     const {error} = await sb().from('branches').delete().eq('id',id);
     if (error) throw error;
   },
   // ─── BRANCH ACCESS (субпанель) ───────────────
   async getBranchAccess(trainerId) {
+    if (useApi('staff')) {
+      const rows = await api('/branch-access', { query: { trainer_id: trainerId } });
+      return (rows||[]).map(r=>r.branch);
+    }
     const {data,error} = await sb().from('branch_access')
       .select('branch').eq('trainer_id',trainerId);
     if (error) throw error; return (data||[]).map(r=>r.branch);
   },
   async setBranchAccess(trainerId, branches) {
+    if (useApi('staff')) { await api('/branch-access', { method:'POST', body:{ trainer_id: trainerId, branches } }); return; }
     // Удаляем старые и вставляем новые
     await sb().from('branch_access').delete().eq('trainer_id',trainerId);
     if (branches.length) {
@@ -369,6 +389,7 @@ Object.assign(DB, {
     }
   },
   async renameBranch(oldName, newName) {
+    if (useApi('staff')) { await api('/branches/rename', { method:'POST', body:{ old_name: oldName, new_name: newName.trim() } }); return; }
     const {error:e1} = await sb().from('branches')
       .update({name:newName.trim()}).eq('name',oldName);
     if (e1) throw e1;
