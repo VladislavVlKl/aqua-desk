@@ -1,57 +1,72 @@
 // ─── ТЕХНИЧКА ────────────────────────────────
 Object.assign(DB, {
   async getTechEquipment(branch) {
+    if (useApi('tech')) return await api('/ops/tech-equipment', { query: { branch: branch || undefined } });
     let q = sb().from('tech_equipment').select('*').order('category').order('name');
     if (branch) q = q.eq('branch',branch);
     const {data,error} = await q;
     if (error) throw error; return data||[];
   },
   async addTechEquipment(fields) {
+    if (useApi('tech')) return await api('/ops/tech-equipment', { method:'POST', body: fields });
     const {data,error} = await sb().from('tech_equipment')
       .insert(fields).select().single();
     if (error) throw error; return data;
   },
   async updateTechEquipment(id, fields) {
+    if (useApi('tech')) { await api('/ops/tech-equipment/'+id+'/update', { method:'POST', body: fields }); return; }
     const {error} = await sb().from('tech_equipment').update(fields).eq('id',id);
     if (error) throw error;
   },
   async deleteTechEquipment(id) {
+    if (useApi('tech')) { await api('/ops/tech-equipment/'+id+'/delete', { method:'POST' }); return; }
     const {error} = await sb().from('tech_equipment').delete().eq('id',id);
     if (error) throw error;
   },
   async getTechIssues(branch) {
+    if (useApi('tech')) {
+      // Бэкенд: только открытые + плоское equipment_name → эмбед tech_equipment{name}.
+      const rows = await api('/ops/tech-issues', { query: { branch: branch || undefined } });
+      return (rows || []).map(r => ({ ...r, tech_equipment: { name: r.equipment_name } }));
+    }
     let q = sb().from('tech_issues').select('*, tech_equipment(name)').neq('status','resolved').order('priority').order('created_at',{ascending:false});
     if (branch) q = q.eq('branch',branch);
     const {data,error} = await q;
     if (error) throw error; return data||[];
   },
   async addTechIssue(fields) {
+    if (useApi('tech')) return await api('/ops/tech-issues', { method:'POST', body: fields });
     const {data,error} = await sb().from('tech_issues')
       .insert(fields).select().single();
     if (error) throw error; return data;
   },
   async updateTechIssue(id, fields) {
+    if (useApi('tech')) { await api('/ops/tech-issues/'+id+'/update', { method:'POST', body: fields }); return; }
     const {error} = await sb().from('tech_issues').update(fields).eq('id',id);
     if (error) throw error;
   },
   async getTechShopping(branch) {
+    if (useApi('tech')) return await api('/ops/tech-shopping', { query: { branch: branch || undefined } });
     let q = sb().from('tech_shopping').select('*').neq('status','received').order('priority').order('created_at',{ascending:false});
     if (branch) q = q.eq('branch',branch);
     const {data,error} = await q;
     if (error) throw error; return data||[];
   },
   async addTechShopping(fields) {
+    if (useApi('tech')) return await api('/ops/tech-shopping', { method:'POST', body: fields });
     const {data,error} = await sb().from('tech_shopping')
       .insert(fields).select().single();
     if (error) throw error; return data;
   },
   async updateTechShopping(id, fields) {
+    if (useApi('tech')) { await api('/ops/tech-shopping/'+id+'/update', { method:'POST', body: fields }); return; }
     const {error} = await sb().from('tech_shopping').update(fields).eq('id',id);
     if (error) throw error;
   },
   // general:true → только «общие» счета (is_general), branch игнорируется.
   // general:false (по умолч.) → обычные счета филиалов, «общие» всегда исключены.
   async getTechBills(branch, {general=false}={}) {
+    if (useApi('tech')) return await api('/ops/tech-bills', { query: { branch: general ? undefined : (branch || undefined), general: general ? 'true' : undefined } });
     let q = sb().from('tech_bills').select('*').order('bill_date',{ascending:false});
     if (general) {
       q = q.eq('is_general', true);
@@ -63,11 +78,13 @@ Object.assign(DB, {
     if (error) throw error; return data||[];
   },
   async addTechBill(fields) {
+    if (useApi('tech')) return await api('/ops/tech-bills', { method:'POST', body: fields });
     const {data,error} = await sb().from('tech_bills')
       .insert(fields).select().single();
     if (error) throw error; return data;
   },
   async updateTechBill(id, fields) {
+    if (useApi('tech')) { await api('/ops/tech-bills/'+id+'/update', { method:'POST', body: fields }); return; }
     const {error} = await sb().from('tech_bills').update(fields).eq('id',id);
     if (error) throw error;
   },
