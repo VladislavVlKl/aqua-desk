@@ -403,9 +403,13 @@ async unassignTrainerGroup(id) {
     return cached(`grp:rate:${[...trainerGroupIds].sort().join(',')}:${monthStr}`, async () => {
     try {
       const next = new Date(monthStr); next.setMonth(next.getMonth()+1);
+      const before = next.toISOString().slice(0,10);
+      if (useApi('groups')) {
+        return await api('/rate-history', { query: { tg_ids: trainerGroupIds, before } });
+      }
       const {data,error} = await sb().from('trainer_group_rate_history')
         .select('*').in('trainer_group_id', trainerGroupIds)
-        .lt('effective_from', next.toISOString().slice(0,10))
+        .lt('effective_from', before)
         .order('effective_from',{ascending:true});
       if (error) throw error; return data||[];
     } catch(e) { console.warn('[getRateHistory]', e?.message||e); return []; }
@@ -413,6 +417,7 @@ async unassignTrainerGroup(id) {
   },
   async getRateHistoryByTg(tgId, limit=5) {
     try {
+      if (useApi('groups')) return await api('/trainer-groups/'+tgId+'/rate-history', { query: { limit } });
       const {data,error} = await sb().from('trainer_group_rate_history')
         .select('*').eq('trainer_group_id', tgId)
         .order('effective_from',{ascending:false}).limit(limit);
@@ -421,6 +426,12 @@ async unassignTrainerGroup(id) {
   },
   async addRateHistory(trainerGroupId, rateType, rateValue, effectiveFrom, createdBy) {
     invalidateCachePrefix('grp:');
+    if (useApi('groups')) {
+      await api('/trainer-groups/'+trainerGroupId+'/rate-history', { method:'POST', body:{
+        rate_type: rateType, rate_value: rateValue, effective_from: effectiveFrom,
+      }});
+      return;
+    }
     const {error} = await sb().from('trainer_group_rate_history')
       .insert({trainer_group_id:trainerGroupId, rate_type:rateType, rate_value:rateValue,
                effective_from:effectiveFrom, created_by:createdBy});
