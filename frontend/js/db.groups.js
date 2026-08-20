@@ -226,6 +226,7 @@ async unassignTrainerGroup(id) {
   },
   async deleteAdultGroupClient(id) {
     invalidateCachePrefix('grp:');
+    if (useApi('groups')) { await api('/adult-group-clients/'+id+'/delete', { method:'POST' }); return; }
     const {error} = await sb().from('adult_group_clients').delete().eq('id',id);
     if (error) throw error;
   },

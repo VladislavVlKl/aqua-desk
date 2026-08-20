@@ -89,6 +89,10 @@ Object.assign(DB, {
     if (error) throw error;
   },
   async getDutiesForSchedule(branch, from, to) {
+    if (useApi('schedule')) {
+      const rows = await api('/duties/schedule', { query: { branch, from, to } });
+      return (rows || []).map(r => ({ ...r, profiles: { fio: r.trainer_fio } }));
+    }
     const {data,error} = await sb().from('duties')
       .select('*, profiles(fio)')
       .eq('branch',branch)
@@ -100,6 +104,7 @@ Object.assign(DB, {
   },
   // ─── ЦВЕТА КЛИЕНТОВ ──────────────────────────
   async updateClientColor(clientId, color) {
+    if (useApi('clients')) { await api('/clients/'+clientId, { method:'PATCH', body:{ color: color || null } }); return; }
     const {error} = await sb().from('clients')
       .update({color: color || null}).eq('id', clientId);
     if (error) throw error;
@@ -275,17 +280,20 @@ Object.assign(DB, {
 
   // ─── ВЗРОСЛЫЕ ГРУППЫ — КЛИЕНТЫ ───────────────
   async getAdultGroupClients(groupId) {
+    if (useApi('groups')) return await api('/adult-group-clients', { query: { group_id: groupId } });
     const {data,error} = await sb().from('adult_group_clients')
       .select('*').eq('group_id',groupId).eq('is_active',true).order('name');
     if (error) throw error; return data||[];
   },
   async addAdultGroupClient(groupId, name) {
     invalidateCachePrefix('grp:');
+    if (useApi('groups')) return await api('/adult-group-clients', { method:'POST', body:{ group_id: groupId, name } });
     const {data,error} = await sb().from('adult_group_clients')
       .insert({group_id:groupId, name}).select().single();
     if (error) throw error; return data;
   },
   async archiveAdultGroupClient(id) {
+    if (useApi('groups')) { await api('/adult-group-clients/'+id+'/archive', { method:'POST' }); return; }
     const {error} = await sb().from('adult_group_clients')
       .update({is_active:false}).eq('id',id);
     if (error) throw error;
