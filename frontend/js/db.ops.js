@@ -40,6 +40,11 @@ Object.assign(DB, {
       // в очередь ресепшена попадёт после тренера Б — только если филиал включён
       ...(receptionEnabledForBranch(r.branch) ? {reception_status:'pending'} : {}),
     }));
+    if (useApi('substitutions')) {
+      // Бэкенд вставляет БЕЗ списания (списание при подтверждении). Пуш тренеру Б
+      // пока не шлём (нет notifications-write эндпоинта).
+      return await api('/workouts/substitute', { method:'POST', body: subRows });
+    }
     const {data,error} = await sb().from('workouts').insert(subRows).select('*, clients(fio), a:profiles!substitute_for(fio)');
     if (error) throw error;
     const w0 = data?.[0];
@@ -54,6 +59,10 @@ Object.assign(DB, {
 
   /** Тренировки ожидающие подтверждения у тренера */
   async getPendingConfirmations(trainerId) {
+    if (useApi('substitutions')) {
+      const rows = await api('/workouts/pending-confirmations', { query: { trainer_id: trainerId } });
+      return (rows || []).map(r => ({ ...r, clients: { fio: r.client_fio }, profiles: { fio: r.assigner_fio } }));
+    }
     const {data,error} = await sb().from('workouts')
       .select('*, clients(fio), profiles!substitute_for(fio)')
       .eq('trainer_id', trainerId)
@@ -64,6 +73,10 @@ Object.assign(DB, {
 
   /** Подтвердить/отклонить замену */
   async resolveSubstitute(workoutId, clientId, confirmed) {
+    if (useApi('substitutions')) {
+      await api('/workouts/'+workoutId+'/resolve-substitute', { method:'POST', body:{ client_id: clientId, confirmed } });
+      return;
+    }
     if (confirmed) {
       // Подтвердить — снять с баланса клиента
       const {error} = await sb().from('workouts')
