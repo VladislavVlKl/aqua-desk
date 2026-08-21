@@ -179,6 +179,7 @@ async unassignTrainerGroup(id) {
   // ─── GROUP CLIENTS ────────────────────────────
   async getGroupClients(groupId) {
     return cached(`grp:cli:g:${groupId}`, async () => {
+      if (useApi('groups')) return await api('/group-clients', { query: { group_id: groupId } });
       const {data,error} = await sb().from('group_clients')
         .select('*').eq('group_id',groupId).eq('is_active',true).order('name');
       if (error) throw error; return data||[];
@@ -246,6 +247,7 @@ async unassignTrainerGroup(id) {
   },
   async deleteGroupAttendanceDay(groupId, date, groupInstanceId=null) {
     invalidateCachePrefix('grp:');
+    if (useApi('groups')) { await api('/group-attendance/delete-day', { method:'POST', body:{ group_id: groupId, group_instance_id: groupInstanceId, date } }); return; }
     // Удаляем по instance_id если есть, иначе по group_id
     let q = sb().from('group_attendance').delete().eq('session_date',date);
     if (groupInstanceId) q = q.eq('group_instance_id', groupInstanceId);
@@ -256,6 +258,7 @@ async unassignTrainerGroup(id) {
 
   // ─── GROUP ATTENDANCE ─────────────────────────
   async getGroupAttendance(groupId, date) {
+    if (useApi('groups')) return await api('/group-attendance', { query: { group_id: groupId, date } });
     const {data,error} = await sb().from('group_attendance')
       .select('*').eq('group_id',groupId).eq('session_date',date);
     if (error) throw error; return data||[];
@@ -308,6 +311,7 @@ async unassignTrainerGroup(id) {
   // ─── GROUP PAYMENTS ───────────────────────────
   async getGroupPayments(groupId, month) {
     return cached(`grp:pay:g:${groupId}:${month}`, async () => {
+      if (useApi('groups')) return await api('/group-payments', { query: { group_id: groupId, month } });
       const {data,error} = await sb().from('group_payments')
         .select('*').eq('group_id',groupId).eq('month',month);
       if (error) throw error; return data||[];
@@ -351,14 +355,19 @@ async unassignTrainerGroup(id) {
         .select('group_instance_id').eq('id',groupId).maybeSingle();
       inst = tg?.group_instance_id || null;
     }
-    const first = monthStr;                                   // 'YYYY-MM-01'
-    const d = new Date(monthStr); d.setMonth(d.getMonth()+1); d.setDate(0);
-    const last = d.toISOString().slice(0,10);                 // последний день месяца
-    let q = sb().from('group_payments').select('*').eq('paid', true);
-    q = inst ? q.eq('group_instance_id', inst) : q.eq('group_id', groupId);
-    q = q.or(`and(sub_start.lte.${last},sub_end.gte.${first}),and(sub_end.is.null,month.eq.${monthStr})`);
-    const {data,error} = await q;
-    if (error) throw error;
+    let data;
+    if (useApi('groups')) {
+      data = await api('/group-payments/active', { query: { month: monthStr, group_id: inst ? undefined : groupId, group_instance_id: inst || undefined } });
+    } else {
+      const first = monthStr;                                   // 'YYYY-MM-01'
+      const d = new Date(monthStr); d.setMonth(d.getMonth()+1); d.setDate(0);
+      const last = d.toISOString().slice(0,10);                 // последний день месяца
+      let q = sb().from('group_payments').select('*').eq('paid', true);
+      q = inst ? q.eq('group_instance_id', inst) : q.eq('group_id', groupId);
+      q = q.or(`and(sub_start.lte.${last},sub_end.gte.${first}),and(sub_end.is.null,month.eq.${monthStr})`);
+      const res = await q;
+      if (res.error) throw res.error; data = res.data;
+    }
     const map = {};
     (data||[]).forEach(p=>{
       const k = p.group_client_id, cur = map[k];
@@ -385,12 +394,20 @@ async unassignTrainerGroup(id) {
   },
   // ─── GROUP TRAINER PAYOUTS ───────────────────
   async getGroupTrainerPayout(groupId, trainerId, month) {
+    if (useApi('groups')) return await api('/group-payouts', { query: { group_id: groupId, trainer_id: trainerId, month } });
     const {data,error} = await sb().from('group_trainer_payouts')
       .select('*').eq('group_id',groupId).eq('trainer_id',trainerId).eq('month',month).maybeSingle();
     if (error) throw error; return data;
   },
   async setGroupTrainerPayout(groupId, trainerId, month, payoutType, payoutValue, approvedBy, note='', bonus=0, penalty=0) {
     invalidateCachePrefix('grp:');
+    if (useApi('groups')) {
+      await api('/group-payouts', { method:'POST', body:{
+        group_id: groupId, trainer_id: trainerId, month, payout_type: payoutType,
+        payout_value: payoutValue, note, bonus: bonus||0, penalty: penalty||0,
+      }});
+      return;
+    }
     const {error} = await sb().from('group_trainer_payouts')
       .upsert({group_id:groupId, trainer_id:trainerId, month,
                payout_type:payoutType, payout_value:payoutValue,
@@ -400,6 +417,12 @@ async unassignTrainerGroup(id) {
     if (error) throw error;
   },
   async getGroupPayoutsForMonth(month) {
+    if (useApi('groups')) {
+      const rows = await api('/group-payouts/month', { query: { month } });
+      return (rows || []).map(r => ({ ...r,
+        profiles: { fio: r.trainer_fio },
+        trainer_groups: { group_types: { name: r.tg_group_name, type: r.tg_group_type } } }));
+    }
     const {data,error} = await sb().from('group_trainer_payouts')
       .select('*, trainer_groups(*, group_types(name,type)), profiles!trainer_id(fio)')
       .eq('month', month);
@@ -545,6 +568,11 @@ async unassignTrainerGroup(id) {
 
   // ─── PT SUBSTITUTIONS FOR MONTH ─────────────
   async getPTSubstitutionsForMonth(branch, year, month) {
+    if (useApi('groups')) {
+      const rows = await api('/workouts/pt-substitutions', { query: { branch, year, month } });
+      return (rows || []).map(r => ({ ...r,
+        clients: { fio: r.client_fio }, profiles: { fio: r.trainer_fio }, sub_profile: { fio: r.sub_fio } }));
+    }
     const from = new Date(year,month-1,1).toISOString();
     const to   = new Date(year,month,  1).toISOString();
     const {data,error} = await sb().from('workouts')
@@ -557,6 +585,7 @@ async unassignTrainerGroup(id) {
     if (error) throw error; return data||[];
   },
   async setPTSubstituteRate(workoutId, rate) {
+    if (useApi('groups')) { await api('/workouts/'+workoutId+'/substitute-rate', { method:'POST', body:{ rate } }); return; }
     const {error} = await sb().from('workouts')
       .update({substitute_rate: rate}).eq('id', workoutId);
     if (error) throw error;
