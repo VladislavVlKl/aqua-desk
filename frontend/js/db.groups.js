@@ -15,6 +15,15 @@ function _apiTgMember(r) {
   return { ...r, profiles: { fio: r.trainer_fio }, group_types: { name: r.group_name, type: r.group_kind } };
 }
 
+// Полный reshape строки trainer_groups для analytics-bundles (calcSalary/calcChild
+// читают все поля group_types). Плоские gt_* → group_types{}, trainer_fio → profiles.
+function _apiTgFull(r) {
+  if (!r) return r;
+  return { ...r, profiles: { fio: r.trainer_fio }, group_types: {
+    name: r.gt_name, type: r.gt_type, billing_model: r.gt_billing_model,
+    price_per_month: r.gt_price, trainer_percentage: r.gt_trainer_pct } };
+}
+
 // Reshape групповой замены: плоские поля бэкенда → эмбеды, которые ждут потребители
 // (.original.fio, .substitute.fio, .trainer_groups.{group_type_id,branch,group_types}).
 function _apiGroupSub(r) {

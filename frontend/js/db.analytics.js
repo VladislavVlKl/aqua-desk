@@ -285,6 +285,26 @@ Object.assign(DB, {
 
   // ─── REPORTS ─────────────────────────────────
   async getSummary(year, month, branch=null) {
+    if (useApi('analytics')) {
+      const fromDay = `${year}-${String(month).padStart(2,'0')}-01`;
+      const b = await api('/analytics/summary', { query: { year, month, branch: branch || undefined } });
+      const workouts     = (b.workouts||[]).map(w => ({ ...w, clients: { age: w.client_age } }));
+      const trainerGroups= (b.trainerGroups||[]).map(_apiTgFull);
+      const groupSessions= (b.groupSessions||[]).map(gs => ({ ...gs, group_types: { billing_model: gs.gt_billing_model } }));
+      const gsubAll      = (b.groupSubstitutions||[]).map(s => ({ ...s, trainer_groups: { group_type_id: s.tg_group_type_id, branch: s.tg_branch } }));
+      const adjData  = branch ? (b.adjustments||[]).filter(a => !a.branch || a.branch===branch) : (b.adjustments||[]);
+      const gsubData = branch ? gsubAll.filter(s => !s.trainer_groups?.branch || s.trainer_groups.branch===branch) : gsubAll;
+      // Авто-ЗП детских групп — тот же клиентский _calcChildInstances + getRateHistory.
+      const childTgs = trainerGroups.filter(_isChildTg);
+      const rateHistory = childTgs.length ? await DB.getRateHistory(childTgs.map(t=>t.id), fromDay) : [];
+      const childAutoByTrainer = {};
+      _calcChildInstances({ childTgs, payments: b.gpay||[], sessions: groupSessions, substitutions: gsubData,
+        adjustments: b.groupPayouts||[], rateHistory, attendance: b.gatt||[], monthStr: fromDay })
+        .forEach(({result}) => { result.rows.forEach(r => { childAutoByTrainer[r.trainerId] = (childAutoByTrainer[r.trainerId]||0) + r.final; }); });
+      return { workouts, duties: b.duties||[], trainerGroups, groupSessions, profiles: b.profiles||[],
+        adjustments: adjData, groupPayouts: b.groupPayouts||[], groupSubstitutions: gsubData,
+        ptSubstitutions: b.ptSubstitutions||[], trialSessions: b.trialSessions||[], childAutoByTrainer };
+    }
     const from    = new Date(year,month-1,1).toISOString();
     const to      = new Date(year,month,  1).toISOString();
     const fromDay = `${year}-${String(month).padStart(2,'0')}-01`;
@@ -395,6 +415,25 @@ Object.assign(DB, {
   // Используется в отчёте тренера (loadTrainerReport) и деталях (getTrainerDetail).
   async getChildGroupsAutoSalary(trainerId, monthStr) {
     return cached(`grp:autosal:${trainerId}:${monthStr}`, async () => {
+    if (useApi('analytics')) {
+      try {
+        const b = await api('/analytics/child-autosalary', { query: { trainer_id: trainerId, month: monthStr } });
+        const childTgs = (b.childTgs||[]).map(_apiTgFull);
+        if (!childTgs.length) return {total:0, rows:[]};
+        const rh = await DB.getRateHistory(childTgs.map(t=>t.id), monthStr);
+        let total = 0; const rows = [];
+        _calcChildInstances({ childTgs, payments: b.payments||[], sessions: b.sessions||[], substitutions: b.substitutions||[],
+          adjustments: b.adjustments||[], rateHistory: rh, attendance: b.attendance||[], monthStr })
+          .forEach(({members, result}) => {
+            const groupName = members[0]?.group_types?.name || 'Группа';
+            result.rows.filter(r=>r.trainerId===trainerId).forEach(r=>{
+              total += r.final;
+              rows.push({tgId:r.tgId, groupName, autoAmt:r.autoAmt, calcNote:r.calcNote, bonus:r.bonus, penalty:r.penalty, final:r.final});
+            });
+          });
+        return {total, rows};
+      } catch(e) { console.error('[getChildGroupsAutoSalary]', e); return {total:0, rows:[]}; }
+    }
     try {
       const nextD = new Date(monthStr); nextD.setMonth(nextD.getMonth()+1);
       const toDay = nextD.toISOString().slice(0,10);
@@ -457,6 +496,10 @@ Object.assign(DB, {
 
   /** Дети, которые ХОДИЛИ в этом месяце, но НЕ оплатили (сигнал ⚠️ тренеру) */
   async getGroupUnpaidAttendees(trainerId, monthStr) {
+    if (useApi('analytics')) {
+      try { return await api('/analytics/group-unpaid', { query: { trainer_id: trainerId, month: monthStr } }); }
+      catch(e) { console.error('[getGroupUnpaidAttendees]', e); return []; }
+    }
     try {
       const nextD = new Date(monthStr); nextD.setMonth(nextD.getMonth()+1);
       const toDay = nextD.toISOString().slice(0,10);
@@ -492,6 +535,27 @@ Object.assign(DB, {
   },
 
   async getTrainerDetail(trainerId, year, month) {
+    if (useApi('analytics')) {
+      const fromDay = `${year}-${String(month).padStart(2,'0')}-01`;
+      const [b, childAuto] = await Promise.all([
+        api('/analytics/trainer-detail', { query: { trainer_id: trainerId, year, month } }),
+        DB.getChildGroupsAutoSalary(trainerId, fromDay),
+      ]);
+      return {
+        workouts:      (b.workouts||[]).map(w => ({ ...w, clients: { fio: w.client_fio, age: w.client_age }, sub_profile: { fio: w.sub_fio } })),
+        duties:        b.duties||[],
+        trainerGroups: (b.trainerGroups||[]).map(_apiTgFull),
+        groupSessions: (b.groupSessions||[]).map(gs => ({ ...gs, group_types: { name: gs.gt_name, type: gs.gt_type, billing_model: gs.gt_billing_model } })),
+        adjustment:    Object.values(aggAdjustments(b.adjustments||[]))[0]||null,
+        adjustments:   b.adjustments||[],
+        groupPayouts:  b.groupPayouts||[],
+        groupSubstitutions: (b.groupSubstitutions||[]).map(s => ({ ...s, trainer_groups: { group_types: { name: s.tg_group_name } } })),
+        sessionNotes:  (b.sessionNotes||[]).map(n => ({ ...n, clients: { fio: n.client_fio }, workouts: { workout_date: n.wo_date, category_at_moment: n.wo_cat } })),
+        trialSessions: b.trialSessions||[],
+        childAutoSum:  childAuto.total,
+        childAutoRows: childAuto.rows,
+      };
+    }
     const from    = new Date(year,month-1,1).toISOString();
     const to      = new Date(year,month,  1).toISOString();
     const fromDay = `${year}-${String(month).padStart(2,'0')}-01`;
