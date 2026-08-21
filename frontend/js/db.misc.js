@@ -302,6 +302,13 @@ Object.assign(DB, {
   // ─── ЗАМЕНА В ГРУППАХ ────────────────────────
   async createGroupSubstitution(groupId, originalTrainerId, substituteTrainerId, sessionDate, headcount=null) {
     invalidateCachePrefix('grp:');
+    if (useApi('groups')) {
+      // Пуш подтверждающим пока не шлём (нет notifications-write эндпоинта).
+      return await api('/group-substitutions', { method:'POST', body:{
+        group_id: groupId, original_trainer_id: originalTrainerId, substitute_trainer_id: substituteTrainerId,
+        session_date: sessionDate, headcount: (headcount && headcount>0) ? headcount : null,
+      }});
+    }
     const {data,error} = await sb().from('group_substitutions')
       .insert({group_id:groupId, original_trainer_id:originalTrainerId,
                substitute_trainer_id:substituteTrainerId,
@@ -332,6 +339,10 @@ Object.assign(DB, {
   },
   // История замен группы (по всем строкам инстанса), новые сверху
   async getGroupSubstitutionsHistory(groupId) {
+    if (useApi('groups')) {
+      const rows = await api('/group-substitutions/history', { query: { group_id: groupId } });
+      return (rows || []).map(_apiGroupSub);
+    }
     const {data:tg} = await sb().from('trainer_groups').select('group_instance_id').eq('id',groupId).single();
     let gIds = [groupId];
     if (tg?.group_instance_id) {
@@ -345,6 +356,10 @@ Object.assign(DB, {
     if (error) throw error; return data||[];
   },
   async getPendingSubstitutions(branch) {
+    if (useApi('groups')) {
+      const rows = await api('/group-substitutions/pending');
+      return (rows || []).map(_apiGroupSub);
+    }
     const {data,error} = await sb().from('group_substitutions')
       .select('*, original:profiles!original_trainer_id(fio), substitute:profiles!substitute_trainer_id(fio), trainer_groups(*, group_types(name, billing_model))')
       .eq('status','pending')
@@ -353,6 +368,10 @@ Object.assign(DB, {
   },
   async approveSubstitution(id, rate) {
     invalidateCachePrefix('grp:');
+    if (useApi('groups')) {
+      const data = await api('/group-substitutions/'+id+'/approve', { method:'POST', body:{ rate } });
+      return !!data?.approved;   // false → уже подтвердил кто-то другой
+    }
     // Идемпотентно: одобряем только если запись ещё pending → «кто первый, тот подтвердил».
     const {data,error} = await sb().from('group_substitutions')
       .update({status:'approved', rate}).eq('id',id).eq('status','pending').select('id');

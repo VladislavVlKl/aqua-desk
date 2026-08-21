@@ -8,6 +8,20 @@ function _apiTrainerGroup(row) {
   }};
 }
 
+// Reshape групповой замены: плоские поля бэкенда → эмбеды, которые ждут потребители
+// (.original.fio, .substitute.fio, .trainer_groups.{group_type_id,branch,group_types}).
+function _apiGroupSub(r) {
+  if (!r) return r;
+  return { ...r,
+    original:   { fio: r.original_fio },
+    substitute: { fio: r.substitute_fio },
+    trainer_groups: {
+      group_type_id: r.tg_group_type_id, branch: r.tg_branch,
+      group_types: { name: r.tg_group_name, billing_model: r.tg_billing_model },
+    },
+  };
+}
+
 Object.assign(DB, {
   // ─── GROUP TYPES ─────────────────────────────
   async getGroupTypes() {
@@ -524,6 +538,7 @@ async unassignTrainerGroup(id) {
 
   async updateGroupSubstitutionRate(id, rate) {
     invalidateCachePrefix('grp:');
+    if (useApi('groups')) { await api('/group-substitutions/'+id+'/rate', { method:'POST', body:{ rate } }); return; }
     const {error} = await sb().from('group_substitutions').update({rate}).eq('id',id);
     if (error) throw error;
   },
@@ -549,6 +564,10 @@ async unassignTrainerGroup(id) {
 
   // Групповые замены за месяц
   async getGroupSubstitutionsForMonth(branch, year, month) {
+    if (useApi('groups')) {
+      const rows = await api('/group-substitutions/month', { query: { branch, year, month } });
+      return (rows || []).map(_apiGroupSub);
+    }
     const from = `${year}-${String(month).padStart(2,'0')}-01`;
     const to   = monthFirstDayStr(year, month+1);
     const {data,error} = await sb().from('group_substitutions')
