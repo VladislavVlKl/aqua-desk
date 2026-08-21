@@ -1,6 +1,7 @@
 Object.assign(DB, {
   // Статистика активности всех тренеров (для координатора)
   async getTrainersActivityStats(year, month) {
+    if (useApi('analytics')) return await api('/analytics/trainers-activity', { query: { year, month } });
     const from = `${year}-${String(month).padStart(2,'0')}-01`;
     const to   = monthFirstDayStr(year, month+1);
     const cutoff48 = new Date(Date.now()-48*3600000).toISOString();
@@ -54,6 +55,15 @@ Object.assign(DB, {
     });
   },
   async getClientProfile(clientId, viewerRole, viewerBranches) {
+    if (useApi('analytics')) {
+      const r = await api('/clients/'+clientId+'/profile');
+      // Проверка доступа старшего тренера — на клиенте (как и раньше).
+      if (viewerRole==='senior_trainer') {
+        const hasAccess = (r.client?.profiles?.branches||[]).some(b=>(viewerBranches||[]).includes(b));
+        if (!hasAccess) throw new Error('Нет доступа');
+      }
+      return { client: r.client, subscriptions: r.subscriptions||[], workouts: r.workouts||[] };
+    }
     const {data:client,error} = await sb().from('clients')
       .select('*, profiles!trainer_id(fio,branches)').eq('id',clientId).single();
     if (error) throw error;
@@ -72,6 +82,7 @@ Object.assign(DB, {
 
   // ─── CLIENT REPORT ───────────────────────────
   async getClientDataForReport(clientId) {
+    if (useApi('analytics')) return await api('/clients/'+clientId+'/report-data');
     const [subsR, workoutsR] = await Promise.all([
       sb().from('subscriptions').select('id,start_date,end_date,is_active')
         .eq('client_id',clientId).order('created_at',{ascending:false}),
@@ -83,6 +94,10 @@ Object.assign(DB, {
 
   // ─── EVENTS ──────────────────────────────────
   async getUpcomingEvents(branch) {
+    if (useApi('analytics')) {
+      const rows = await api('/events/upcoming', { query: { branch: branch || undefined } });
+      return (rows || []).map(e => ({ ...e, profiles: { fio: e.creator_fio } }));  // event_participants уже массив
+    }
     const now  = new Date().toISOString();
     const in30 = new Date(Date.now()+30*86400000).toISOString();
     let q = sb().from('events')
@@ -93,6 +108,9 @@ Object.assign(DB, {
     if (error) throw error; return data||[];
   },
   async getBlockingEvents(branch, startTime, endTime) {
+    if (useApi('analytics')) {
+      return await api('/events/blocking', { query: { branch: branch || undefined, start: startTime, end: endTime } });
+    }
     const {data,error} = await sb().from('events')
       .select('id,title,start_time,end_time').eq('blocks_pool',true)
       .or(`branch.is.null,branch.eq.${branch}`)
@@ -100,20 +118,24 @@ Object.assign(DB, {
     if (error) throw error; return data||[];
   },
   async createEvent(fields) {
+    if (useApi('analytics')) return await api('/events', { method:'POST', body: fields });
     const {data,error} = await sb().from('events').insert(fields)
       .select('*, profiles!created_by(fio)').single();
     if (error) throw error; return data;
   },
   async deleteEvent(id) {
+    if (useApi('analytics')) { await api('/events/'+id+'/delete', { method:'POST' }); return; }
     const {error} = await sb().from('events').delete().eq('id',id);
     if (error) throw error;
   },
   async joinEvent(eventId, trainerId) {
+    if (useApi('analytics')) { await api('/events/'+eventId+'/join', { method:'POST', body:{ trainer_id: trainerId } }); return; }
     const {error} = await sb().from('event_participants')
       .insert({event_id:eventId,trainer_id:trainerId});
     if (error&&!error.message.includes('unique')) throw error;
   },
   async leaveEvent(eventId, trainerId) {
+    if (useApi('analytics')) { await api('/events/'+eventId+'/leave', { method:'POST', body:{ trainer_id: trainerId } }); return; }
     const {error} = await sb().from('event_participants')
       .delete().eq('event_id',eventId).eq('trainer_id',trainerId);
     if (error) throw error;
