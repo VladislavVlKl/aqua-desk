@@ -614,6 +614,11 @@ async function renderGroupMonthReport(groupId, monthStr, view='full') {
     // Итого оплат
     const totalPaid = payments.filter(p=>p.paid).reduce((s,p)=>s+Number(p.amount||0),0);
 
+    // Должники — по ПЕРИОДУ абонемента (activePayMap), как в хабе группы:
+    // должник = активный ребёнок без действующего абонемента на этот месяц.
+    // NB: это НЕ вал ЗП (та считается по строкам месяца оплаты) — см. коммент выше.
+    const debtors = clients.filter(c=>c.is_active && !activePayMap[c.id]);
+
     // Флаги потенциальных дублей (только для координатора/старшего)
     const instanceId = trainers[0]?.group_instance_id||null;
     const canSeePayrollData = isAdmin||STATE.profile.role==='senior_trainer';
@@ -659,6 +664,7 @@ async function renderGroupMonthReport(groupId, monthStr, view='full') {
       <div class="summary-cards" style="margin-bottom:16px">
         <div class="summary-card"><div class="s-val">${clients.filter(c=>c.is_active).length}</div><div class="s-lbl">Детей</div></div>
         <div class="summary-card"><div class="s-val">${clients.filter(c=>c.is_active&&activePayMap[c.id]).length}</div><div class="s-lbl">Оплатили</div></div>
+        <div class="summary-card"><div class="s-val" style="color:${debtors.length?'#ef4444':'#10b981'}">${debtors.length}</div><div class="s-lbl">Должники</div></div>
         <div class="summary-card"><div class="s-val">${totalSessions}</div><div class="s-lbl">Занятий</div></div>
         <div class="summary-card accent"><div class="s-val">${fmt(totalPaid)}</div><div class="s-lbl">Сумма оплат</div></div>
       </div>
@@ -694,8 +700,12 @@ async function renderGroupMonthReport(groupId, monthStr, view='full') {
       })()}
 
       <!-- Таблица детей -->
-      <h4 style="margin-bottom:8px">Посещаемость и оплаты</h4>
-      <div style="overflow-x:auto">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px">
+        <h4 style="margin:0">Посещаемость и оплаты</h4>
+        ${debtors.length?`<button class="btn btn-sm" data-on="0" onclick="toggleGmrDebtors(this)"
+          style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#ef4444;font-size:12px;white-space:nowrap">⚠️ Только должники</button>`:''}
+      </div>
+      <div style="overflow-x:auto" id="gmr-children-table">
         <table class="admin-table" style="font-size:12px;min-width:320px">
           <thead><tr>
             <th style="text-align:left">Ребёнок</th>
@@ -713,7 +723,7 @@ async function renderGroupMonthReport(groupId, monthStr, view='full') {
                 const att = attByClient[c.id]||0;
                 const paid = !!pay;
                 const debtAlert = !paid && att > 2;
-                return `<tr${debtAlert?' style="background:rgba(239,68,68,.06)"':''}>
+                return `<tr class="${paid?'gmr-row-paid':'gmr-row-debtor'}"${debtAlert?' style="background:rgba(239,68,68,.06)"':''}>
                   <td style="font-weight:500">
                     ${debtAlert?'<span title="Ходит без оплаты" style="color:#ef4444;margin-right:4px">⚠️</span>':''}
                     ${c.name}${c.age?`, ${c.age}л`:''}
@@ -729,8 +739,11 @@ async function renderGroupMonthReport(groupId, monthStr, view='full') {
               if (subNames.length<=1) return active.map(rowHtml).join('');
               return ['', ...subNames.filter(Boolean).sort()]
                 .filter(s=>active.some(c=>(c.subgroup||'')===s))
-                .map(s=>`<tr><td colspan="5" style="font-weight:700;font-size:12px;background:rgba(124,58,237,.08);padding:6px 8px">${subLabel(s)}</td></tr>`
-                  + active.filter(c=>(c.subgroup||'')===s).map(rowHtml).join('')).join('');
+                .map(s=>{
+                  const subHasDebtor = active.some(c=>(c.subgroup||'')===s && !activePayMap[c.id]);
+                  return `<tr class="gmr-subhead${subHasDebtor?'':' gmr-subhead-nodebt'}"><td colspan="5" style="font-weight:700;font-size:12px;background:rgba(124,58,237,.08);padding:6px 8px">${subLabel(s)}</td></tr>`
+                    + active.filter(c=>(c.subgroup||'')===s).map(rowHtml).join('');
+                }).join('');
             })()}
           </tbody>
         </table>
@@ -980,6 +993,15 @@ function prevMonthStr(monthStr) {
 function nextMonthStr(monthStr) {
   const d = new Date(monthStr); d.setMonth(d.getMonth()+1);
   return d.toISOString().slice(0,7)+'-01';
+}
+// Фильтр таблицы «Отчёт по детям» → показать только должников (по периоду абонемента).
+// Прячет оплаченные строки и подзаголовки подгрупп без должников. Чисто клиентский тумблер.
+function toggleGmrDebtors(btn) {
+  const activate = btn.dataset.on !== '1';
+  btn.dataset.on = activate ? '1' : '0';
+  btn.textContent = activate ? '✓ Показать всех' : '⚠️ Только должники';
+  document.querySelectorAll('#gmr-children-table tr.gmr-row-paid, #gmr-children-table tr.gmr-subhead-nodebt')
+    .forEach(tr => { tr.style.display = activate ? 'none' : ''; });
 }
 function updateGroupPayoutTotal(trainerId, autoAmt) {
   const bonus   = parseInt(document.getElementById(`bonus-${trainerId}`)?.value)||0;
