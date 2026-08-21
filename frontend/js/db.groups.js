@@ -355,12 +355,14 @@ async unassignTrainerGroup(id) {
 
   // ─── GROUP PROGRESS NOTES ─────────────────────
   async getGroupProgressNotes(groupId, month) {
+    if (useApi('groups')) return await api('/group-progress-notes', { query: { group_id: groupId, month } });
     const {data,error} = await sb().from('group_progress_notes')
       .select('*').eq('group_id',groupId).eq('month',month);
     if (error) throw error; return data||[];
   },
   async saveGroupProgressNote(groupId, groupClientId, trainerId, month, note) {
     invalidateCachePrefix('grp:');
+    if (useApi('groups')) { await api('/group-progress-notes', { method:'POST', body:{ group_id: groupId, group_client_id: groupClientId, trainer_id: trainerId, month, note } }); return; }
     const {error} = await sb().from('group_progress_notes')
       .upsert({group_id:groupId, group_client_id:groupClientId,
                trainer_id:trainerId, month, note},
@@ -592,23 +594,31 @@ async unassignTrainerGroup(id) {
   // {names:[обычные подгруппы], mainLabel:строка|null} — метка главной ('') подгруппы
   async getGroupSubgroups(groupInstanceId, groupId) {
     return cached(`grp:subg:${groupInstanceId||'g'+groupId}`, async () => {
-      let q = sb().from('group_subgroups').select('name,is_main');
-      q = groupInstanceId ? q.eq('group_instance_id', groupInstanceId) : q.eq('group_id', groupId).is('group_instance_id', null);
-      const {data,error} = await q;
-      if (error) { console.warn('[getGroupSubgroups]', error.message); return {names:[], mainLabel:null}; }
-      const rows = data||[];
-      const mainRow = rows.find(r=>r.is_main);
-      return { names: rows.filter(r=>!r.is_main).map(r=>r.name), mainLabel: mainRow?.name || null };
+      let rows;
+      if (useApi('groups')) {
+        try { rows = await api('/group-subgroups', { query: { group_instance_id: groupInstanceId || undefined, group_id: groupInstanceId ? undefined : groupId } }); }
+        catch(e) { console.warn('[getGroupSubgroups]', e?.message||e); return {names:[], mainLabel:null}; }
+      } else {
+        let q = sb().from('group_subgroups').select('name,is_main');
+        q = groupInstanceId ? q.eq('group_instance_id', groupInstanceId) : q.eq('group_id', groupId).is('group_instance_id', null);
+        const {data,error} = await q;
+        if (error) { console.warn('[getGroupSubgroups]', error.message); return {names:[], mainLabel:null}; }
+        rows = data||[];
+      }
+      const mainRow = (rows||[]).find(r=>r.is_main);
+      return { names: (rows||[]).filter(r=>!r.is_main).map(r=>r.name), mainLabel: mainRow?.name || null };
     });
   },
   async addGroupSubgroup(groupInstanceId, groupId, name, createdBy=null) {
     invalidateCachePrefix('grp:subg:');
+    if (useApi('groups')) { await api('/group-subgroups', { method:'POST', body:{ group_instance_id: groupInstanceId||null, group_id: groupInstanceId?null:groupId, name } }); return; }
     const {error} = await sb().from('group_subgroups')
       .insert({group_instance_id: groupInstanceId||null, group_id: groupInstanceId?null:groupId, name, created_by: createdBy});
     if (error && error.code!=='23505') throw error; // 23505 = уже есть, не ошибка
   },
   async removeGroupSubgroup(groupInstanceId, groupId, name) {
     invalidateCachePrefix('grp:subg:');
+    if (useApi('groups')) { await api('/group-subgroups/remove', { method:'POST', body:{ group_instance_id: groupInstanceId||null, group_id: groupInstanceId?null:groupId, name } }); return; }
     let q = sb().from('group_subgroups').delete().eq('name', name).eq('is_main', false);
     q = groupInstanceId ? q.eq('group_instance_id', groupInstanceId) : q.eq('group_id', groupId).is('group_instance_id', null);
     const {error} = await q;
@@ -617,6 +627,7 @@ async unassignTrainerGroup(id) {
   // Метка главной ('') подгруппы. label='' → вернуть к «Основная» (удалить метку).
   async setMainSubgroupLabel(groupInstanceId, groupId, label) {
     invalidateCachePrefix('grp:subg:');
+    if (useApi('groups')) { await api('/group-subgroups/set-main', { method:'POST', body:{ group_instance_id: groupInstanceId||null, group_id: groupInstanceId?null:groupId, label: label||'' } }); return; }
     let del = sb().from('group_subgroups').delete().eq('is_main', true);
     del = groupInstanceId ? del.eq('group_instance_id', groupInstanceId) : del.eq('group_id', groupId).is('group_instance_id', null);
     await del;
@@ -628,6 +639,7 @@ async unassignTrainerGroup(id) {
   // Переименовать обычную подгруппу: меняем имя в group_subgroups + во всех записях детей и занятий
   async renameGroupSubgroup(groupInstanceId, groupId, oldName, newName) {
     invalidateCachePrefix('grp:');
+    if (useApi('groups')) { await api('/group-subgroups/rename', { method:'POST', body:{ group_instance_id: groupInstanceId||null, group_id: groupInstanceId?null:groupId, old_name: oldName, new_name: newName } }); return; }
     const matchSub = q => groupInstanceId ? q.eq('group_instance_id', groupInstanceId) : q.eq('group_id', groupId).is('group_instance_id', null);
     await matchSub(sb().from('group_subgroups').update({name:newName}).eq('name', oldName).eq('is_main', false));
     // Дети: по инстансу или по группе
