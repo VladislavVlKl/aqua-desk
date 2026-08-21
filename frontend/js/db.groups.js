@@ -8,6 +8,13 @@ function _apiTrainerGroup(row) {
   }};
 }
 
+// Reshape строки trainer_groups с эмбедами: плоские trainer_fio/group_name/group_kind
+// → profiles{fio} + group_types{name,type} (getActiveGroupsByBranch/Members/Assigned).
+function _apiTgMember(r) {
+  if (!r) return r;
+  return { ...r, profiles: { fio: r.trainer_fio }, group_types: { name: r.group_name, type: r.group_kind } };
+}
+
 // Reshape групповой замены: плоские поля бэкенда → эмбеды, которые ждут потребители
 // (.original.fio, .substitute.fio, .trainer_groups.{group_type_id,branch,group_types}).
 function _apiGroupSub(r) {
@@ -54,6 +61,10 @@ Object.assign(DB, {
     if (error) throw error; return data;
   },
 async getAssignedTrainers(groupTypeId) {
+    if (useApi('groups')) {
+      const rows = await api('/assigned-trainers', { query: { group_type_id: groupTypeId } });
+      return (rows || []).map(_apiTgMember);
+    }
     const {data,error} = await sb().from('trainer_groups')
       .select('*, profiles(fio)')
       .eq('group_type_id',groupTypeId)
@@ -117,6 +128,10 @@ async getAssignedTrainers(groupTypeId) {
   },
   async getGroupInstanceMembers(groupInstanceId) {
     return cached(`grp:members:${groupInstanceId}`, async () => {
+      if (useApi('groups')) {
+        const rows = await api('/group-instance-members', { query: { group_instance_id: groupInstanceId } });
+        return (rows || []).map(_apiTgMember);
+      }
       const {data,error} = await sb().from('trainer_groups')
         .select('*, profiles(fio), group_types(name,type)')
         .eq('group_instance_id', groupInstanceId)
@@ -150,6 +165,14 @@ async getAssignedTrainers(groupTypeId) {
   },
   async getDuplicateFlags(groupInstanceId) {
     return cached(`grp:dup:${groupInstanceId}`, async () => {
+      if (useApi('groups')) {
+        try {
+          const rows = await api('/group-duplicate-flags', { query: { group_instance_id: groupInstanceId } });
+          return (rows || []).map(f => ({ ...f,
+            c1: f.client_id_1 ? { id: f.client_id_1, name: f.c1_name, age: f.c1_age } : null,
+            c2: f.client_id_2 ? { id: f.client_id_2, name: f.c2_name, age: f.c2_age } : null }));
+        } catch(e) { return []; }
+      }
       const {data,error} = await sb().from('group_client_duplicate_flags')
         .select('*')
         .eq('group_instance_id', groupInstanceId).eq('status','pending');
@@ -164,6 +187,7 @@ async getAssignedTrainers(groupTypeId) {
   },
   async resolveDuplicateFlag(id, status) {
     invalidateCachePrefix('grp:');
+    if (useApi('groups')) { await api('/group-duplicate-flags/'+id+'/resolve', { method:'POST', body:{ status } }); return; }
     const {error} = await sb().from('group_client_duplicate_flags')
       .update({status}).eq('id',id);
     if (error) throw error;
@@ -281,6 +305,7 @@ async unassignTrainerGroup(id) {
 
   // Уникальные даты занятий с явкой (по instance_id если есть, иначе по group_id)
   async getGroupSessionHistory(groupId) {
+    if (useApi('groups')) return await api('/group-session-history', { query: { group_id: groupId } });
     // Сначала получаем instance_id
     const {data:tg} = await sb().from('trainer_groups')
       .select('group_instance_id').eq('id',groupId).single();
@@ -302,6 +327,7 @@ async unassignTrainerGroup(id) {
 
   // История посещений конкретного ребёнка (последние записи)
   async getGroupClientAttendanceHistory(groupClientId) {
+    if (useApi('groups')) return await api('/group-client-attendance-history', { query: { group_client_id: groupClientId } });
     const {data,error} = await sb().from('group_attendance')
       .select('session_date,attended').eq('group_client_id',groupClientId)
       .order('session_date',{ascending:false}).limit(120);
@@ -479,6 +505,21 @@ async unassignTrainerGroup(id) {
   // Отчёт по детской группе за месяц (для старшего/админа)
   async getGroupMonthReport(groupId, month) {
     return cached(`grp:report:${groupId}:${month}`, async () => {
+    if (useApi('groups')) {
+      const r = await api('/groups/'+groupId+'/month-report', { query: { month } });
+      return {
+        clients:          r.clients||[],
+        payments:         r.payments||[],
+        notes:            r.notes||[],
+        attendance:       r.attendance||[],
+        payouts:          r.payouts||[],
+        trainers:         (r.trainers||[]).map(_apiTgMember),
+        instanceSessions: r.instanceSessions||[],
+        substitutions:    (r.substitutions||[]).map(s => ({ ...s,
+                            original: { fio: s.original_fio }, substitute: { fio: s.substitute_fio } })),
+        groupTypeInfo:    r.groupTypeInfo||null,
+      };
+    }
     const nextMonth = new Date(month); nextMonth.setMonth(nextMonth.getMonth()+1);
     const nextMonthStr = nextMonth.toISOString().slice(0,10);
 
@@ -763,6 +804,10 @@ async unassignTrainerGroup(id) {
   },
   // Активные группы филиала (строки trainer_groups) — для формы «второй тренер» у старшего
   async getActiveGroupsByBranch(branch) {
+    if (useApi('groups')) {
+      const rows = await api('/group-instances/active', { query: { branch } });
+      return (rows || []).map(_apiTgMember);
+    }
     const {data,error} = await sb().from('trainer_groups')
       .select('id, group_type_id, branch, group_instance_id, role, profiles(fio), group_types(name,type)')
       .eq('branch', branch).is('subscription_end',null)
