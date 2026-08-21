@@ -144,6 +144,7 @@ Object.assign(DB, {
   // ─── АНАЛИТИКА ───────────────────────────────
 
   async getAnalytics(year, month, branch=null) {
+    if (useApi('analytics')) return await api('/analytics/dashboard', { query: { year, month, branch: branch || undefined } });
     // Текущий месяц
     const from    = new Date(year,month-1,1).toISOString();
     const to      = new Date(year,month,  1).toISOString();
@@ -256,6 +257,11 @@ Object.assign(DB, {
 
   // Данные для CEO-аналитики: оплаты групп (тек/прошлый месяц), клиенты, абонементы, слоты
   async getCeoAnalytics(year, month) {
+    if (useApi('analytics')) {
+      const r = await api('/analytics/ceo', { query: { year, month } });
+      // groupPayments: плоское tg_trainer_id → эмбед trainer_groups{trainer_id}.
+      return { ...r, groupPayments: (r.groupPayments||[]).map(g => ({ ...g, trainer_groups: { trainer_id: g.tg_trainer_id } })) };
+    }
     const py = month===1 ? year-1 : year;
     const pm = month===1 ? 12 : month-1;
     const monthDay  = `${year}-${String(month).padStart(2,'0')}-01`;
@@ -539,6 +545,23 @@ Object.assign(DB, {
 
   // ─── КОНТРОЛЬ ────────────────────────────────
   async getControlData() {
+    if (useApi('analytics')) {
+      const r = await api('/analytics/control-data');
+      const notesCount = {};
+      (r.batchWO||[]).forEach(w => {
+        if (!w.notes) return;
+        const key = `${w.trainer_id}::${w.notes}`;
+        notesCount[key] = notesCount[key] || { count: 0, rec: { ...w, profiles: { fio: w.trainer_fio } } };
+        notesCount[key].count++;
+      });
+      return {
+        expiringClients:  (r.expiring||[]).map(c => ({ ...c, profiles: { fio: c.trainer_fio } })),
+        oldDebt:          (r.oldDebt||[]).map(w => ({ ...w, clients: { fio: w.client_fio }, profiles: { fio: w.trainer_fio } })),
+        childDropinAbuse: (r.childDropin||[]).map(c => ({ ...c, profiles: { fio: c.trainer_fio } })),
+        suspiciousBatch:  Object.values(notesCount).filter(x => x.count > 3),
+        inactiveTrainers: r.inactive || [],
+      };
+    }
     const today      = todayStr();
     const warnDay    = new Date(); warnDay.setDate(warnDay.getDate()+SUBSCRIPTION_WARN_DAYS);
     const warnStr    = warnDay.toISOString().slice(0,10);
@@ -577,6 +600,11 @@ Object.assign(DB, {
   // ─── АНАЛИТИКА КООРДИНАТОРА (Overview + хабы) ──
   // Выручка детских групп за месяц (оплаты). branch — через join trainer_groups.
   async getAnGroupRevenue(year, month, branch=null) {
+    if (useApi('analytics')) {
+      const rows = (await api('/analytics/an-group-revenue', { query: { year, month } }))
+        .map(r => ({ ...r, trainer_groups: { branch: r.tg_branch } }));
+      return branch ? rows.filter(r => r.trainer_groups?.branch === branch) : rows;
+    }
     const monthDay = `${year}-${String(month).padStart(2,'0')}-01`;
     const { data, error } = await sb().from('group_payments')
       .select('amount,paid,group_id,trainer_groups(branch)').eq('month', monthDay);
@@ -588,6 +616,13 @@ Object.assign(DB, {
 
   // Клиенты + все абонементы (хаб «Клиентская база»). Фильтр по филиалу — в JS по branches тренера.
   async getAnClients() {
+    if (useApi('analytics')) {
+      const r = await api('/analytics/an-clients');
+      return {
+        clients: (r.clients||[]).map(c => ({ ...c, profiles: { fio: c.trainer_fio, branches: c.trainer_branches } })),
+        subscriptions: r.subscriptions || [],
+      };
+    }
     const [cl, subs] = await Promise.all([
       sb().from('clients').select(
         'id,fio,balance,age,is_archived,subscription_start,subscription_end,freeze_start,freeze_end,trainer_id,profiles!trainer_id(fio,branches)'),
@@ -601,6 +636,11 @@ Object.assign(DB, {
 
   // Проданные абонементы за месяц (для выручки детских ПТ — по цене пакета).
   async getAnSubsRevenue(year, month, branch=null) {
+    if (useApi('analytics')) {
+      const rows = (await api('/analytics/an-subs-revenue', { query: { year, month } }))
+        .map(r => ({ ...r, clients: { age: r.client_age, category: r.client_category }, profiles: { branches: r.trainer_branches } }));
+      return branch ? rows.filter(r => (r.profiles?.branches||[]).includes(branch)) : rows;
+    }
     const fromDay = `${year}-${String(month).padStart(2,'0')}-01`;
     const toDay   = monthFirstDayStr(year, month+1);
     const { data, error } = await sb().from('subscriptions')
@@ -614,6 +654,10 @@ Object.assign(DB, {
 
   // Тренировки за месяц (тепловая карта, распределение, выручка по начислению).
   async getAnWorkouts(year, month, branch=null) {
+    if (useApi('analytics')) {
+      return (await api('/analytics/an-workouts', { query: { year, month, branch: branch || undefined } }))
+        .map(r => ({ ...r, profiles: { fio: r.trainer_fio }, clients: { age: r.client_age, category: r.client_category } }));
+    }
     const from = new Date(year, month-1, 1).toISOString();
     const to   = new Date(year, month,   1).toISOString();
     let q = sb().from('workouts')
@@ -628,6 +672,7 @@ Object.assign(DB, {
   // Абонементы за окно ~8 мес до конца месяца — карта «размер пакета клиента на дату»
   // для выручки по начислению (accrual).
   async getAnAllSubs(year, month) {
+    if (useApi('analytics')) return await api('/analytics/an-all-subs', { query: { year, month } });
     const toDay = monthFirstDayStr(year, month+1);
     const loDay = monthFirstDayStr(year, month-8);
     const { data, error } = await sb().from('subscriptions')
@@ -638,6 +683,15 @@ Object.assign(DB, {
 
   // Данные для хаба «Контроль»: конспекты, поздние внесения, удаления ПТ, активность.
   async getAnControl(year, month, branch=null) {
+    if (useApi('analytics')) {
+      const r = await api('/analytics/an-control', { query: { year, month, branch: branch || undefined } });
+      return {
+        notes: (r.notes||[]).map(n => ({ ...n, workouts: { branch: n.wo_branch, workout_date: n.wo_date } })),
+        late:  (r.late||[]).map(l => ({ ...l, clients: { fio: l.client_fio }, profiles: { fio: l.trainer_fio } })),
+        dels:  (r.dels||[]).map(d => ({ ...d, profiles: { fio: d.trainer_fio } })),
+        audit: r.audit || [],
+      };
+    }
     const from = new Date(year, month-1, 1).toISOString();
     const to   = new Date(year, month,   1).toISOString();
     let notesQ = sb().from('session_notes')
