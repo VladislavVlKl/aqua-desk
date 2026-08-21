@@ -654,19 +654,25 @@ async unassignTrainerGroup(id) {
   },
   // Отметки «кто проводил» последнего занятия ДО указанной даты (для «повторить прошлое»)
   async getLastConductedBefore(groupInstanceId, beforeDate) {
-    const {data,error} = await sb().from('group_sessions')
-      .select('trainer_id,conducted_role,subgroup,session_date,headcount')
-      .eq('group_instance_id', groupInstanceId)
-      .not('conducted_role','is',null)
-      .lt('session_date', beforeDate)
-      .order('session_date',{ascending:false}).limit(50);
-    if (error) throw error;
-    const rows = data||[];
+    let rows;
+    if (useApi('groups')) {
+      rows = await api('/group-conducted/last-before', { query: { group_instance_id: groupInstanceId, before: beforeDate } });
+    } else {
+      const {data,error} = await sb().from('group_sessions')
+        .select('trainer_id,conducted_role,subgroup,session_date,headcount')
+        .eq('group_instance_id', groupInstanceId)
+        .not('conducted_role','is',null)
+        .lt('session_date', beforeDate)
+        .order('session_date',{ascending:false}).limit(50);
+      if (error) throw error; rows = data;
+    }
+    rows = rows||[];
     if (!rows.length) return {date:null, rows:[]};
     const lastDate = rows[0].session_date;
     return {date:lastDate, rows: rows.filter(r=>r.session_date===lastDate)};
   },
   async getGroupConductedByDate(groupInstanceId, date) {
+    if (useApi('groups')) return await api('/group-conducted', { query: { group_instance_id: groupInstanceId, date } });
     // select('*') — безопасно и до миграции subgroup (явный список колонок упал бы)
     const {data,error} = await sb().from('group_sessions')
       .select('*')
@@ -676,6 +682,12 @@ async unassignTrainerGroup(id) {
   },
   async setGroupConducted(trainerId, groupTypeId, branch, date, headcount, conductedRole, groupInstanceId, subgroup='') {
     invalidateCachePrefix('grp:');
+    if (useApi('groups')) {
+      return await api('/group-conducted', { method:'POST', body:{
+        trainer_id: trainerId, group_type_id: groupTypeId, branch, date, headcount,
+        conducted_role: conductedRole, group_instance_id: groupInstanceId||null, subgroup: subgroup||'',
+      }});
+    }
     // subgroup ВСЕГДА в payload ('' = основная) — уникальный индекс из 6 колонок
     const {data,error} = await sb().from('group_sessions')
       .upsert({trainer_id:trainerId, group_type_id:groupTypeId, branch,
@@ -688,6 +700,13 @@ async unassignTrainerGroup(id) {
   },
   async removeGroupConducted(trainerId, groupTypeId, branch, date, conductedRole, subgroup='') {
     invalidateCachePrefix('grp:');
+    if (useApi('groups')) {
+      await api('/group-conducted/remove', { method:'POST', body:{
+        trainer_id: trainerId, group_type_id: groupTypeId, branch, date,
+        conducted_role: conductedRole, subgroup: subgroup||'',
+      }});
+      return;
+    }
     const {error} = await sb().from('group_sessions').delete()
       .eq('trainer_id',trainerId).eq('group_type_id',groupTypeId).eq('branch',branch)
       .eq('session_date',date).eq('conducted_role',conductedRole)
