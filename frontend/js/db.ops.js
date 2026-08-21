@@ -1,3 +1,8 @@
+// Reshape ресепшн-строк: плоские client_fio/client_age/trainer_fio → эмбеды
+// clients{fio,age}/profiles{fio}, которые ждут карточки очереди.
+function _apiRcWo(w) { return { ...w, clients: { fio: w.client_fio, age: w.client_age }, profiles: { fio: w.trainer_fio } }; }
+function _apiRcTr(t) { return { ...t, profiles: { fio: t.trainer_fio } }; }
+
 Object.assign(DB, {
   // ─── УВЕДОМЛЕНИЯ ─────────────────────────────
   async getNotificationRules() {
@@ -184,8 +189,13 @@ Object.assign(DB, {
     const nd = (workouts||[]).filter(w=>!w.is_drop_in && w.client_id);
     if (!nd.length) return;
     const clientIds = [...new Set(nd.map(w=>w.client_id))];
-    const {data:subs} = await sb().from('subscriptions')
-      .select('client_id,start_date,initial_balance').in('client_id',clientIds);
+    let subs;
+    if (useApi('reception')) {
+      subs = await api('/reception/seq-subs', { query: { client_ids: clientIds } });
+    } else {
+      subs = (await sb().from('subscriptions')
+        .select('client_id,start_date,initial_balance').in('client_id',clientIds)).data;
+    }
     const subsBy = {};
     (subs||[]).forEach(s=>{ (subsBy[s.client_id]=subsBy[s.client_id]||[]).push(s); });
     Object.values(subsBy).forEach(a=>a.sort((x,y)=>x.start_date<y.start_date?-1:1));
@@ -198,12 +208,18 @@ Object.assign(DB, {
       if (!minFrom||f<minFrom) minFrom=f;
       if (!maxDay||day>maxDay) maxDay=day;
     });
-    const {data:hist} = await sb().from('workouts')
-      .select('id,client_id,workout_date,is_drop_in,reception_status')
-      .in('client_id',clientIds).eq('pending_confirmation',false)
-      .gte('workout_date', new Date(minFrom).toISOString())
-      .lte('workout_date', `${maxDay}T23:59:59+05:00`)
-      .order('workout_date');
+    let hist;
+    if (useApi('reception')) {
+      hist = await api('/reception/seq-history', { query: {
+        client_ids: clientIds, start: new Date(minFrom).toISOString(), end: `${maxDay}T23:59:59+05:00` } });
+    } else {
+      hist = (await sb().from('workouts')
+        .select('id,client_id,workout_date,is_drop_in,reception_status')
+        .in('client_id',clientIds).eq('pending_confirmation',false)
+        .gte('workout_date', new Date(minFrom).toISOString())
+        .lte('workout_date', `${maxDay}T23:59:59+05:00`)
+        .order('workout_date')).data;
+    }
     const histBy = {};
     (hist||[]).filter(w=>!w.is_drop_in && w.reception_status!=='rejected')
       .forEach(w=>{ (histBy[w.client_id]=histBy[w.client_id]||[]).push(w); });
@@ -223,6 +239,12 @@ Object.assign(DB, {
 
   /** Очередь pending филиала за день: ПТ + пробные */
   async getReceptionPending(branch, dateStr) {
+    if (useApi('reception')) {
+      const r = await api('/reception/pending', { query: { branch, date: dateStr } });
+      const workouts = (r.workouts||[]).map(_apiRcWo);
+      await this._enrichReceptionSeq(workouts);
+      return { workouts, trials: (r.trials||[]).map(_apiRcTr) };
+    }
     const [from, to] = this._dayRange(dateStr);
     const wq = sb().from('workouts')
       .select('*, clients(fio,age), profiles!trainer_id(fio)')
@@ -243,6 +265,7 @@ Object.assign(DB, {
 
   /** Количество pending за день (для бейджа) */
   async getReceptionPendingCount(branch, dateStr) {
+    if (useApi('reception')) return (await api('/reception/counts', { query: { branch, date: dateStr } })).day;
     const [from, to] = this._dayRange(dateStr);
     const wq = sb().from('workouts').select('id',{count:'exact',head:true})
       .eq('branch',branch).eq('reception_status','pending').eq('pending_confirmation',false)
@@ -256,6 +279,12 @@ Object.assign(DB, {
 
   /** Висящие pending за ПРОШЛЫЕ дни (до сегодня): ПТ + пробные */
   async getReceptionOlderPending(branch, todayStr) {
+    if (useApi('reception')) {
+      const r = await api('/reception/pending-older', { query: { branch, before: todayStr } });
+      const workouts = (r.workouts||[]).map(_apiRcWo);
+      await this._enrichReceptionSeq(workouts);
+      return { workouts, trials: (r.trials||[]).map(_apiRcTr) };
+    }
     const before = `${todayStr}T00:00:00+05:00`;
     const wq = sb().from('workouts')
       .select('*, clients(fio,age), profiles!trainer_id(fio)')
@@ -276,6 +305,7 @@ Object.assign(DB, {
 
   /** Кол-во висящих за прошлые дни (для бейджа/баннера) */
   async getReceptionOlderPendingCount(branch, todayStr) {
+    if (useApi('reception')) return (await api('/reception/counts', { query: { branch, date: todayStr } })).older;
     const before = `${todayStr}T00:00:00+05:00`;
     const wq = sb().from('workouts').select('id',{count:'exact',head:true})
       .eq('branch',branch).eq('reception_status','pending').eq('pending_confirmation',false)
@@ -289,6 +319,7 @@ Object.assign(DB, {
 
   /** Подтвердить ПТ */
   async confirmWorkout(id, receptionId) {
+    if (useApi('reception')) { await api('/reception/workouts/'+id+'/confirm', { method:'POST' }); return; }
     const {error} = await sb().from('workouts')
       .update({reception_status:'confirmed', reception_by:receptionId, reception_at:new Date().toISOString()})
       .eq('id',id).eq('reception_status','pending');
@@ -297,6 +328,8 @@ Object.assign(DB, {
 
   /** Отклонить ПТ — статус rejected + откат баланса по типу */
   async rejectWorkout(id, receptionId, reasonCode) {
+    // Бэкенд делает откат баланса (+1 если списывала) и сброс drop_in_used ребёнка.
+    if (useApi('reception')) { await api('/reception/workouts/'+id+'/reject', { method:'POST', body:{ reason_code: reasonCode||null } }); return; }
     const {data:w, error:ge} = await sb().from('workouts')
       .select('id,client_id,is_debt,is_drop_in,reception_status').eq('id',id).single();
     if (ge) throw ge;
@@ -321,6 +354,7 @@ Object.assign(DB, {
 
   /** Подтвердить пробную */
   async confirmTrial(id, receptionId) {
+    if (useApi('reception')) { await api('/reception/trials/'+id+'/confirm', { method:'POST' }); return; }
     const {error} = await sb().from('trial_sessions')
       .update({reception_status:'confirmed', reception_by:receptionId, reception_at:new Date().toISOString()})
       .eq('id',id).eq('reception_status','pending');
@@ -329,6 +363,7 @@ Object.assign(DB, {
 
   /** Отклонить пробную — баланс не трогает */
   async rejectTrial(id, receptionId, reasonCode) {
+    if (useApi('reception')) { await api('/reception/trials/'+id+'/reject', { method:'POST', body:{ reason_code: reasonCode||null } }); return; }
     const {error} = await sb().from('trial_sessions')
       .update({reception_status:'rejected', reception_reason:reasonCode||null,
                reception_by:receptionId, reception_at:new Date().toISOString()})
@@ -338,6 +373,7 @@ Object.assign(DB, {
 
   /** Подтвердить всё за день (ПТ + пробные) */
   async confirmAllReception(branch, dateStr, receptionId) {
+    if (useApi('reception')) { await api('/reception/confirm-all', { method:'POST', body:{ branch, date: dateStr } }); return; }
     const [from, to] = this._dayRange(dateStr);
     const ts = new Date().toISOString();
     const {error:we} = await sb().from('workouts')
@@ -354,6 +390,10 @@ Object.assign(DB, {
 
   /** Отклонённые за период (по дате решения reception_at) */
   async getReceptionRejected(branch, fromDate, toDate) {
+    if (useApi('reception')) {
+      const r = await api('/reception/rejected', { query: { branch: branch || undefined, start: fromDate, end: toDate } });
+      return { workouts: (r.workouts||[]).map(_apiRcWo), trials: (r.trials||[]).map(_apiRcTr) };
+    }
     const from = `${fromDate}T00:00:00+05:00`, to = `${toDate}T23:59:59+05:00`;
     let wq = sb().from('workouts')
       .select('*, clients(fio), profiles!trainer_id(fio)')
@@ -374,6 +414,10 @@ Object.assign(DB, {
 
   /** Подтверждённые за период (вкладка «История») */
   async getReceptionConfirmed(branch, fromDate, toDate) {
+    if (useApi('reception')) {
+      const r = await api('/reception/confirmed', { query: { branch, start: fromDate, end: toDate } });
+      return { workouts: (r.workouts||[]).map(_apiRcWo), trials: (r.trials||[]).map(_apiRcTr) };
+    }
     const from = `${fromDate}T00:00:00+05:00`, to = `${toDate}T23:59:59+05:00`;
     const wq = sb().from('workouts')
       .select('*, clients(fio), profiles!trainer_id(fio)')
@@ -392,6 +436,10 @@ Object.assign(DB, {
 
   /** Все висящие pending филиала (для эскалации в «Контроле» координатора) */
   async getReceptionHanging(branch) {
+    if (useApi('reception')) {
+      const rows = await api('/reception/hanging', { query: { branch: branch || undefined } });
+      return (rows||[]).map(w => ({ ...w, profiles: { fio: w.trainer_fio } }));
+    }
     let wq = sb().from('workouts')
       .select('id,branch,workout_date,trainer_id,profiles!trainer_id(fio)')
       .eq('reception_status','pending').eq('pending_confirmation',false)
@@ -403,6 +451,10 @@ Object.assign(DB, {
 
   /** Статистика подтверждено/отклонено по тренерам за месяц (для «Контроля») */
   async getReceptionStats(branch, year, month) {
+    if (useApi('reception')) {
+      const rows = await api('/reception/stats', { query: { branch: branch || undefined, year, month } });
+      return (rows||[]).map(w => ({ ...w, profiles: { fio: w.trainer_fio } }));
+    }
     const from = new Date(year,month-1,1).toISOString();
     const to   = new Date(year,month,  1).toISOString();
     let q = sb().from('workouts')
