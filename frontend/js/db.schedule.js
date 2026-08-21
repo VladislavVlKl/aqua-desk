@@ -1,8 +1,21 @@
+// Reshape слота: плоские client_*/gt_* → эмбеды clients{}/group_types{}.
+function _apiSlot(s) {
+  if (!s) return s;
+  return { ...s,
+    clients: { fio: s.client_fio, category: s.client_category, balance: s.client_balance,
+               is_archived: s.client_archived, age: s.client_age, drop_in_used: s.client_dropin },
+    group_types: { name: s.gt_name, type: s.gt_type, billing_model: s.gt_billing } };
+}
+
 Object.assign(DB, {
   // ─── SCHEDULE SLOTS ──────────────────────────
 
   /** Повторяющиеся слоты тренера */
   async getRecurringSlots(trainerId) {
+    if (useApi('schedule')) {
+      const rows = (await api('/slots', { query: { trainer_id: trainerId, recurring: 'true' } })).map(_apiSlot);
+      return rows.filter(s=>!(s.client_id && s.clients?.is_archived));
+    }
     const {data,error} = await sb().from('schedule_slots')
       .select('*, clients(fio,category,balance,is_archived), group_types(name,type)')
       .eq('trainer_id',trainerId).eq('active',true)
@@ -15,6 +28,10 @@ Object.assign(DB, {
 
   /** Разовые слоты тренера для конкретной недели */
   async getOneTimeSlots(trainerId, weekStart, weekEnd) {
+    if (useApi('schedule')) {
+      const rows = (await api('/slots', { query: { trainer_id: trainerId, week_start: weekStart, week_end: weekEnd } })).map(_apiSlot);
+      return rows.filter(s=>!(s.client_id && s.clients?.is_archived));
+    }
     const {data,error} = await sb().from('schedule_slots')
       .select('*, clients(fio,category,balance,is_archived), group_types(name,type)')
       .eq('trainer_id',trainerId).eq('active',true)
@@ -29,6 +46,7 @@ Object.assign(DB, {
   /** Отмены повторяющихся слотов за неделю */
   async getCancellations(slotIds, weekStart, weekEnd) {
     if (!slotIds.length) return [];
+    if (useApi('schedule')) return await api('/schedule-cancellations', { query: { slot_ids: slotIds, start: weekStart, end: weekEnd } });
     const {data,error} = await sb().from('schedule_cancellations')
       .select('slot_id,cancel_date')
       .in('slot_id',slotIds)
@@ -39,6 +57,7 @@ Object.assign(DB, {
 
   /** Все активные слоты — для обратной совместимости */
   async getSlots(trainerId) {
+    if (useApi('schedule')) return (await api('/slots', { query: { trainer_id: trainerId, recurring: 'true' } })).map(_apiSlot);
     const {data,error} = await sb().from('schedule_slots')
       .select('*, clients(fio,category,balance), group_types(name,type)')
       .eq('trainer_id',trainerId).eq('active',true)
@@ -48,6 +67,10 @@ Object.assign(DB, {
   },
 
   async getAllActiveSlots() {
+    if (useApi('schedule')) {
+      const rows = await api('/slots/all');
+      return (rows||[]).map(s => ({ ...s, profiles: { fio: s.trainer_fio }, clients: { fio: s.client_fio }, group_types: { name: s.gt_name } }));
+    }
     const {data,error} = await sb().from('schedule_slots')
       .select('*, profiles!trainer_id(fio), clients(fio), group_types(name)')
       .eq('active',true).in('slot_type',['pt','group'])
@@ -56,6 +79,7 @@ Object.assign(DB, {
   },
 
   async addSlot(fields) {
+    if (useApi('schedule')) return await api('/slots', { method:'POST', body: fields });
     // Защита от дублей: тот же тренер/день/время/тип/клиент(группа) уже есть активным — не плодим копию
     let dupQ = sb().from('schedule_slots').select('id')
       .eq('trainer_id', fields.trainer_id)
@@ -75,12 +99,14 @@ Object.assign(DB, {
   },
 
   async deactivateSlot(id) {
+    if (useApi('schedule')) { await api('/slots/'+id+'/deactivate', { method:'POST' }); return; }
     const {error} = await sb().from('schedule_slots').update({active:false}).eq('id',id);
     if (error) throw error;
   },
 
   /** Отменить повторяющийся слот на одну дату */
   async cancelSlotDate(slotId, date, reason='') {
+    if (useApi('schedule')) { await api('/slots/'+slotId+'/cancel', { method:'POST', body:{ date, reason: reason||'' } }); return; }
     const {error} = await sb().from('schedule_cancellations')
       .upsert({slot_id:slotId, cancel_date:date, reason:reason||null},
               {onConflict:'slot_id,cancel_date'});
@@ -89,6 +115,7 @@ Object.assign(DB, {
 
   /** Восстановить отменённый слот */
   async restoreSlotDate(slotId, date) {
+    if (useApi('schedule')) { await api('/slots/'+slotId+'/restore', { method:'POST', body:{ date } }); return; }
     const {error} = await sb().from('schedule_cancellations')
       .delete().eq('slot_id',slotId).eq('cancel_date',date);
     if (error) throw error;
@@ -110,6 +137,10 @@ Object.assign(DB, {
 
   // ─── TODAY / CONFIRMATIONS ───────────────────
   async getTodaySlots(trainerId, dateStr) {
+    if (useApi('schedule')) {
+      // Бэкенд делает всё: recurring(dow)+oneTime+отмены+подтверждения+фильтр архива.
+      return (await api('/slots/today', { query: { trainer_id: trainerId, date: dateStr } })).map(_apiSlot);
+    }
     const dow = (new Date(dateStr+'T12:00:00').getDay()+6) % 7;
 
     // Повторяющиеся слоты на этот день недели
@@ -152,6 +183,7 @@ Object.assign(DB, {
       .map(s=>({...s, confirmation:confMap[s.id]||null}));
   },
   async upsertConfirmation(slotId, date, fields) {
+    if (useApi('schedule')) return await api('/slots/'+slotId+'/confirm', { method:'POST', body:{ date, fields } });
     const {data,error} = await sb().from('schedule_confirmations')
       .upsert({slot_id:slotId,session_date:date,...fields,updated_at:new Date().toISOString()},
               {onConflict:'slot_id,session_date'})
@@ -229,6 +261,10 @@ Object.assign(DB, {
     if (error) throw error; return data;
   },
   async createSubscription(clientId, trainerId, startDate, initialBalance, isWeekend = false) {
+    if (useApi('clients')) {
+      return await api('/clients/'+clientId+'/subscriptions/create', { method:'POST', body:{
+        trainer_id: trainerId, start_date: startDate, initial_balance: initialBalance, is_weekend: !!isWeekend } });
+    }
     await sb().from('subscriptions')
       .update({is_active:false}).eq('client_id',clientId).eq('is_active',true);
     const {data,error} = await sb().from('subscriptions')
@@ -241,6 +277,10 @@ Object.assign(DB, {
 
   /** Создать абонемент для действующего клиента (баланс уже установлен отдельно) */
   async createSubscriptionWithInitial(clientId, trainerId, startDate, initialBalance, currentBalance) {
+    if (useApi('clients')) {
+      return await api('/clients/'+clientId+'/subscriptions/create', { method:'POST', body:{
+        trainer_id: trainerId, start_date: startDate, initial_balance: initialBalance, current_balance: currentBalance } });
+    }
     await sb().from('subscriptions')
       .update({is_active:false}).eq('client_id',clientId).eq('is_active',true);
     const {data,error} = await sb().from('subscriptions')
@@ -345,11 +385,17 @@ Object.assign(DB, {
 
   // ─── SESSION NOTES ───────────────────────────
   async getNoteByWorkout(workoutId) {
+    if (useApi('clients')) return await api('/notes/by-workout', { query: { workout_id: workoutId } });
     const {data,error} = await sb().from('session_notes')
       .select('*').eq('workout_id',workoutId).maybeSingle();
     if (error) throw error; return data;
   },
   async upsertNote(workoutId, clientId, trainerId, subscriptionId, accomplishments, nextTask, sessionNumber) {
+    if (useApi('clients')) {
+      return await api('/notes', { method:'PUT', body:{
+        workout_id: workoutId, client_id: clientId, trainer_id: trainerId, subscription_id: subscriptionId,
+        accomplishments: accomplishments||null, next_task: nextTask||null, session_number: sessionNumber||null } });
+    }
     const deadline = new Date(Date.now()+48*3600000).toISOString();
     const {data,error} = await sb().from('session_notes')
       .upsert({
@@ -363,6 +409,7 @@ Object.assign(DB, {
     if (error) throw error; return data;
   },
   async getOverdueNotes(clientId, trainerId) {
+    if (useApi('clients')) return await api('/notes/overdue', { query: { client_id: clientId, trainer_id: trainerId } });
     const cutoff = new Date(Date.now()-48*3600000).toISOString();
     const {data:workouts} = await sb().from('workouts')
       .select('id,workout_date').eq('client_id',clientId).eq('trainer_id',trainerId)
@@ -378,6 +425,10 @@ Object.assign(DB, {
 
   // Батч-версия: все просроченные конспекты по тренеру за один запрос
   async getOverdueNotesBatch(trainerId) {
+    if (useApi('clients')) {
+      const rows = await api('/notes/overdue-batch', { query: { trainer_id: trainerId } });
+      const map = {}; (rows||[]).forEach(r => { map[r.client_id] = Number(r.count); }); return map;
+    }
     const cutoff = new Date(Date.now()-48*3600000).toISOString();
     const {data:workouts} = await sb().from('workouts')
       .select('id,client_id,workout_date').eq('trainer_id',trainerId)

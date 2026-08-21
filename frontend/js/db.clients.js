@@ -208,6 +208,13 @@ Object.assign(DB, {
   },
   // ─── ПРОБНЫЕ ТРЕНИРОВКИ ──────────────────────
   async addTrialSession(trainerId, branch, firstName, lastName, phone, age, category) {
+    if (useApi('clients')) {
+      return await api('/trials', { method:'POST', body:{
+        trainer_id: trainerId, branch, first_name: firstName.trim(),
+        last_name: lastName?.trim()||null, phone: phone?.trim()||null, age: age||null, category,
+        reception_status: receptionEnabledForBranch(branch) ? 'pending' : 'confirmed',
+      }});
+    }
     const {data,error} = await sb().from('trial_sessions')
       .insert({trainer_id:trainerId, branch, first_name:firstName.trim(),
                last_name:lastName?.trim()||null, phone:phone?.trim()||null,
@@ -217,6 +224,7 @@ Object.assign(DB, {
     if (error) throw error; return data;
   },
   async getTrialSessions(trainerId, year, month) {
+    if (useApi('clients')) return await api('/trials', { query: { trainer_id: trainerId, year, month } });
     const from = new Date(year,month-1,1).toISOString();
     const to   = new Date(year,month,  1).toISOString();
     const {data,error} = await sb().from('trial_sessions')
@@ -226,6 +234,10 @@ Object.assign(DB, {
     if (error) throw error; return data||[];
   },
   async getAllTrialSessions(year, month, branch) {
+    if (useApi('clients')) {
+      const rows = await api('/trials/all', { query: { year, month, branch: branch || undefined } });
+      return (rows||[]).map(t => ({ ...t, profiles: { fio: t.trainer_fio } }));
+    }
     const from = new Date(year,month-1,1).toISOString();
     const to   = new Date(year,month,  1).toISOString();
     let q = sb().from('trial_sessions')
@@ -236,10 +248,12 @@ Object.assign(DB, {
     if (error) throw error; return data||[];
   },
   async deleteTrialSession(id) {
+    if (useApi('clients')) { await api('/trials/'+id+'/delete', { method:'POST' }); return; }
     const {error} = await sb().from('trial_sessions').delete().eq('id',id);
     if (error) throw error;
   },
   async updateTrialSession(id, fields) {
+    if (useApi('clients')) { await api('/trials/'+id+'/update', { method:'POST', body: fields }); return; }
     const {error} = await sb().from('trial_sessions').update(fields).eq('id',id);
     if (error) throw error;
   },

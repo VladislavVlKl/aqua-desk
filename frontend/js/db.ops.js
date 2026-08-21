@@ -11,10 +11,16 @@ Object.assign(DB, {
     if (error) throw error; return data||[];
   },
   async toggleRule(id, active) {
+    if (useApi('notifications')) { await api('/notifications/rules/'+id+'/toggle', { method:'POST', body:{ active } }); return; }
     const {error} = await sb().from('notification_rules').update({active}).eq('id',id);
     if (error) throw error;
   },
   async queueBroadcast(profiles, message, scheduledFor, createdBy) {
+    if (useApi('notifications')) {
+      const r = await api('/notifications/broadcast', { method:'POST', body:{
+        profiles: profiles.map(p=>({ tg_id: p.tg_id, fio: p.fio })), message, scheduled_for: scheduledFor||null, created_by: createdBy } });
+      return r.queued;
+    }
     const rows = profiles.map(p=>({
       recipient_tg_id: p.tg_id,
       recipient_name:  p.fio,
@@ -498,6 +504,7 @@ Object.assign(DB, {
 
   /** Получатели-ресепшн филиала */
   async getReceptionProfiles(branch) {
+    if (useApi('notifications')) return await api('/notifications/reception-profiles', { query: { branch } });
     let q = sb().from('profiles').select('id,tg_id,fio')
       .eq('role','reception').eq('is_archived',false);
     if (branch) q = q.contains('branches',[branch]);
@@ -507,6 +514,10 @@ Object.assign(DB, {
 
   /** Уведомление «конец дня» ресепшену (дедуп по rule_key за сутки) */
   async queueReceptionEodOnce(branch, dateStr, count, createdBy) {
+    if (useApi('notifications')) {
+      const r = await api('/notifications/reception-eod', { method:'POST', body:{ branch, date: dateStr, count, created_by: createdBy||null } });
+      return r.queued;
+    }
     const ruleKey = `reception_eod:${branch}:${dateStr}`;
     const {data:exists} = await sb().from('notifications_queue')
       .select('id').eq('rule_key',ruleKey).limit(1);
@@ -537,6 +548,10 @@ Object.assign(DB, {
   // Fire-and-forget: ошибка не должна валить основную операцию.
   async enqueueTrainerNotification(trainerId, message, ruleKey) {
     try {
+      if (useApi('notifications')) {
+        await api('/notifications/enqueue', { method:'POST', body:{ trainer_id: trainerId, message, rule_key: ruleKey || 'system' } });
+        return;
+      }
       const {data:tr} = await sb().from('profiles').select('tg_id,fio').eq('id',trainerId).maybeSingle();
       if (!tr?.tg_id) return;
       await sb().from('notifications_queue').insert({
