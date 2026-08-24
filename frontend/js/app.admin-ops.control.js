@@ -185,19 +185,18 @@ async function renderAdminMonitoring(force=false) {
     const cacheKey=`adm_monitor_${y}_${mo}`;
     if (force) invalidateCache(cacheKey);
     const D = await cached(cacheKey, async () => {
-      const from=new Date(y,mo-1,1).toISOString(),to=new Date(y,mo,1).toISOString();
-      const [data, activeRes, activityStats, allTrials, sessions, recStats] = await Promise.all([
+      const [data, activityStats, allTrials, sessions, recStats] = await Promise.all([
         DB.getControlData(),
-        sb().from('workouts').select('trainer_id').gte('workout_date',from).lt('workout_date',to),
         DB.getTrainersActivityStats(y, mo).catch(()=>[]),
         DB.getAllTrialSessions(y, mo, null).catch(()=>[]),
         DB.getRecentSessions(30).catch(()=>[]),
         DB.getReceptionStats(branches, y, mo).catch(()=>[]),
       ]);
-      return {data, activeRes, activityStats, allTrials, sessions, recStats};
+      return {data, activityStats, allTrials, sessions, recStats};
     }, 60000);
-    const {data, activeRes, activityStats, allTrials, sessions, recStats} = D;
-    const activeSet=new Set((activeRes?.data||[]).map(x=>x.trainer_id));
+    const {data, activityStats, allTrials, sessions, recStats} = D;
+    // Активный тренер = есть тренировки в текущем месяце (берём из activityStats.monthWorkouts).
+    const activeSet=new Set((activityStats||[]).filter(t=>t.monthWorkouts>0).map(t=>t.id));
     const inactive=data.inactiveTrainers.filter(t=>!activeSet.has(t.id));
     const sections=[];
     if (data.expiringClients.length) sections.push(`<div class="control-section">

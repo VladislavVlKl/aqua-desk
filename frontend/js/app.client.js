@@ -528,10 +528,7 @@ async function doExportBranchChildGroups(monthStr, branches) {
   try {
     const branch = branches[0];
     // Все детские группы по филиалу — уникальные инстансы (убираем дубли по group_instance_id)
-    const {data:tgs, error:tgsErr} = await sb().from('trainer_groups')
-      .select('id, group_instance_id, group_types(name,type), profiles(fio)')
-      .eq('branch', branch).is('subscription_end', null);
-    if (tgsErr) throw tgsErr;
+    const tgs = await DB.getActiveGroupsByBranch(branch);
 
     const childGroups = (tgs||[]).filter(tg=>tg.group_types?.type==='children');
     if (!childGroups.length) { toast('Нет детских групп в этом филиале','error'); return; }
