@@ -545,4 +545,16 @@ async deleteClient(id) {
     const {error} = await sb().from('duties').delete().eq('id',id);
     if (error) throw error;
   },
+  // Ручное внесение дежурства с явными временами (в отличие от start/stop).
+  async addDuty(trainerId, branch, startIso, endIso) {
+    if (useApi('schedule')) return await api('/duties/manual', { method:'POST', body:{ trainer_id: trainerId, branch, start: startIso, end: endIso } });
+    const {data,error} = await sb().from('duties')
+      .insert({ trainer_id: trainerId, branch, start_time: startIso, end_time: endIso }).select().single();
+    if (error) throw error; return data;
+  },
+  async updateDuty(id, startIso, endIso) {
+    if (useApi('schedule')) return await api('/duties/'+id+'/update', { method:'POST', body:{ start: startIso, end: endIso } });
+    const {error} = await sb().from('duties').update({ start_time: startIso, end_time: endIso }).eq('id',id);
+    if (error) throw error;
+  },
 });

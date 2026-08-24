@@ -570,13 +570,9 @@ async function _loadAdultSessions(tgInfo, monthStr) {
   const [mYear, mMonth] = monthStr.split('-').map(Number);
   const toDay = new Date(mYear, mMonth, 1).toISOString().slice(0,10);
   const isAdminView = ['admin','ceo','senior_trainer'].includes(STATE.profile.role);
-  let q = sb().from('group_sessions').select('*, profiles(fio)')
-    .eq('group_type_id', tgInfo?.group_type_id||0)
-    .eq('branch', tgInfo?.branch||'')
-    .gte('session_date',monthStr).lt('session_date',toDay)
-    .order('session_date',{ascending:false});
-  if (!isAdminView) q = q.eq('trainer_id', STATE.profile.id);
-  return q.then(r=>r.data||[]);
+  return DB.getAdultGroupSessions(
+    tgInfo?.group_type_id||0, tgInfo?.branch||'', monthStr, toDay,
+    isAdminView ? null : STATE.profile.id);
 }
 
 // ═══ ХАБ ВЗРОСЛОЙ ГРУППЫ (Акваджим / Аквафитнес) ═══
@@ -942,7 +938,7 @@ async function doEditGroupSession(sessionId, groupId) {
   const headcount = parseInt(document.getElementById('egs-count')?.value||0);
   if (!date || !headcount) return toast('Заполните поля','error');
   try {
-    await sb().from('group_sessions').update({session_date:date, headcount}).eq('id',sessionId);
+    await DB.updateGroupSession(sessionId, date, headcount);
     document.querySelector('.modal-overlay')?.remove();
     toast('✅ Обновлено','success');
     renderAdultGroupHistory(groupId);
@@ -951,7 +947,7 @@ async function doEditGroupSession(sessionId, groupId) {
 async function doDeleteGroupSession(sessionId, groupId) {
   if (!confirm('Удалить занятие?')) return;
   try {
-    await sb().from('group_sessions').delete().eq('id',sessionId);
+    await DB.deleteGroupSession(sessionId);
     toast('Удалено','success');
     renderAdultGroupHistory(groupId);
   } catch(e) { toast('Ошибка','error'); console.error(e); }

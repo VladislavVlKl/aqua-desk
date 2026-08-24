@@ -228,11 +228,7 @@ async function doLogDutyHome() {
   const h = hoursFromDuty(new Date(start),new Date(end));
   if (h>16) return toast('Не более 16 часов','error');
   try {
-    await sb().from('duties').insert({
-      trainer_id:STATE.profile.id,branch,
-      start_time: new Date(start).toISOString(),
-end_time:   new Date(end).toISOString(),
-    });
+    await DB.addDuty(STATE.profile.id, branch, new Date(start).toISOString(), new Date(end).toISOString());
     toast(`✅ ${h.toFixed(1)}ч = ${fmt(Math.round(h*RATES.duty_per_hour))} сум`,'success');
     renderHomeTab();
   } catch(e) { toast('Ошибка','error'); console.error(e); }

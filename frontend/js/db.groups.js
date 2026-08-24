@@ -686,6 +686,34 @@ async unassignTrainerGroup(id) {
       .select().single();
     if (error) throw error; return data;
   },
+  // Занятия взрослой группы за месяц по типу+филиалу (+profiles(fio)). trainerId!=null →
+  // только свои (для тренерского вида); null → все (admin/ceo/senior).
+  async getAdultGroupSessions(groupTypeId, branch, from, to, trainerId=null) {
+    if (useApi('groups')) {
+      const rows = await api('/group-sessions/adult', { query: {
+        group_type_id: groupTypeId, branch, from, to, trainer_id: trainerId||undefined } });
+      return (rows||[]).map(r => ({ ...r, profiles: { fio: r.trainer_fio } }));
+    }
+    let q = sb().from('group_sessions').select('*, profiles(fio)')
+      .eq('group_type_id', groupTypeId).eq('branch', branch)
+      .gte('session_date', from).lt('session_date', to)
+      .order('session_date',{ascending:false});
+    if (trainerId) q = q.eq('trainer_id', trainerId);
+    const {data,error} = await q;
+    if (error) throw error; return data||[];
+  },
+  async updateGroupSession(id, sessionDate, headcount) {
+    invalidateCachePrefix('grp:');
+    if (useApi('groups')) return await api('/group-sessions/'+id+'/update', { method:'POST', body:{ session_date: sessionDate, headcount } });
+    const {error} = await sb().from('group_sessions').update({ session_date: sessionDate, headcount }).eq('id',id);
+    if (error) throw error;
+  },
+  async deleteGroupSession(id) {
+    invalidateCachePrefix('grp:');
+    if (useApi('groups')) { await api('/group-sessions/'+id+'/delete', { method:'POST' }); return; }
+    const {error} = await sb().from('group_sessions').delete().eq('id',id);
+    if (error) throw error;
+  },
   async getGroupSessions(trainerId, year, month) {
     if (useApi('groups')) {
       // Бэкенд флэтит group_name/kind/billing_model → тот же reshape, что у trainer-groups.

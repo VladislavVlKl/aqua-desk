@@ -573,11 +573,7 @@ async function doLogDuty() {
   const h=hoursFromDuty(new Date(start),new Date(end));
   if (h>16) return toast('Не более 16 часов','error');
   try {
-    await sb().from('duties').insert({
-      trainer_id:STATE.profile.id,branch,
-      start_time:new Date(start).toISOString(),
-      end_time:new Date(end).toISOString(),
-    });
+    await DB.addDuty(STATE.profile.id, branch, new Date(start).toISOString(), new Date(end).toISOString());
     toast(`✅ ${h.toFixed(1)}ч = ${fmt(Math.round(h*RATES.duty_per_hour))} сум`,'success');
     renderDutyTab();
   } catch(e) { toast('Ошибка','error'); console.error(e); }
@@ -769,10 +765,7 @@ async function doEditDuty(dutyId) {
   const h = hoursFromDuty(new Date(start),new Date(end));
   if (h>16) return toast('Не более 16 часов','error');
   try {
-    await sb().from('duties').update({
-      start_time:new Date(start).toISOString(),
-      end_time:new Date(end).toISOString(),
-    }).eq('id',dutyId);
+    await DB.updateDuty(dutyId, new Date(start).toISOString(), new Date(end).toISOString());
     document.querySelector('.modal-overlay')?.remove();
     toast(`✅ ${h.toFixed(1)}ч сохранено`,'success');
     renderDutyTab();
