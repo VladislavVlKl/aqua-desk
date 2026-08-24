@@ -780,18 +780,16 @@ function _childStatusOf(c) {
   if (c.is_active===false) return 'left';
   return g.statusMap?.[c.id]?.status || 'debt';
 }
-// 4 плитки-счётчика на хабе группы; тап → «Список детей» с этим фильтром
+// 3 плитки-счётчика на хабе группы; тап → «Список детей» с этим фильтром.
+// «Ушли» намеренно не показываем в общем окне — они в «📦 Архив».
 function groupStatusTilesHtml(counts, groupId) {
-  const defs = [
-    ['paid','Оплатили','этот месяц'], ['carry','Оплатили','в том месяце'],
-    ['debt','Без оплаты',''], ['left','Ушли',''],
-  ];
-  return `<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:14px">
-    ${defs.map(([k,l1,l2])=>{ const m=GROUP_STATUS_META[k];
+  const defs = [ ['paid','Оплатили'], ['carry','В том мес.'], ['debt','Без оплаты'] ];
+  return `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px">
+    ${defs.map(([k,lbl])=>{ const m=GROUP_STATUS_META[k];
       return `<button onclick="renderGroupChildrenScreen('${groupId}','${k}')"
-        style="border:1px solid var(--border);background:${m.tile};border-radius:11px;padding:9px 11px;text-align:left;cursor:pointer">
+        style="border:1px solid var(--border);background:${m.tile};border-radius:11px;padding:9px 8px;text-align:left;cursor:pointer">
         <div style="font-size:21px;font-weight:600;color:${m.color};line-height:1">${counts[k]||0}</div>
-        <div style="font-size:11px;color:${m.color};margin-top:3px">${l1}${l2?` · ${l2}`:''}</div>
+        <div style="font-size:11px;color:${m.color};margin-top:3px">${lbl}</div>
       </button>`; }).join('')}
   </div>`;
 }
@@ -815,8 +813,9 @@ function _childCardHtml(c) {
 }
 
 function _childFilterChipsHtml(counts, active) {
-  const defs = ['paid','carry','debt','left'].map(k=>[k, counts[k]||0, GROUP_STATUS_META[k]]);
-  return `<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px">
+  // «Ушли» не показываем в общем списке — они доступны через «📦 Архив»
+  const defs = ['paid','carry','debt'].map(k=>[k, counts[k]||0, GROUP_STATUS_META[k]]);
+  return `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px">
     ${defs.map(([k,v,m])=>`<button onclick="setChildFilter('${k}')"
       style="border:1px solid ${active===k?m.color:'var(--border)'};background:${m.tile};border-radius:10px;padding:7px 4px;text-align:center;cursor:pointer">
       <div style="font-size:16px;font-weight:600;color:${m.color};line-height:1">${v}</div>
