@@ -430,5 +430,48 @@ async function enterApp() {
     else if (STATE.profile.role==='reception')      renderReceptionApp();
     else if (STATE.profile.role==='manager')        renderManagerApp();
     else                                            renderTrainerApp();
+    setTimeout(maybeShowUpdateModal, 500);   // анонс «Что нового» после отрисовки панели
   });
+}
+
+// ─── МОДАЛКА «ЧТО НОВОГО» (config.js → APP_UPDATE) ───────────────────
+// Показывается один раз каждому при первом заходе после смены APP_UPDATE.id.
+// Отметка «видел» — в Telegram CloudStorage (кросс-устройство) + localStorage (браузер).
+async function _updateSeenGet(key) {
+  const cs = window.Telegram?.WebApp?.CloudStorage;
+  if (cs?.getItem) {
+    const v = await new Promise(res=>{ try{ cs.getItem(key,(e,val)=>res(e?null:(val||null))); }catch(_){ res(null); } });
+    if (v!=null && v!=='') return v;
+  }
+  try { return localStorage.getItem(key); } catch(_){ return null; }
+}
+function _updateSeenSet(key, val) {
+  try { localStorage.setItem(key, val); } catch(_){}
+  const cs = window.Telegram?.WebApp?.CloudStorage;
+  if (cs?.setItem) { try{ cs.setItem(key, val, ()=>{}); }catch(_){} }
+}
+async function maybeShowUpdateModal() {
+  try {
+    const u = (typeof APP_UPDATE!=='undefined') ? APP_UPDATE : null;
+    if (!u || !u.id || !(u.items||[]).length) return;
+    const role = STATE?.profile?.role;
+    if (Array.isArray(u.roles) && u.roles.length && !u.roles.includes(role)) return;
+    // не наслаиваемся на туториал/другую модалку
+    if (document.querySelector('.modal-overlay') || document.querySelector('.tutorial-overlay')) return;
+    const KEY = 'aq_update_seen';
+    if (await _updateSeenGet(KEY) === u.id) return;
+    _showUpdateModal(u, ()=>_updateSeenSet(KEY, u.id));
+  } catch(e) { console.warn('[update-modal]', e?.message||e); }
+}
+function _showUpdateModal(u, onClose) {
+  const m = el('div','modal-overlay');
+  m.innerHTML = `<div class="modal">
+    <div class="modal-header"><h3>🆕 ${u.title||'Что нового'}</h3></div>
+    <div style="display:flex;flex-direction:column;gap:10px;margin:8px 0 16px">
+      ${(u.items||[]).map(it=>`<div style="font-size:14px;line-height:1.5">${it}</div>`).join('')}
+    </div>
+    <button class="btn btn-primary btn-full" id="upd-ok">Понятно</button>
+  </div>`;
+  document.body.appendChild(m);
+  m.querySelector('#upd-ok')?.addEventListener('click', () => { try{ onClose&&onClose(); }finally{ m.remove(); } });
 }
