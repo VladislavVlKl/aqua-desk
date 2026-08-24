@@ -57,18 +57,15 @@ async function renderGroupsStructure() {
   </div>`;
   try {
     const DOW = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
-    const [branches, tgsRes, slotsRes] = await Promise.all([
+    const [branches, tgsRes, allSlots] = await Promise.all([
       cached('branches', ()=>DB.getBranches()),
       sb().from('trainer_groups')
         .select('trainer_id, group_type_id, branch, role, group_types(name,type), profiles(fio)')
         .is('subscription_end', null).order('branch'),
-      sb().from('schedule_slots')
-        .select('trainer_id, group_type_id, branch, day_of_week, start_time')
-        .eq('active', true).eq('slot_type','group').is('specific_date',null)
-        .order('day_of_week').order('start_time'),
+      DB.getAllActiveSlots(),
     ]);
     const tgs   = tgsRes.data  || [];
-    const slots = slotsRes.data || [];
+    const slots = (allSlots||[]).filter(s => s.slot_type==='group' && !s.specific_date);
 
     // slotMap: "group_type_id|branch|trainer_id" → ["Пн 09:00", ...]
     // Но тренеры у одной группы в одном филиале могут иметь разное время (суша/вода)
@@ -912,9 +909,7 @@ async function doSaveLeaderFee(groupId, remove=false) {
   const name = remove ? null : document.getElementById('lf-name')?.value.trim()||null;
   const pct  = remove ? 0   : parseInt(document.getElementById('lf-pct')?.value)||0;
   try {
-    await sb().from('trainer_groups')
-      .update({leader_name: name, leader_fee_percent: pct})
-      .eq('id', groupId);
+    await DB.updateTrainerGroupLeader(groupId, name, pct);
     document.querySelector('.modal-overlay')?.remove();
     toast(remove?'Руководитель удалён':'Сохранено ✅','success');
     // Перезагрузить текущий отчёт

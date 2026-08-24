@@ -88,6 +88,28 @@ Object.assign(DB, {
     const {error} = await sb().from('tech_bills').update(fields).eq('id',id);
     if (error) throw error;
   },
+  async deleteTechBill(id) {
+    if (useApi('tech')) { await api('/ops/tech-bills/'+id+'/delete', { method:'POST' }); return; }
+    const {error} = await sb().from('tech_bills').delete().eq('id',id);
+    if (error) throw error;
+  },
+  async getChlorineOrders(branch) {
+    if (useApi('tech')) return await api('/ops/chlorine', { query: { branch: branch || undefined } });
+    let q = sb().from('chlorine_orders').select('*').order('order_date',{ascending:false});
+    if (branch) q = q.eq('branch', branch);
+    const {data,error} = await q;
+    if (error) throw error; return data||[];
+  },
+  async addChlorineOrder(fields) {
+    if (useApi('tech')) return await api('/ops/chlorine', { method:'POST', body: fields });
+    const {data,error} = await sb().from('chlorine_orders').insert(fields).select().single();
+    if (error) throw error; return data;
+  },
+  async deleteChlorineOrder(id) {
+    if (useApi('tech')) { await api('/ops/chlorine/'+id+'/delete', { method:'POST' }); return; }
+    const {error} = await sb().from('chlorine_orders').delete().eq('id',id);
+    if (error) throw error;
+  },
   async getDutiesForSchedule(branch, from, to) {
     if (useApi('schedule')) {
       const rows = await api('/duties/schedule', { query: { branch, from, to } });

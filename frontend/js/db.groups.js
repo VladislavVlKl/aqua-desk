@@ -818,7 +818,7 @@ async unassignTrainerGroup(id) {
       return (rows || []).map(_apiTgMember);
     }
     const {data,error} = await sb().from('trainer_groups')
-      .select('id, group_type_id, branch, group_instance_id, role, profiles(fio), group_types(name,type)')
+      .select('id, group_type_id, branch, group_instance_id, role, days_of_week, session_time, profiles(fio), group_types(name,type)')
       .eq('branch', branch).is('subscription_end',null)
       .order('group_type_id');
     if (error) throw error; return data||[];

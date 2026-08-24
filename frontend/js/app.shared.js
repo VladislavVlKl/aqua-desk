@@ -393,13 +393,10 @@ async function renderLinkGroupInstanceModal(groupId) {
     .eq('id',groupId).single();
   if (!thisGroup) return toast('Ошибка','error');
 
-  const {data:candidates} = await sb().from('trainer_groups')
-    .select('id,group_instance_id,days_of_week,session_time,profiles(fio)')
-    .eq('group_type_id', thisGroup.group_type_id)
-    .eq('branch', thisGroup.branch)
-    .is('subscription_end',null)
-    .neq('id', groupId)
-    .neq('group_instance_id', thisGroup.group_instance_id);
+  const candidates = (await DB.getActiveGroupsByBranch(thisGroup.branch)).filter(c =>
+    c.group_type_id === thisGroup.group_type_id &&
+    c.id !== groupId &&
+    c.group_instance_id !== thisGroup.group_instance_id);
 
   const groups = [];
   const seen = new Set();

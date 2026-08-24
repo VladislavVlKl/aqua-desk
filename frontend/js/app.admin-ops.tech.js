@@ -195,7 +195,7 @@ async function toggleBillPaid(id, currentPaid) {
 }
 async function deleteTechBill(id) {
   if (!confirm('Удалить счёт?')) return;
-  try { await sb().from('tech_bills').delete().eq('id',id); toast('Удалено','success'); techLoadSection(_techBranch, true); }
+  try { await DB.deleteTechBill(id); toast('Удалено','success'); techLoadSection(_techBranch, true); }
   catch(e) { console.error(e); toast('Ошибка','error'); }
 }
 
@@ -262,9 +262,7 @@ async function resolveIssue(id) {
 // SECTION: ADMIN:TECH — Хлор
 // ============================================================
 async function techRenderChlorine(body, branch, editable) {
-  let q = sb().from('chlorine_orders').select('*').order('order_date',{ascending:false});
-  if (branch) q = q.eq('branch',branch);
-  const {data:orders} = await q;
+  const orders = await DB.getChlorineOrders(branch);
   const list     = orders||[];
   const totalKg  = list.reduce((s,o)=>s+Number(o.quantity_kg),0);
   const totalSum = list.reduce((s,o)=>s+Number(o.price_total),0);
@@ -320,13 +318,13 @@ async function doAddChlorine() {
   if (!branch) return toast('Выберите филиал','error');
   if (!qty||!sum) return toast('Укажите количество и сумму','error');
   try {
-    await sb().from('chlorine_orders').insert({branch,order_date:date,quantity_kg:qty,price_total:sum,supplier:sup,note});
+    await DB.addChlorineOrder({branch,order_date:date,quantity_kg:qty,price_total:sum,supplier:sup,note});
     document.querySelector('.modal-overlay')?.remove();
     toast('✅ Добавлено','success'); techLoadSection(branch, true);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 async function deleteChlorineOrder(id) {
   if (!confirm('Удалить запись?')) return;
-  try { await sb().from('chlorine_orders').delete().eq('id',id); toast('Удалено','success'); techLoadSection(_techBranch, true); }
+  try { await DB.deleteChlorineOrder(id); toast('Удалено','success'); techLoadSection(_techBranch, true); }
   catch(e) { console.error(e); toast('Ошибка','error'); }
 }

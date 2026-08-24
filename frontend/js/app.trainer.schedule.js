@@ -781,7 +781,7 @@ async function doEditDuty(dutyId) {
 async function doDeleteDuty(dutyId) {
   if (!confirm('Удалить дежурство?')) return;
   try {
-    await sb().from('duties').delete().eq('id',dutyId);
+    await DB.deleteDuty(dutyId);
     toast('Удалено','success'); renderDutyTab();
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }

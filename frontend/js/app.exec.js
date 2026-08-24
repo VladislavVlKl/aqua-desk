@@ -895,10 +895,7 @@ async function renderManagerGroups(year, month) {
   document.getElementById('next-mg')?.addEventListener('click',()=>{let y=year,m=month+1;if(m>12){y++;m=1;}renderManagerGroups(y,m);});
   const body = document.getElementById('mg-body');
   try {
-    // Чтение с расписанием (getActiveGroupsByBranch не отдаёт days/time) — только select.
-    const { data: rows } = await sb().from('trainer_groups')
-      .select('id, group_type_id, group_instance_id, role, days_of_week, session_time, profiles(fio), group_types(name,type)')
-      .eq('branch', branch).is('subscription_end', null).order('group_type_id');
+    const rows = await DB.getActiveGroupsByBranch(branch);
     const byInst = {};
     (rows||[]).forEach(r=>{ const key = r.group_instance_id || ('g'+r.id); (byInst[key]=byInst[key]||[]).push(r); });
     const groups = Object.values(byInst);

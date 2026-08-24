@@ -219,8 +219,8 @@ async function adminDetail(trainerId,fioEnc,year,month) {
   $('#tab-content').innerHTML=`<div class="tab-pad"><h3>${fio}</h3><div class="center-screen"><div class="spinner"></div></div></div>`;
   try {
     const d=await DB.getTrainerDetail(trainerId,year,month);
-    const {data:prof}=await sb().from('profiles').select('branches').eq('id',trainerId).single();
-    const trainerBranches=prof?.branches||[];
+    // Экран открывается только для активных тренеров из сводки → find по общему списку.
+    const trainerBranches=(await DB.getAllProfiles()).find(p=>p.id===trainerId)?.branches||[];
     const sal=calcSalary({...d,trainerId});
     $('#tab-content').innerHTML=`<div class="tab-pad">
       <div class="section-header">

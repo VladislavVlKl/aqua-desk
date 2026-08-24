@@ -39,9 +39,7 @@ async function loadExtraBranchGroups() {
     div.style.cssText = 'padding:0 16px 16px';
     div.innerHTML = `<h4 style="margin-bottom:8px">Дополнительные филиалы</h4>`;
     for (const branch of extraBranches) {
-      const {data:tgs} = await sb().from('trainer_groups')
-        .select('*, group_types(name,type), profiles(fio)')
-        .eq('branch',branch).is('subscription_end',null);
+      const tgs = await DB.getActiveGroupsByBranch(branch);
       const monthStr = new Date().toISOString().slice(0,7)+'-01';
       div.innerHTML += `<div style="margin-bottom:12px">
         <div style="font-weight:600;font-size:13px;color:var(--hint);margin-bottom:6px">${branch}</div>
