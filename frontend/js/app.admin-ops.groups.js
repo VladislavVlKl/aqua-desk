@@ -595,9 +595,16 @@ async function renderGroupMonthReport(groupId, monthStr, view='full') {
     const {clients, payments, notes, attendance, payouts, trainers, instanceSessions, substitutions, groupTypeInfo} = report;
 
     const payMap  = Object.fromEntries(payments.map(p=>[p.group_client_id, p]));
-    // Статус «оплачено»/должник — по ПЕРИОДУ абонемента (не сбрасывается 1-го числа).
-    // Деньги/ЗП/выручка ниже остаются на строках месяца оплаты (payMap/payments).
-    const activePayMap = await DB.getActiveGroupPaymentsMap(groupId, monthStr);
+    // 4-статусная карта (docs/group-payment-status-4state.md). Деньги/ЗП/выручка ниже
+    // остаются на строках месяца оплаты (payMap/payments) — статус их не трогает.
+    const _rptInstanceId = report.trainers?.[0]?.group_instance_id || null;
+    const [statusMap, rptArchived] = await Promise.all([
+      DB.getGroupStatusMap(groupId, monthStr, _rptInstanceId, todayStr()),
+      _rptInstanceId ? DB.getArchivedGroupClientsByInstance(_rptInstanceId) : DB.getArchivedGroupClients(groupId),
+    ]);
+    const statusOf = c => statusMap[c.id]?.status || 'debt';
+    const activePayMap = Object.fromEntries(Object.entries(statusMap).map(([k,v])=>[k, v.pay]));
+    const sCounts = DB.groupStatusCounts(clients.filter(c=>c.is_active), (rptArchived||[]).length, statusMap);
     const noteMap = Object.fromEntries(notes.map(n=>[n.group_client_id, n]));
 
     // Уникальные даты занятий в месяце
@@ -660,12 +667,16 @@ async function renderGroupMonthReport(groupId, monthStr, view='full') {
       </div>
 
       ${showChildren?`
-      <!-- Сводка -->
+      <!-- Сводка: 4 статуса (docs/group-payment-status-4state.md) -->
+      <div class="summary-cards" style="margin-bottom:8px">
+        <div class="summary-card"><div class="s-val" style="color:#10b981">${sCounts.paid}</div><div class="s-lbl">Оплатили</div></div>
+        <div class="summary-card"><div class="s-val" style="color:#f59e0b">${sCounts.carry}</div><div class="s-lbl">В том мес.</div></div>
+        <div class="summary-card"><div class="s-val" style="color:${sCounts.debt?'#ef4444':'#10b981'}">${sCounts.debt}</div><div class="s-lbl">Без оплаты</div></div>
+        <div class="summary-card"><div class="s-val" style="color:var(--hint)">${sCounts.left}</div><div class="s-lbl">Ушли</div></div>
+      </div>
       <div class="summary-cards" style="margin-bottom:16px">
-        <div class="summary-card"><div class="s-val">${clients.filter(c=>c.is_active).length}</div><div class="s-lbl">Детей</div></div>
-        <div class="summary-card"><div class="s-val">${clients.filter(c=>c.is_active&&activePayMap[c.id]).length}</div><div class="s-lbl">Оплатили</div></div>
-        <div class="summary-card"><div class="s-val" style="color:${debtors.length?'#ef4444':'#10b981'}">${debtors.length}</div><div class="s-lbl">Должники</div></div>
         <div class="summary-card"><div class="s-val">${totalSessions}</div><div class="s-lbl">Занятий</div></div>
+        <div class="summary-card"><div class="s-val">${sCounts.paid+sCounts.carry}</div><div class="s-lbl">Оплачено сейчас</div></div>
         <div class="summary-card accent"><div class="s-val">${fmt(totalPaid)}</div><div class="s-lbl">Сумма оплат</div></div>
       </div>
 
@@ -709,6 +720,7 @@ async function renderGroupMonthReport(groupId, monthStr, view='full') {
         <table class="admin-table" style="font-size:12px;min-width:320px">
           <thead><tr>
             <th style="text-align:left">Ребёнок</th>
+            <th>Статус</th>
             <th>Оплата</th>
             <th>Абонемент</th>
             <th>Явка</th>
@@ -716,19 +728,23 @@ async function renderGroupMonthReport(groupId, monthStr, view='full') {
           </tr></thead>
           <tbody>
             ${(()=>{
+              const stMeta = {paid:['Оплатил','#10b981'], carry:['В том мес.','#f59e0b'], debt:['Без оплаты','#ef4444']};
               const active = clients.filter(c=>c.is_active);
               const rowHtml = c=>{
                 const pay = activePayMap[c.id];
                 const note = noteMap[c.id];
                 const att = attByClient[c.id]||0;
-                const paid = !!pay;
-                const debtAlert = !paid && att > 2;
-                return `<tr class="${paid?'gmr-row-paid':'gmr-row-debtor'}"${debtAlert?' style="background:rgba(239,68,68,.06)"':''}>
+                const st = statusOf(c);
+                const [stLabel, stColor] = stMeta[st]||stMeta.debt;
+                const paidThisMonth = st==='paid';
+                const debtAlert = st==='debt' && att > 2;
+                return `<tr class="${st!=='debt'?'gmr-row-paid':'gmr-row-debtor'}"${debtAlert?' style="background:rgba(239,68,68,.06)"':''}>
                   <td style="font-weight:500">
                     ${debtAlert?'<span title="Ходит без оплаты" style="color:#ef4444;margin-right:4px">⚠️</span>':''}
                     ${c.name}${c.age?`, ${c.age}л`:''}
                   </td>
-                  <td style="color:${paid?'#10b981':'#ef4444'}">${paid?fmt(pay?.amount||0)+' ✓':'—'}</td>
+                  <td><span style="font-size:11px;color:${stColor}">${stLabel}</span></td>
+                  <td style="color:${paidThisMonth?'#10b981':'#ef4444'}">${paidThisMonth?fmt(pay?.amount||0)+' ✓':'—'}</td>
                   <td style="font-size:11px;color:var(--hint)">${pay?.sub_start?fmtDate(pay.sub_start)+(pay.sub_end?' – '+fmtDate(pay.sub_end):''):'—'}</td>
                   <td style="color:${debtAlert?'#ef4444':''};font-weight:${debtAlert?'600':''}">${att}/${totalSessions}</td>
                   <td style="font-size:11px;color:var(--hint);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${note?.note||'—'}</td>
@@ -741,7 +757,7 @@ async function renderGroupMonthReport(groupId, monthStr, view='full') {
                 .filter(s=>active.some(c=>(c.subgroup||'')===s))
                 .map(s=>{
                   const subHasDebtor = active.some(c=>(c.subgroup||'')===s && !activePayMap[c.id]);
-                  return `<tr class="gmr-subhead${subHasDebtor?'':' gmr-subhead-nodebt'}"><td colspan="5" style="font-weight:700;font-size:12px;background:rgba(124,58,237,.08);padding:6px 8px">${subLabel(s)}</td></tr>`
+                  return `<tr class="gmr-subhead${subHasDebtor?'':' gmr-subhead-nodebt'}"><td colspan="6" style="font-weight:700;font-size:12px;background:rgba(124,58,237,.08);padding:6px 8px">${subLabel(s)}</td></tr>`
                     + active.filter(c=>(c.subgroup||'')===s).map(rowHtml).join('');
                 }).join('');
             })()}
@@ -977,8 +993,11 @@ async function doExportGroupPayroll(groupId, monthStr) {
 // Конец ГРУППОВОГО абонемента = ровно 30 дней с начала включительно (купил 2.06 → закрывается 1.07).
 // Не путать с calcSubEnd(start, qty) из config.js — та для пакетов ПТ.
 function calcGroupSubEnd(startStr) {
+  // Один календарный месяц: тот же день следующего месяца (7 июля → 7 августа).
+  // Край месяца клампится: 31 янв → 28/29 фев, 31 мар → 30 апр.
   const [y,m,d] = startStr.split('-').map(Number);
-  const end = new Date(y, m-1, d + 29);
+  const end = new Date(y, m, d);              // m = следующий месяц (0-индекс), день тот же
+  if (end.getMonth() !== (m % 12)) end.setDate(0); // переполнение дня → последний день целевого месяца
   return `${end.getFullYear()}-${String(end.getMonth()+1).padStart(2,'0')}-${String(end.getDate()).padStart(2,'0')}`;
 }
 function syncGroupSubEnd() {

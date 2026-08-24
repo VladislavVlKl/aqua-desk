@@ -294,6 +294,57 @@ async unassignTrainerGroup(id) {
     });
     return map;
   },
+  /**
+   * 4-статусная карта оплат (согласовано 2026-08-24, docs/group-payment-status-4state.md).
+   * Возвращает {group_client_id: {status:'paid'|'carry', pay}} для клиентов с покрытием:
+   *   'paid'  — есть оплаченная строка month = месяц просмотра (идёт в ФОТ месяца);
+   *   'carry' — строки за этот месяц нет, но прошлый абонемент ещё действует на опорную дату.
+   * Клиенты не в карте → 'debt' (активные без покрытия); is_active=false → 'left' (считает вызывающий).
+   * Опорная дата: текущий месяц → сегодня; прошлый → последний день месяца; будущий → первый день.
+   */
+  async getGroupStatusMap(groupId, monthStr, groupInstanceId=undefined, todayStr=null) {
+    let inst = groupInstanceId;
+    if (inst === undefined) {
+      const {data:tg} = await sb().from('trainer_groups')
+        .select('group_instance_id').eq('id',groupId).maybeSingle();
+      inst = tg?.group_instance_id || null;
+    }
+    const mStart = String(monthStr).slice(0,10);                 // 'YYYY-MM-01'
+    const d = new Date(mStart); d.setMonth(d.getMonth()+1); d.setDate(0);
+    const mEnd = d.toISOString().slice(0,10);                    // последний день месяца
+    const today = todayStr || new Date().toISOString().slice(0,10);
+    const refDate = today < mStart ? mStart : (today > mEnd ? mEnd : today);
+    const mKey = monthStr.slice(0,7);
+
+    let q = sb().from('group_payments').select('*').eq('paid', true);
+    q = inst ? q.eq('group_instance_id', inst) : q.eq('group_id', groupId);
+    const {data,error} = await q;
+    if (error) throw error;
+    const map = {};
+    (data||[]).forEach(p=>{
+      const isThisMonth = String(p.month).slice(0,7) === mKey;
+      const covers = p.sub_end
+        ? (String(p.sub_start||p.month).slice(0,10) <= refDate && refDate <= String(p.sub_end).slice(0,10))
+        : (String(p.month).slice(0,7) === mKey);
+      const status = isThisMonth ? 'paid' : (covers ? 'carry' : null);
+      if (!status) return;
+      const k = p.group_client_id, cur = map[k];
+      const better = !cur
+        || (status==='paid' && cur.status!=='paid')
+        || (status===cur.status && String(p.sub_end||p.month) > String(cur.pay.sub_end||cur.pay.month));
+      if (better && !(cur && cur.status==='paid' && status!=='paid')) map[k] = {status, pay:p};
+    });
+    return map;
+  },
+  // Пороговые числа 4 статусов по спискам клиентов + карте статусов (общий помощник для UI/Excel)
+  groupStatusCounts(activeClients, archivedCount, statusMap) {
+    let paid=0, carry=0, debt=0;
+    (activeClients||[]).forEach(c=>{
+      const s = statusMap?.[c.id]?.status;
+      if (s==='paid') paid++; else if (s==='carry') carry++; else debt++;
+    });
+    return { paid, carry, debt, left: archivedCount||0 };
+  },
 
   // ─── GROUP PROGRESS NOTES ─────────────────────
   async getGroupProgressNotes(groupId, month) {

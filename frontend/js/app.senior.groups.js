@@ -361,16 +361,18 @@ async function renderGroupDetail(groupId) {
     const instanceId = groupInfo.group_instance_id;
     const branch = groupInfo.branch;
     const groupTypeId = groupInfo.group_type_id;
-    const [clients, payments, members, subgData] = await Promise.all([
+    const [clients, archived, payments, members, subgData, statusMap] = await Promise.all([
       instanceId ? DB.getGroupClientsByInstance(instanceId) : DB.getGroupClients(groupId),
+      instanceId ? DB.getArchivedGroupClientsByInstance(instanceId) : DB.getArchivedGroupClients(groupId),
       instanceId ? DB.getGroupPaymentsByInstance(instanceId, month) : DB.getGroupPayments(groupId, month),
       instanceId ? DB.getGroupInstanceMembers(instanceId) : Promise.resolve([groupInfo]),
       DB.getGroupSubgroups(instanceId, groupId),
+      DB.getGroupStatusMap(groupId, month, instanceId||null, today),
     ]);
     const dbSubgroups = subgData.names||[];
-    // Статус «оплачено» — по ПЕРИОДУ абонемента (не сбрасывается 1-го числа месяца)
-    const paidMap = await DB.getActiveGroupPaymentsMap(groupId, month, instanceId||null);
-    const debtors = clients.filter(c=>!paidMap[c.id]);
+    // 4-статусная карта (docs/group-payment-status-4state.md)
+    const paidMap = Object.fromEntries(Object.entries(statusMap).map(([k,v])=>[k, v.pay]));
+    const counts = DB.groupStatusCounts(clients, (archived||[]).length, statusMap);
 
     // Подгруппы: персистентные (group_subgroups) ∪ те, в которые уже переведены дети
     const subgroups = [...new Set([...dbSubgroups, ...clients.map(c=>c.subgroup||'').filter(Boolean)])].sort();
@@ -378,7 +380,7 @@ async function renderGroupDetail(groupId) {
 
     // Кешируем контекст для onclick-обработчиков (без JSON в атрибутах)
     window._gd = { groupId, instanceId, branch, groupTypeId, month, today,
-                   members, clients, paidMap, noteMap:{}, canPayroll, role,
+                   members, clients, archived: archived||[], statusMap, paidMap, noteMap:{}, canPayroll, role,
                    groupName: groupInfo.group_types?.name||'Группа',
                    subgroups, dbSubgroups, mainLabel: subgData.mainLabel||null,
                    currentSubgroup: subgroups.includes(prevSub) ? prevSub : '',
@@ -393,15 +395,13 @@ async function renderGroupDetail(groupId) {
       <span style="font-size:12px;color:var(--hint)">${branch}</span>
     </div>
     <div class="tab-content"><div class="tab-pad">
-      <div class="staff-card" style="flex-direction:column;align-items:stretch;gap:8px;margin-bottom:14px">
+      <div class="staff-card" style="flex-direction:column;align-items:stretch;gap:8px;margin-bottom:10px">
         ${infoRow('Филиал', `<span style="font-weight:600;font-size:13px">${branch}</span>`)}
-        ${infoRow('Детей', `<span style="font-weight:600;font-size:13px">${clients.length}${subgroups.length?` · подгрупп: ${subgroups.length+1}`:''}</span>`)}
         ${infoRow('Тренеров', `<span style="font-weight:600;font-size:13px">${new Set(members.map(t=>t.trainer_id)).size}</span>`)}
-        ${infoRow('Должники', debtors.length
-          ? `<button class="btn btn-sm" style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#ef4444;font-size:12px"
-              onclick="renderGroupDebtorsModal(${JSON.stringify(debtors.map(c=>c.name)).replace(/"/g,'&quot;')})">⚠️ ${debtors.length}</button>`
-          : `<span style="font-weight:600;font-size:13px;color:#10b981">нет</span>`)}
+        ${infoRow('Активных детей', `<span style="font-weight:600;font-size:13px">${clients.length}${subgroups.length?` · подгрупп: ${subgroups.length+1}`:''}</span>`)}
       </div>
+      <div style="font-size:11px;color:var(--hint);margin:0 2px 6px">Оплаты · ${new Date(month).toLocaleDateString('ru-RU',{month:'long',year:'numeric'})} <span style="float:right">оплачено сейчас: ${counts.paid+counts.carry}</span></div>
+      ${groupStatusTilesHtml(counts, groupId)}
       <div style="display:flex;flex-direction:column;gap:8px">
         ${bigBtn('✅','Занятие сегодня',`${fmtDate(today)} · отметить детей · кто на станции`,`renderGroupSessionScreen('${groupId}')`, true)}
         ${canPayroll?bigBtn('👥','Персонал','тренеры · ставки · расписание',`openSeniorGroupPersonnel('${groupId}')`):''}
@@ -739,22 +739,27 @@ function cbdClose(groupId) {
 }
 
 // ═══ ЭКРАН «СПИСОК ДЕТЕЙ» (плоский список или аккордеоны подгрупп) ═══
-async function renderGroupChildrenScreen(groupId) {
+async function renderGroupChildrenScreen(groupId, preFilter=null) {
   const g = await ensureGd(groupId); if (!g) return;
   g._screen = 'children';
+  g.childFilter = preFilter||null;   // фильтр из счётчиков хаба (или сброс при обычном входе)
   navPush(()=>renderGroupDetail(groupId));
   setupBack(()=>renderGroupDetail(groupId));
   loading('Загрузка списка...');
   try {
-    const [clients, payments, notes, subgData] = await Promise.all([
+    const [clients, archived, payments, notes, subgData, statusMap] = await Promise.all([
       g.instanceId ? DB.getGroupClientsByInstance(g.instanceId) : DB.getGroupClients(g.groupId),
+      g.instanceId ? DB.getArchivedGroupClientsByInstance(g.instanceId) : DB.getArchivedGroupClients(g.groupId),
       g.instanceId ? DB.getGroupPaymentsByInstance(g.instanceId, g.month) : DB.getGroupPayments(g.groupId, g.month),
       DB.getGroupProgressNotes(g.groupId, g.month),
       DB.getGroupSubgroups(g.instanceId, g.groupId),
+      DB.getGroupStatusMap(g.groupId, g.month, g.instanceId||null, g.today),
     ]);
     g.clients = clients;
-    // Статус «оплачено» — по ПЕРИОДУ абонемента (не сбрасывается 1-го числа месяца)
-    g.paidMap = await DB.getActiveGroupPaymentsMap(g.groupId, g.month, g.instanceId||null);
+    g.archived = archived||[];
+    // 4-статусная карта (docs/group-payment-status-4state.md); paidMap оставляем для совместимости
+    g.statusMap = statusMap;
+    g.paidMap = Object.fromEntries(Object.entries(statusMap).map(([k,v])=>[k, v.pay]));
     g.noteMap = Object.fromEntries(notes.map(n=>[n.group_client_id, n]));
     g.dbSubgroups = subgData.names||[];
     g.mainLabel = subgData.mainLabel||null;
@@ -763,25 +768,82 @@ async function renderGroupChildrenScreen(groupId) {
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 
+// 4-статусная модель оплат (docs/group-payment-status-4state.md)
+const GROUP_STATUS_META = {
+  paid:  {label:'Оплачен',    short:'Оплатили',  color:'#10b981', badge:'rgba(16,185,129,.15)', tile:'rgba(16,185,129,.12)'},
+  carry: {label:'Действует',  short:'В том мес.',color:'#f59e0b', badge:'rgba(245,158,11,.15)', tile:'rgba(245,158,11,.12)'},
+  debt:  {label:'Без оплаты', short:'Без оплаты',color:'#ef4444', badge:'rgba(239,68,68,.15)',  tile:'rgba(239,68,68,.10)'},
+  left:  {label:'Ушёл',       short:'Ушли',      color:'var(--hint)', badge:'rgba(148,163,184,.15)', tile:'var(--card)'},
+};
+function _childStatusOf(c) {
+  const g = window._gd;
+  if (c.is_active===false) return 'left';
+  return g.statusMap?.[c.id]?.status || 'debt';
+}
+// 4 плитки-счётчика на хабе группы; тап → «Список детей» с этим фильтром
+function groupStatusTilesHtml(counts, groupId) {
+  const defs = [
+    ['paid','Оплатили','этот месяц'], ['carry','Оплатили','в том месяце'],
+    ['debt','Без оплаты',''], ['left','Ушли',''],
+  ];
+  return `<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:14px">
+    ${defs.map(([k,l1,l2])=>{ const m=GROUP_STATUS_META[k];
+      return `<button onclick="renderGroupChildrenScreen('${groupId}','${k}')"
+        style="border:1px solid var(--border);background:${m.tile};border-radius:11px;padding:9px 11px;text-align:left;cursor:pointer">
+        <div style="font-size:21px;font-weight:600;color:${m.color};line-height:1">${counts[k]||0}</div>
+        <div style="font-size:11px;color:${m.color};margin-top:3px">${l1}${l2?` · ${l2}`:''}</div>
+      </button>`; }).join('')}
+  </div>`;
+}
+
 function _childCardHtml(c) {
   const g = window._gd;
-  const pay = g.paidMap?.[c.id]; const paid = !!pay; const note = g.noteMap?.[c.id];
-  return `<div class="staff-card" onclick="openChildMenu('${c.id}')" style="cursor:pointer">
+  const st = _childStatusOf(c);
+  const m = GROUP_STATUS_META[st];
+  const note = g.noteMap?.[c.id];
+  const pay = g.statusMap?.[c.id]?.pay;
+  const sub = (st==='paid'||st==='carry') && pay?.sub_end ? ` · до ${fmtDate(pay.sub_end)}` : '';
+  const clickable = st!=='left';
+  return `<div class="staff-card" ${clickable?`onclick="openChildMenu('${c.id}')" style="cursor:pointer"`:'style="opacity:.6"'}>
     <div style="flex:1;min-width:0">
       <div class="staff-fio">${c.name}</div>
-      <div class="staff-meta">${c.level} · ${fmt(c.monthly_price)} сум/мес${note?.note?' · 📝':''}</div>
+      <div class="staff-meta">${c.level||'—'} · ${fmt(c.monthly_price)} сум/мес${note?.note?' · 📝':''}${sub}</div>
     </div>
-    <span style="font-size:11px;padding:3px 8px;border-radius:12px;
-      background:${paid?'rgba(16,185,129,.15)':'rgba(239,68,68,.15)'};color:${paid?'#10b981':'#ef4444'}">
-      ${paid?'Оплачен':'Не оплачен'}</span>
-    <span style="font-size:14px;color:var(--hint);margin-left:8px">⋯</span>
+    <span style="font-size:11px;padding:3px 8px;border-radius:12px;background:${m.badge};color:${m.color}">${m.label}</span>
+    ${clickable?'<span style="font-size:14px;color:var(--hint);margin-left:8px">⋯</span>':''}
   </div>`;
+}
+
+function _childFilterChipsHtml(counts, active) {
+  const defs = ['paid','carry','debt','left'].map(k=>[k, counts[k]||0, GROUP_STATUS_META[k]]);
+  return `<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px">
+    ${defs.map(([k,v,m])=>`<button onclick="setChildFilter('${k}')"
+      style="border:1px solid ${active===k?m.color:'var(--border)'};background:${m.tile};border-radius:10px;padding:7px 4px;text-align:center;cursor:pointer">
+      <div style="font-size:16px;font-weight:600;color:${m.color};line-height:1">${v}</div>
+      <div style="font-size:9px;color:${m.color};margin-top:2px">${m.short}</div>
+    </button>`).join('')}
+  </div>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin:0 2px 10px">
+    <span style="font-size:12px;color:var(--hint)">${active?GROUP_STATUS_META[active].short:'Все статусы'}</span>
+    ${active?`<button class="btn btn-sm" style="background:none;border:none;color:var(--accent);font-size:12px;padding:0" onclick="setChildFilter(null)">сбросить</button>`:''}
+  </div>`;
+}
+function setChildFilter(f) {
+  const g = window._gd; if (!g) return;
+  g.childFilter = (g.childFilter===f) ? null : f;
+  renderGroupChildrenScreenHtml();
 }
 
 function renderGroupChildrenScreenHtml() {
   const g = window._gd; if (!g) return;
+  const f = g.childFilter||null;
+  const counts = DB.groupStatusCounts(g.clients, (g.archived||[]).length, g.statusMap);
   // ОДИН общий список без деления по подгруппам (подгруппа правится в меню ребёнка / менеджере подгрупп)
-  const listHtml = g.clients.length ? g.clients.map(_childCardHtml).join('') : '<p class="hint">Детей пока нет</p>';
+  const items = f==='left' ? (g.archived||[])
+              : f          ? g.clients.filter(c=>_childStatusOf(c)===f)
+                           : g.clients;
+  const listHtml = items.length ? items.map(_childCardHtml).join('')
+                 : `<p class="hint">${f?'Никого в этом статусе':'Детей пока нет'}</p>`;
   setScreen(`<div class="app-header">
     ${backBtn()}
     <div class="app-title">Список детей</div>
@@ -795,6 +857,7 @@ function renderGroupChildrenScreenHtml() {
     </div>
   </div>
   <div class="tab-content"><div class="tab-pad">
+    ${_childFilterChipsHtml(counts, f)}
     ${listHtml}
   </div></div>`);
 }

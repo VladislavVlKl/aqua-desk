@@ -584,7 +584,15 @@ async function doExportChildGroupExcel(groupId, monthStr) {
     const report = await DB.getGroupMonthReport(groupId, monthStr);
     // Дополнительно: информация о группе
     const {data:groupInfo} = await sb().from('trainer_groups')
-      .select('branch, group_types(name), profiles(fio)').eq('id',groupId).single();
+      .select('branch, group_instance_id, group_types(name), profiles(fio)').eq('id',groupId).single();
+    // 4-статусная карта + архив (docs/group-payment-status-4state.md)
+    const inst = groupInfo?.group_instance_id || report.trainers?.[0]?.group_instance_id || null;
+    const [statusMap, archived] = await Promise.all([
+      DB.getGroupStatusMap(groupId, monthStr, inst, todayStr()),
+      inst ? DB.getArchivedGroupClientsByInstance(inst) : DB.getArchivedGroupClients(groupId),
+    ]);
+    report.statusMap = statusMap;
+    report.archived  = archived||[];
     exportChildGroupExcel(groupId, monthStr, report, groupInfo);
   } catch(e) { toast('Ошибка экспорта','error'); console.error(e); }
 }
