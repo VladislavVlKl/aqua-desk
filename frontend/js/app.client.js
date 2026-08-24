@@ -459,20 +459,14 @@ async function doExportTrainer(trainerId,fioEnc,year,month) {
       if (clientIds.length) {
         const monthStartDay=`${year}-${String(month).padStart(2,'0')}-01`;
         const monthEnd=new Date(year,month,1).toISOString();
-        const {data:subs}=await sb().from('subscriptions')
-          .select('client_id,start_date,initial_balance')
-          .in('client_id',clientIds).lte('start_date',monthEnd.slice(0,10));
+        const subs=await DB.getClientSubscriptionsBulk(clientIds, monthEnd.slice(0,10));
         // История нужна с начала последнего абонемента, стартовавшего ДО месяца (по каждому клиенту)
         const lastBefore={};
         (subs||[]).forEach(s=>{ if (s.start_date<=monthStartDay &&
           (!lastBefore[s.client_id]||s.start_date>lastBefore[s.client_id])) lastBefore[s.client_id]=s.start_date; });
         const minFrom=clientIds.reduce((m,c)=>{
           const f=lastBefore[c]||monthStartDay; return !m||f<m?f:m; },null)||monthStartDay;
-        const {data:hist}=await sb().from('workouts')
-          .select('id,client_id,workout_date,is_drop_in')
-          .in('client_id',clientIds).eq('pending_confirmation',false)
-          .gte('workout_date',new Date(minFrom).toISOString()).lt('workout_date',monthEnd)
-          .order('workout_date');
+        const hist=await DB.getClientWorkoutsBulk(clientIds, new Date(minFrom).toISOString(), monthEnd);
         numbering={subs:subs||[],history:hist||[]};
       }
     } catch(e) { console.error('[exportTrainer numbering]',e); }

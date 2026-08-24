@@ -57,14 +57,11 @@ async function renderGroupsStructure() {
   </div>`;
   try {
     const DOW = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
-    const [branches, tgsRes, allSlots] = await Promise.all([
+    const [branches, tgs, allSlots] = await Promise.all([
       cached('branches', ()=>DB.getBranches()),
-      sb().from('trainer_groups')
-        .select('trainer_id, group_type_id, branch, role, group_types(name,type), profiles(fio)')
-        .is('subscription_end', null).order('branch'),
+      DB.getAllActiveGroups(),
       DB.getAllActiveSlots(),
     ]);
-    const tgs   = tgsRes.data  || [];
     const slots = (allSlots||[]).filter(s => s.slot_type==='group' && !s.specific_date);
 
     // slotMap: "group_type_id|branch|trainer_id" → ["Пн 09:00", ...]

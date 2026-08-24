@@ -38,6 +38,11 @@ Object.assign(DB, {
       .select('*').order('created_at',{ascending:false}).limit(limit);
     if (error) throw error; return data||[];
   },
+  async deleteQueueItem(id) {
+    if (useApi('notifications')) { await api('/notifications/'+id+'/delete', { method:'POST' }); return; }
+    const {error} = await sb().from('notifications_queue').delete().eq('id',id);
+    if (error) throw error;
+  },
 
   // ─── ЗАМЕНЫ И ПЕРЕДАЧА ───────────────────────
 

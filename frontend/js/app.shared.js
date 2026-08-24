@@ -14,9 +14,7 @@ async function doDeleteClientCheck(clientId, fioEnc, createdAt) {
   // Сколько проведённых ПТ у клиента — удаление сотрёт их и уменьшит ЗП за те периоды
   let ptCount = 0;
   try {
-    const {count} = await sb().from('workouts')
-      .select('id',{count:'exact',head:true}).eq('client_id',clientId);
-    ptCount = count || 0;
+    ptCount = await DB.getClientWorkoutCount(clientId);
   } catch(e) { console.error(e); }
   if (ptCount > 0) {
     if (!confirm(`⚠️ У «${fio}» ${ptCount} проведённых тренировок.\n\nПолное удаление сотрёт всю историю безвозвратно и УМЕНЬШИТ ЗП тренера за те периоды.\n\nДля ушедших клиентов используйте «📦 Архив» — он скрывает клиента, но сохраняет историю и ЗП.\n\nВсё равно удалить с историей?`)) return;
@@ -88,8 +86,7 @@ async function doApproveDelete(reqId, clientId, nameEnc) {
   const fio = decodeURIComponent(nameEnc);
   try {
     // Check if client has records
-    const {data:wks} = await sb().from('workouts').select('id').eq('client_id',clientId).limit(1);
-    const hasRecords = wks && wks.length > 0;
+    const hasRecords = (await DB.getClientWorkoutCount(clientId)) > 0;
     if (hasRecords) {
       const m = el('div','modal-overlay');
       m.innerHTML=`<div class="modal">

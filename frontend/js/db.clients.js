@@ -206,6 +206,35 @@ Object.assign(DB, {
       .order('workout_date',{ascending:false});
     if (error) throw error; return data||[];
   },
+  // Изменить ПТ (дата/категория/клиент) — updates: {workout_date?, category_at_moment?, client_id?}
+  async updateWorkout(id, updates) {
+    if (useApi('clients')) { await api('/workouts/'+id+'/update', { method:'POST', body: updates }); return; }
+    const {error} = await sb().from('workouts').update(updates).eq('id',id);
+    if (error) throw error;
+  },
+  // Число проведённых ПТ клиента (предупреждение при удалении).
+  async getClientWorkoutCount(clientId) {
+    if (useApi('clients')) { const r = await api('/workouts/client-count', { query: { client_id: clientId } }); return r?.count||0; }
+    const {count} = await sb().from('workouts').select('id',{count:'exact',head:true}).eq('client_id',clientId);
+    return count||0;
+  },
+  // ПТ по списку клиентов за период (нумерация экспорта). from/to — ISO timestamp.
+  async getClientWorkoutsBulk(clientIds, fromIso, toIso) {
+    if (!clientIds?.length) return [];
+    if (useApi('clients')) return await api('/workouts/client-history', { query: { client_ids: clientIds.join(','), from: fromIso, to: toIso } });
+    const {data,error} = await sb().from('workouts').select('id,client_id,workout_date,is_drop_in')
+      .in('client_id',clientIds).eq('pending_confirmation',false)
+      .gte('workout_date',fromIso).lt('workout_date',toIso).order('workout_date');
+    if (error) throw error; return data||[];
+  },
+  // Абонементы по списку клиентов (start_date <= beforeDate, YYYY-MM-DD).
+  async getClientSubscriptionsBulk(clientIds, beforeDate) {
+    if (!clientIds?.length) return [];
+    if (useApi('clients')) return await api('/subscriptions/by-clients', { query: { client_ids: clientIds.join(','), before: beforeDate } });
+    const {data,error} = await sb().from('subscriptions').select('client_id,start_date,initial_balance')
+      .in('client_id',clientIds).lte('start_date',beforeDate);
+    if (error) throw error; return data||[];
+  },
   // ─── ПРОБНЫЕ ТРЕНИРОВКИ ──────────────────────
   async addTrialSession(trainerId, branch, firstName, lastName, phone, age, category) {
     if (useApi('clients')) {

@@ -779,4 +779,30 @@ Object.assign(DB, {
       dels:  dels.data  || [], audit: audit.data || [],
     };
   },
+  // Админ-отчёт конспектов за период (created_at). from/to — ISO. trainerId!=null → фильтр.
+  async getSessionNotesReport(from, to, trainerId=null) {
+    if (useApi('analytics')) {
+      const rows = await api('/analytics/session-notes-report', { query: { from, to, trainer_id: trainerId||undefined } });
+      return (rows||[]).map(n => ({ ...n,
+        clients: { fio: n.client_fio }, profiles: { fio: n.trainer_fio },
+        workouts: { workout_date: n.wo_date, category_at_moment: n.wo_cat } }));
+    }
+    let q = sb().from('session_notes')
+      .select('*, clients(fio), profiles!trainer_id(fio), workouts(workout_date,category_at_moment)')
+      .gte('created_at',from).lt('created_at',to).order('created_at',{ascending:false});
+    if (trainerId) q = q.eq('trainer_id', parseInt(trainerId));
+    const {data,error} = await q;
+    if (error) throw error; return data||[];
+  },
+  // Админ-отчёт целей за период (created_at). from/to — ISO.
+  async getGoalsReport(from, to) {
+    if (useApi('analytics')) {
+      const rows = await api('/analytics/training-goals-report', { query: { from, to } });
+      return (rows||[]).map(g => ({ ...g, clients: { fio: g.client_fio, profiles: { fio: g.trainer_fio } } }));
+    }
+    const {data,error} = await sb().from('training_goals')
+      .select('*, clients(fio,profiles!trainer_id(fio))')
+      .gte('created_at',from).lt('created_at',to).order('created_at',{ascending:false});
+    if (error) throw error; return data||[];
+  },
 });

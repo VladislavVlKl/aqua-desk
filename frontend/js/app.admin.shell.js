@@ -241,19 +241,9 @@ async function loadAdminSessionNotes() {
   const from = new Date(monthVal+'-01').toISOString();
   const to   = new Date(new Date(monthVal+'-01').getFullYear(), new Date(monthVal+'-01').getMonth()+1, 1).toISOString();
   try {
-    let q = sb().from('session_notes')
-      .select('*, clients(fio), profiles!trainer_id(fio), workouts(workout_date,category_at_moment)')
-      .gte('created_at',from).lt('created_at',to)
-      .order('created_at',{ascending:false});
-    if (trainerId) q = q.eq('trainer_id', parseInt(trainerId));
-    const {data:notes} = await q;
-
+    const notes = await DB.getSessionNotesReport(from, to, trainerId||null);
     // Цели за месяц
-    let gq = sb().from('training_goals')
-      .select('*, clients(fio,profiles!trainer_id(fio))')
-      .gte('created_at',from).lt('created_at',to)
-      .order('created_at',{ascending:false});
-    const {data:goals} = await gq;
+    const goals = await DB.getGoalsReport(from, to);
 
     body.innerHTML=`
       <h4>Конспекты (${(notes||[]).length})</h4>

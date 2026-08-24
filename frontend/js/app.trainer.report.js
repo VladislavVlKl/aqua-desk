@@ -33,7 +33,7 @@ async function loadTrainerReport(year,month) {
       DB.getTrainerGroups(STATE.profile.id),
       DB.getGroupSessions(STATE.profile.id,year,month),
       DB.getChildGroupsAutoSalary(STATE.profile.id, fromDay),
-      sb().from('group_substitutions').select('*, trainer_groups(*, group_types(name))').eq('substitute_trainer_id',STATE.profile.id).gte('session_date',fromDay).lt('session_date',monthFirstDayStr(year, month+1)).then(r=>r.data||[]),
+      DB.getMyGroupSubstitutions(STATE.profile.id, year, month),
       DB.getTrialSessions(STATE.profile.id,year,month),
       DB.getAdjustment(STATE.profile.id,year,month),
       DB.getGroupUnpaidAttendees(STATE.profile.id, fromDay).catch(()=>[]),
@@ -468,7 +468,7 @@ async function doEditWorkout(workoutId, oldClientId) {
       // Списываем у нового
       await DB.addBalance(newClientId, -1);
     }
-    await sb().from('workouts').update(updates).eq('id',workoutId);
+    await DB.updateWorkout(workoutId, updates);
     document.querySelector('.modal-overlay')?.remove();
     toast('✅ Тренировка обновлена','success');
     renderReportTab();

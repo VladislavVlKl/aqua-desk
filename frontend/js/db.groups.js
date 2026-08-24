@@ -217,6 +217,14 @@ async getAssignedTrainers(groupTypeId) {
       .update({status}).eq('id',id);
     if (error) throw error;
   },
+  async addDuplicateFlag(instanceId, clientId1, clientId2, status='pending') {
+    invalidateCachePrefix('grp:');
+    if (useApi('groups')) return await api('/group-duplicate-flags', { method:'POST', body:{
+      group_instance_id: instanceId, client_id_1: clientId1, client_id_2: clientId2, status } });
+    const {error} = await sb().from('group_client_duplicate_flags')
+      .insert({ group_instance_id: instanceId, client_id_1: clientId1, client_id_2: clientId2, status });
+    if (error) throw error;
+  },
 async unassignTrainerGroup(id) {
     invalidateCachePrefix('grp:');
     if (useApi('groups')) { await api('/trainer-groups/'+id+'/unassign', { method:'POST' }); return; }
@@ -865,6 +873,32 @@ async unassignTrainerGroup(id) {
       .select('id, group_type_id, branch, group_instance_id, role, days_of_week, session_time, profiles(fio), group_types(name,type)')
       .eq('branch', branch).is('subscription_end',null)
       .order('group_type_id');
+    if (error) throw error; return data||[];
+  },
+  // Активные группы всех филиалов (для сводного экрана координатора).
+  async getAllActiveGroups() {
+    if (useApi('groups')) {
+      const rows = await api('/group-instances/active-all');
+      return (rows || []).map(_apiTgMember);
+    }
+    const {data,error} = await sb().from('trainer_groups')
+      .select('trainer_id, group_type_id, branch, role, group_types(name,type), profiles(fio)')
+      .is('subscription_end', null).order('branch');
+    if (error) throw error; return data||[];
+  },
+  // Мои групповые замены как заменяющего за месяц (+trainer_groups.group_types.name).
+  async getMyGroupSubstitutions(trainerId, year, month) {
+    if (useApi('groups')) {
+      const rows = await api('/group-substitutions/mine', { query: { trainer_id: trainerId, year, month } });
+      return (rows || []).map(_apiGroupSub);
+    }
+    const from = `${year}-${String(month).padStart(2,'0')}-01`;
+    const to   = monthFirstDayStr(year, month+1);
+    const {data,error} = await sb().from('group_substitutions')
+      .select('*, trainer_groups(*, group_types(name))')
+      .eq('substitute_trainer_id', trainerId)
+      .gte('session_date', from).lt('session_date', to)
+      .order('session_date',{ascending:false});
     if (error) throw error; return data||[];
   },
 });

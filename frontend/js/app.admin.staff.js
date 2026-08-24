@@ -174,12 +174,7 @@ async function doAddGroupClient(groupId) {
         const dist = levenshtein(nameLower, other.name.toLowerCase());
         if (dist > 0 && dist <= 2) {
           // Создаём флаг потенциального дубля
-          await sb().from('group_client_duplicate_flags').insert({
-            group_instance_id: instanceId,
-            client_id_1: newClient.id,
-            client_id_2: other.id,
-            status: 'pending'
-          });
+          await DB.addDuplicateFlag(instanceId, newClient.id, other.id);
         }
       }
     }

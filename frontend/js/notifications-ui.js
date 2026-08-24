@@ -185,8 +185,7 @@ async function doSendNotif(trainers, branchNames) {
 async function doDeleteNotif(id) {
   if (!confirm('Удалить уведомление из очереди?')) return;
   try {
-    const {error} = await sb().from('notifications_queue').delete().eq('id', id);
-    if (error) throw error;
+    await DB.deleteQueueItem(id);
     toast('Удалено ✅', 'success');
     renderAdminNotifications();
   } catch(e) { toast('Ошибка', 'error'); }
