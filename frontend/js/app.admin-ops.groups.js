@@ -397,7 +397,7 @@ async function renderAddSecondTrainerModal(groupTypeId, groupNameEnc, branch, gr
   let existingInstanceId = null;
   if (existingTgId) {
     try {
-      const {data} = await sb().from('trainer_groups').select('group_instance_id').eq('id', existingTgId).single();
+      const data = await DB.getTrainerGroupById(existingTgId);
       existingInstanceId = data?.group_instance_id || null;
     } catch(e) {}
   }

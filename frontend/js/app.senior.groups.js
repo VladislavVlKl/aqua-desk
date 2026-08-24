@@ -352,8 +352,7 @@ async function renderGroupDetail(groupId) {
   loading('Загрузка группы...');
   try {
     // Тип группы — взрослые уводим в отдельный обработчик
-    const {data:groupInfo} = await sb().from('trainer_groups')
-      .select('*, group_types(name,type)').eq('id',groupId).single();
+    const groupInfo = await DB.getTrainerGroupById(groupId);
     if (groupInfo?.group_types?.type !== 'children') {
       renderAdultGroupDetail(groupId); return;
     }

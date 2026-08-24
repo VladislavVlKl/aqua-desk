@@ -388,9 +388,7 @@ async function doSaveGroupSchedule(groupId) {
 // ── СВЯЗАТЬ ТРЕНЕРОВ В ОДИН INSTANCE (Арт-свим) ──────────────────────────────
 async function renderLinkGroupInstanceModal(groupId) {
   // Ищем все группы того же типа и филиала с разными instance
-  const {data:thisGroup} = await sb().from('trainer_groups')
-    .select('group_type_id,branch,group_instance_id,group_types(name)')
-    .eq('id',groupId).single();
+  const thisGroup = await DB.getTrainerGroupById(groupId);
   if (!thisGroup) return toast('Ошибка','error');
 
   const candidates = (await DB.getActiveGroupsByBranch(thisGroup.branch)).filter(c =>
@@ -475,7 +473,7 @@ async function renderGroupSubstitutionModal(groupId) {
   try {
     const [trainers, gInfo] = await Promise.all([
       cached('profiles',()=>DB.getAllProfiles()),
-      sb().from('trainer_groups').select('group_types(billing_model)').eq('id',groupId).single().then(r=>r.data).catch(()=>null),
+      DB.getTrainerGroupById(groupId).catch(()=>null),
     ]);
     const others = trainers.filter(t=>
       ['trainer','senior_trainer'].includes(t.role) &&
@@ -593,8 +591,7 @@ async function renderAdultGroupDetail(groupId) {
   const month = new Date().toISOString().slice(0,7)+'-01';
   loading('Загрузка...');
   try {
-    const {data:tgInfo} = await sb().from('trainer_groups')
-      .select('branch,group_type_id,group_types(name)').eq('id',groupId).single();
+    const tgInfo = await DB.getTrainerGroupById(groupId);
     const [clients, sessions] = await Promise.all([
       DB.getAdultGroupClients(groupId),
       _loadAdultSessions(tgInfo, month),
@@ -662,8 +659,7 @@ async function renderAdultGroupHistory(groupId, monthStr) {
   if (!monthStr) monthStr = new Date().toISOString().slice(0,7)+'-01';
   loading('Загрузка...');
   try {
-    const {data:tgInfo} = await sb().from('trainer_groups')
-      .select('branch,group_type_id,group_types(name)').eq('id',groupId).single();
+    const tgInfo = await DB.getTrainerGroupById(groupId);
     const [mYear, mMonth] = monthStr.split('-').map(Number);
     const prevMonth = mMonth===1 ? `${mYear-1}-12-01` : `${mYear}-${String(mMonth-1).padStart(2,'0')}-01`;
     const nextMonth = mMonth===12 ? `${mYear+1}-01-01` : `${mYear}-${String(mMonth+1).padStart(2,'0')}-01`;
@@ -712,8 +708,7 @@ async function renderAdultGroupReport(groupId, monthStr) {
   if (!monthStr) monthStr = new Date().toISOString().slice(0,7)+'-01';
   loading('Загрузка...');
   try {
-    const {data:tgInfo} = await sb().from('trainer_groups')
-      .select('branch,group_type_id,group_types(name)').eq('id',groupId).single();
+    const tgInfo = await DB.getTrainerGroupById(groupId);
     const [mYear, mMonth] = monthStr.split('-').map(Number);
     const prevMonth = mMonth===1 ? `${mYear-1}-12-01` : `${mYear}-${String(mMonth-1).padStart(2,'0')}-01`;
     const nextMonth = mMonth===12 ? `${mYear+1}-01-01` : `${mYear}-${String(mMonth+1).padStart(2,'0')}-01`;
@@ -809,8 +804,7 @@ async function doEditGroupClient(clientId, groupId) {
 
 // Открыть редактор посещаемости за конкретную дату из истории
 async function renderGroupAttendanceEdit(groupId, date) {
-  const {data:tg} = await sb().from('trainer_groups')
-    .select('group_instance_id').eq('id',groupId).single();
+  const tg = await DB.getTrainerGroupById(groupId);
   const instanceId = tg?.group_instance_id||null;
   const [clients, existing] = await Promise.all([
     instanceId ? DB.getGroupClientsByInstance(instanceId) : DB.getGroupClients(groupId),
@@ -837,8 +831,7 @@ async function renderGroupAttendanceEdit(groupId, date) {
 
 // Посещаемость за другую дату
 async function renderGroupAttendanceByDate(groupId) {
-  const {data:tg} = await sb().from('trainer_groups')
-    .select('group_instance_id').eq('id',groupId).single();
+  const tg = await DB.getTrainerGroupById(groupId);
   const instanceId = tg?.group_instance_id||null;
   const clients = instanceId
     ? await DB.getGroupClientsByInstance(instanceId)
@@ -920,8 +913,7 @@ async function doAddManualGroupSession(groupId) {
   const headcount = parseInt(document.getElementById('mgs-count')?.value||0);
   if (!date || !headcount) return toast('Заполните дату и явку','error');
   try {
-    const {data:tg} = await sb().from('trainer_groups')
-      .select('branch,group_type_id,trainer_id').eq('id',groupId).single();
+    const tg = await DB.getTrainerGroupById(groupId);
     // Используем trainer_id из группы (не STATE.profile.id — координатор мог добавлять)
     const logTrainerId = tg?.trainer_id || STATE.profile.id;
     await DB.logGroupSession(logTrainerId, tg?.group_type_id, tg?.branch||'', date, headcount);
@@ -1062,8 +1054,7 @@ async function doLogAdultGroupSession(groupId) {
   if (!headcount) return toast('Укажите хотя бы одного участника','error');
   const time = document.getElementById('ag-hc-time')?.value||'09:00';
   try {
-    const {data:tg} = await sb().from('trainer_groups')
-      .select('branch,group_type_id').eq('id',groupId).single();
+    const tg = await DB.getTrainerGroupById(groupId);
     await DB.logGroupSession(STATE.profile.id, tg?.group_type_id||null, tg?.branch||STATE.profile.branches?.[0]||'', date, headcount);
     DB.auditLog('group_session', STATE.profile.id, STATE.profile.fio, groupId, 'group_session',
       { date, headcount, branch: tg?.branch }, tg?.branch||STATE.profile.branches?.[0]);

@@ -580,8 +580,7 @@ async function doExportChildGroupExcel(groupId, monthStr) {
   try {
     const report = await DB.getGroupMonthReport(groupId, monthStr);
     // Дополнительно: информация о группе
-    const {data:groupInfo} = await sb().from('trainer_groups')
-      .select('branch, group_types(name), profiles(fio)').eq('id',groupId).single();
+    const groupInfo = await DB.getTrainerGroupById(groupId);
     exportChildGroupExcel(groupId, monthStr, report, groupInfo);
   } catch(e) { toast('Ошибка экспорта','error'); console.error(e); }
 }

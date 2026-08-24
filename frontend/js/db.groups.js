@@ -92,6 +92,22 @@ async getAssignedTrainers(groupTypeId) {
       .is('subscription_end',null).order('subscription_start',{ascending:false});
     if (error) throw error; return data||[];
   },
+  // Одна строка trainer_groups по id (+ group_types(*), profiles(fio)). Кэшируем —
+  // эти лукапы частые (renderGroupReport/renderAdultGroup* и т.п.).
+  async getTrainerGroupById(id) {
+    return cached(`grp:tg:${id}`, async () => {
+      if (useApi('groups')) {
+        const r = await api('/trainer-groups/'+id);
+        if (!r) return null;
+        return { ...r,
+          profiles: { fio: r.trainer_fio },
+          group_types: { name: r.group_name, type: r.group_kind, billing_model: r.billing_model } };
+      }
+      const {data,error} = await sb().from('trainer_groups')
+        .select('*, group_types(*), profiles(fio)').eq('id',id).single();
+      if (error) throw error; return data;
+    });
+  },
   async addTrainerGroup(trainerId, groupTypeId, branch, startDate, rateType='percent', rateValue=40, role=null, groupInstanceId=null) {
     invalidateCachePrefix('grp:');
     if (useApi('groups')) {

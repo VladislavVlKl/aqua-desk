@@ -158,8 +158,7 @@ async function doAddGroupClient(groupId) {
   if (!name) return toast('Введите имя','error');
   try {
     // Получаем group_instance_id для этой группы
-    const {data:tg} = await sb().from('trainer_groups')
-      .select('group_instance_id').eq('id',groupId).single();
+    const tg = await DB.getTrainerGroupById(groupId);
     const instanceId = tg?.group_instance_id||null;
 
     const newClient = await DB.addGroupClient(groupId, name, age, price, todayStr(), instanceId, subgroup);
@@ -210,8 +209,8 @@ function toggleGroupPayment(groupId, clientId, paid, amount, month) {
     document.body.appendChild(m);
   } else {
     // Снять оплату — без модала
-    sb().from('trainer_groups').select('group_instance_id').eq('id',groupId).single()
-      .then(({data:tg})=>DB.setGroupPayment(groupId, clientId, month, amount, false, null, null, tg?.group_instance_id||null))
+    DB.getTrainerGroupById(groupId)
+      .then(tg=>DB.setGroupPayment(groupId, clientId, month, amount, false, null, null, tg?.group_instance_id||null))
       .then(()=>refreshGroupScreen(groupId))
       .catch(()=>toast('Ошибка','error'));
   }
@@ -223,8 +222,7 @@ async function doSetGroupPayment(groupId, clientId, month, paid) {
   document.querySelector('.modal-overlay')?.remove();
   try {
     // Берём instance_id для этой группы
-    const {data:tg} = await sb().from('trainer_groups')
-      .select('group_instance_id').eq('id',groupId).single();
+    const tg = await DB.getTrainerGroupById(groupId);
     const instanceId = tg?.group_instance_id||null;
     await DB.setGroupPayment(groupId, clientId, month, amount, paid, subStart, subEnd, instanceId);
     DB.auditLog('group_payment', STATE.profile.id, STATE.profile.fio, groupId, 'group_payment',
@@ -350,8 +348,7 @@ async function doDeleteGroupClient(clientId, groupId) {
 }
 async function renderGroupAttendance(groupId) {
   // Берём instance_id группы
-  const {data:tg} = await sb().from('trainer_groups')
-    .select('group_instance_id').eq('id',groupId).single();
+  const tg = await DB.getTrainerGroupById(groupId);
   const instanceId = tg?.group_instance_id||null;
   let clients = instanceId
     ? await DB.getGroupClientsByInstance(instanceId)
