@@ -94,8 +94,11 @@ async function doApproveDelete(reqId, clientId, nameEnc) {
           <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
         <div class="warn-banner" style="margin-bottom:16px">
           ⚠️ У клиента <b>${fio}</b> есть история тренировок и записи.<br>
-          Удаление уберёт все данные безвозвратно.
+          Полное удаление уберёт все данные безвозвратно и <b>уменьшит ЗП тренера</b> за те периоды.
         </div>
+        <button class="btn btn-full btn-primary" style="margin-bottom:8px"
+          onclick="doArchiveFromDelete('${reqId}','${clientId}','${encodeURIComponent(fio)}')">
+          📦 В архив (сохранить историю и ЗП)</button>
         <button class="btn btn-full btn-danger" style="margin-bottom:8px"
           onclick="doForceDelete('${reqId}','${clientId}','${encodeURIComponent(fio)}')">
           🗑 Удалить принудительно вместе с историей</button>
@@ -128,6 +131,23 @@ async function doForceDelete(reqId, clientId, nameEnc) {
     invalidateCachePrefix('adm_control'); adminTab('control');
   } catch(e) { toast('Ошибка удаления','error'); console.error(e); }
   finally { _pending.delete('force_'+reqId); }
+}
+// Вместо удаления клиента с историей — отправить в архив (история и ЗП сохраняются),
+// а сам запрос на удаление закрыть.
+async function doArchiveFromDelete(reqId, clientId, nameEnc) {
+  const fio = decodeURIComponent(nameEnc);
+  if (_pending.has('archdel_'+reqId)) return;
+  _pending.add('archdel_'+reqId);
+  try {
+    await DB.archiveClient(clientId, 'Запрос на удаление → в архив (история сохранена)');
+    await DB.rejectDeleteRequest(reqId);
+    DB.auditLog('client_archive', STATE.profile.id, STATE.profile.fio, clientId, 'client',
+      { fio, from: 'delete_request' }, STATE.profile.branches?.[0]);
+    document.querySelector('.modal-overlay')?.remove();
+    toast('📦 В архиве — история и ЗП сохранены','success');
+    invalidateCachePrefix('adm_control'); adminTab('control');
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+  finally { _pending.delete('archdel_'+reqId); }
 }
 async function doRejectDelete(reqId) {
   if (_pending.has('reject_'+reqId)) return;
@@ -602,21 +622,12 @@ async function renderAdultGroupDetail(groupId) {
         ${groupHubInfoRow('Участников', `<span style="font-weight:600;font-size:13px">${clients.length}</span>`)}
         ${groupHubInfoRow('Занятий в этом месяце', `<span style="font-weight:600;font-size:13px">${sessions.length}${monthTotal?` · ${fmt(monthTotal)} сум`:''}</span>`)}
       </div>
-      ${groupHubSection('Управление')}
-      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px">
+      <div style="display:flex;flex-direction:column;gap:8px">
+        ${groupHubBigBtn('📊','Отметить занятие','кто был · ставка по явке',`renderAdultGroupHeadcount('${groupId}')`, true)}
         ${canPayroll?groupHubBigBtn('👥','Персонал','тренеры · ставки · расписание',`openSeniorGroupPersonnel('${groupId}')`):''}
         ${groupHubBigBtn('👤',`Участники (${clients.length})`,'добавление · архив',`renderAdultGroupMembers('${groupId}')`)}
-      </div>
-
-      ${groupHubSection('Занятия')}
-      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px">
-        ${groupHubBigBtn('📊','Отметить занятие','кто был · ставка по явке',`renderAdultGroupHeadcount('${groupId}')`)}
         ${groupHubBigBtn('📅','История занятий','по месяцам · правка/удаление',`renderAdultGroupHistory('${groupId}')`)}
         ${groupHubBigBtn('🔄','История замен','прошедшие и текущие замены',`renderGroupSubstitutionsHistory('${groupId}')`)}
-      </div>
-
-      ${groupHubSection('Финансы и отчёты')}
-      <div style="display:flex;flex-direction:column;gap:8px">
         ${groupHubBigBtn('💰','Отчёт за месяц','занятия · сумма по тренерам',`renderAdultGroupReport('${groupId}')`)}
       </div>
     </div></div>`);

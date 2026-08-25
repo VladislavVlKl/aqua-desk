@@ -87,10 +87,28 @@ function calcSalary({workouts=[], duties=[], trainerGroups=[], groupSessions=[],
 //   isArtSwim        — формула арт-свима: вычет ставочников у процентника, пул-лимит, allFlat
 //   attendance       — group_attendance месяца (для не-арт ставочника: занятий × ставка)
 // Замены НЕ входят в autoAmt/final — выплачиваются заменяющему отдельной строкой (groupSubSum).
+// Станция-сплит: один тренер может вести суша+вода (две активные строки одного инстанса
+// с разными role/session_time). Для ЗП это ОДИН участник — иначе 40%+40% (двойная оплата),
+// а ставочнику — двойной счёт занятий. Схлопываем строки с одинаковыми trainer_id + окном
+// действия (subscription_start/end). Разные окна (перезаведение в середине месяца — старая
+// строка закрыта, новая открыта) НЕ трогаем: там нужен раздельный расчёт по окнам.
+function _collapseTrainerRows(list) {
+  const by = {};
+  (list||[]).forEach(t=>{
+    const k = `${t.trainer_id}|${t.subscription_start||''}|${t.subscription_end||''}`;
+    const cur = by[k];
+    // при дубле оставляем строку с бОльшей ставкой (обычно одинаковы) — она несёт биллинг
+    if (!cur || Number(t.rate_value||0) > Number(cur.rate_value||0)) by[k] = t;
+  });
+  return Object.values(by);
+}
+
 function calcChildGroupPayroll({payments=[], trainers=[], instanceSessions=[], substitutions=[],
                                 rateHistory=[], adjustments=[], monthStr,
                                 isArtSwim=true, attendance=[]}) {
   const F = typeof fmt==='function' ? fmt : (n=>Number(n||0).toLocaleString('ru-RU'));
+  // Строки-станции одного тренера в одном окне считаем как одну (см. _collapseTrainerRows)
+  trainers = _collapseTrainerRows(trainers);
 
   const paidPayments = (payments||[]).filter(p=>p.paid);
   // Вал — всегда от реальных оплат месяца

@@ -94,14 +94,18 @@ Object.assign(DB, {
       return;
     }
     if (confirmed) {
-      // Подтвердить — снять с баланса клиента
+      // Подтвердить — снять с баланса клиента. Замена входит в очередь ресепшна именно
+      // сейчас (pending_confirmation=false) → пишем снимок остатка для карточки «−1 · остаток N».
       const {error} = await sb().from('workouts')
         .update({pending_confirmation:false}).eq('id',workoutId);
       if (error) throw error;
       const {data:cl} = await sb().from('clients').select('balance').eq('id',clientId).single();
+      const before = cl?.balance||0, after = Math.max(0, before-1);
       await sb().from('clients')
-        .update({balance:Math.max(0,(cl?.balance||0)-1),last_used:new Date().toISOString()})
+        .update({balance:after, last_used:new Date().toISOString()})
         .eq('id',clientId);
+      await sb().from('workouts')
+        .update({balance_before:before, balance_after:after}).eq('id',workoutId);
     } else {
       // Отклонить — удалить запись
       const {error} = await sb().from('workouts').delete().eq('id',workoutId);
@@ -196,57 +200,10 @@ Object.assign(DB, {
    * total = initial_balance абонемента (размер пакета). Разовые — без номера.
    * Мутирует переданный массив на месте.
    */
-  async _enrichReceptionSeq(workouts) {
-    const nd = (workouts||[]).filter(w=>!w.is_drop_in && w.client_id);
-    if (!nd.length) return;
-    const clientIds = [...new Set(nd.map(w=>w.client_id))];
-    let subs;
-    if (useApi('reception')) {
-      subs = await api('/reception/seq-subs', { query: { client_ids: clientIds } });
-    } else {
-      subs = (await sb().from('subscriptions')
-        .select('client_id,start_date,initial_balance').in('client_id',clientIds)).data;
-    }
-    const subsBy = {};
-    (subs||[]).forEach(s=>{ (subsBy[s.client_id]=subsBy[s.client_id]||[]).push(s); });
-    Object.values(subsBy).forEach(a=>a.sort((x,y)=>x.start_date<y.start_date?-1:1));
-    const coverFor = (cid,day)=>{ let s=null; for (const x of (subsBy[cid]||[])) { if (x.start_date<=day) s=x; else break; } return s; };
-    // История нужна с начала самого раннего покрывающего абонемента среди pending
-    let minFrom=null, maxDay=null;
-    nd.forEach(w=>{
-      const day=String(w.workout_date).slice(0,10);
-      const s=coverFor(w.client_id,day); const f=s?s.start_date:day;
-      if (!minFrom||f<minFrom) minFrom=f;
-      if (!maxDay||day>maxDay) maxDay=day;
-    });
-    let hist;
-    if (useApi('reception')) {
-      hist = await api('/reception/seq-history', { query: {
-        client_ids: clientIds, start: new Date(minFrom).toISOString(), end: `${maxDay}T23:59:59+05:00` } });
-    } else {
-      hist = (await sb().from('workouts')
-        .select('id,client_id,workout_date,is_drop_in,reception_status')
-        .in('client_id',clientIds).eq('pending_confirmation',false)
-        .gte('workout_date', new Date(minFrom).toISOString())
-        .lte('workout_date', `${maxDay}T23:59:59+05:00`)
-        .order('workout_date')).data;
-    }
-    const histBy = {};
-    (hist||[]).filter(w=>!w.is_drop_in && w.reception_status!=='rejected')
-      .forEach(w=>{ (histBy[w.client_id]=histBy[w.client_id]||[]).push(w); });
-    const seqMap = {};
-    Object.entries(histBy).forEach(([cid,list])=>{
-      list.sort((a,b)=> a.workout_date<b.workout_date?-1 : a.workout_date>b.workout_date?1 : (a.id<b.id?-1:1));
-      const counters={};
-      list.forEach(w=>{
-        const day=String(w.workout_date).slice(0,10);
-        const s=coverFor(cid,day); const key=s?s.start_date:'nosub';
-        counters[key]=(counters[key]||0)+1;
-        seqMap[w.id]={seq:counters[key], total:s?s.initial_balance:null};
-      });
-    });
-    nd.forEach(w=>{ const info=seqMap[w.id]; if (info) { w._seq=info.seq; w._total=info.total; } });
-  },
+  // РЕТАЙРЕД: ресепшн перешёл с реконструкции «N/M» на снимок остатка тренера
+  // (workouts.balance_after, пишется в logWorkouts/approveLateRequest). Карточка
+  // ресепшна читает balance_after напрямую. Оставлен пустым, чтобы не трогать вызовы.
+  async _enrichReceptionSeq(_workouts) { /* no-op */ },
 
   /** Очередь pending филиала за день: ПТ + пробные */
   async getReceptionPending(branch, dateStr) {
@@ -363,6 +320,41 @@ Object.assign(DB, {
     }
   },
 
+  /** Вернуть ошибочно отклонённое списание: rejected → confirmed + заново списать баланс.
+   *  Отклонение вернуло клиенту +1 (rejectWorkout), поэтому подтверждение заново списывает 1.
+   *  Если баланс = 0 (в минус не уводим) — ПТ помечается как долг (is_debt): тренер получает
+   *  оплату, клиент остаётся должен. Долг/разовое баланс не трогали → просто confirmed.
+   *  Возвращает {wentDebt, balanceAfter}. */
+  async restoreRejectedWorkout(id, actorId, actorFio) {
+    const {data:w, error:ge} = await sb().from('workouts')
+      .select('id,client_id,is_debt,is_drop_in,reception_status,branch').eq('id',id).single();
+    if (ge) throw ge;
+    if (w.reception_status!=='rejected') throw new Error('not_rejected');
+    let balanceAfter=null, wentDebt=false;
+    if (!w.is_debt && !w.is_drop_in) {
+      const {data:nb, error:be} = await sb().rpc('deduct_balance', {client_id:w.client_id, n:1});
+      if (be) {
+        const noFn = be.code==='42883' || be.code==='PGRST202';
+        const insuff = String(be.message||'').includes('INSUFFICIENT_BALANCE');
+        if (insuff) { wentDebt = true; }              // баланс 0 → в минус не уводим, оформляем долгом
+        else if (noFn) {
+          const {data:cl} = await sb().from('clients').select('balance').eq('id',w.client_id).single();
+          if ((cl?.balance||0) >= 1) { await sb().rpc('increment_balance',{client_id:w.client_id,delta:-1}); balanceAfter = cl.balance-1; }
+          else wentDebt = true;
+        } else throw be;
+      } else balanceAfter = nb;
+    }
+    const upd = {reception_status:'confirmed', reception_reason:null,
+                 reception_by:actorId, reception_at:new Date().toISOString()};
+    if (wentDebt) upd.is_debt = true;
+    if (balanceAfter!=null) { upd.balance_before = balanceAfter+1; upd.balance_after = balanceAfter; }
+    const {error:ue} = await sb().from('workouts').update(upd).eq('id',id);
+    if (ue) throw ue;
+    try { await DB.auditLog('reception_restore', actorId, actorFio, w.client_id, 'client',
+      {workout_id:id, went_debt:wentDebt, balance_after:balanceAfter}, w.branch); } catch(_){}
+    return {wentDebt, balanceAfter};
+  },
+
   /** Подтвердить пробную */
   async confirmTrial(id, receptionId) {
     if (useApi('reception')) { await api('/reception/trials/'+id+'/confirm', { method:'POST' }); return; }
@@ -420,29 +412,35 @@ Object.assign(DB, {
     tq = _brFilter(tq, branch);
     const [w, t] = await Promise.all([wq, tq]);
     if (w.error) throw w.error; if (t.error) throw t.error;
-    return { workouts:w.data||[], trials:t.data||[] };
+    const workouts = w.data||[];
+    await this._enrichReceptionSeq(workouts);
+    return { workouts, trials:t.data||[] };
   },
 
-  /** Подтверждённые за период (вкладка «История») */
+  /** Подтверждённые за период (вкладка «История»; branch — строка/массив/null). */
   async getReceptionConfirmed(branch, fromDate, toDate) {
     if (useApi('reception')) {
       const r = await api('/reception/confirmed', { query: { branch, start: fromDate, end: toDate } });
       return { workouts: (r.workouts||[]).map(_apiRcWo), trials: (r.trials||[]).map(_apiRcTr) };
     }
     const from = `${fromDate}T00:00:00+05:00`, to = `${toDate}T23:59:59+05:00`;
-    const wq = sb().from('workouts')
+    let wq = sb().from('workouts')
       .select('*, clients(fio), profiles!trainer_id(fio)')
-      .eq('branch',branch).eq('reception_status','confirmed')
+      .eq('reception_status','confirmed')
       .gte('reception_at',from).lte('reception_at',to)
       .order('reception_at',{ascending:false}).limit(300);
-    const tq = sb().from('trial_sessions')
+    wq = _brFilter(wq, branch);
+    let tq = sb().from('trial_sessions')
       .select('*, profiles!trainer_id(fio)')
-      .eq('branch',branch).eq('reception_status','confirmed')
+      .eq('reception_status','confirmed')
       .gte('reception_at',from).lte('reception_at',to)
       .order('reception_at',{ascending:false}).limit(300);
+    tq = _brFilter(tq, branch);
     const [w, t] = await Promise.all([wq, tq]);
     if (w.error) throw w.error; if (t.error) throw t.error;
-    return { workouts:w.data||[], trials:t.data||[] };
+    const workouts = w.data||[];
+    await this._enrichReceptionSeq(workouts);
+    return { workouts, trials:t.data||[] };
   },
 
   /** Все висящие pending филиала (для эскалации в «Контроле» координатора) */
@@ -452,12 +450,15 @@ Object.assign(DB, {
       return (rows||[]).map(w => ({ ...w, profiles: { fio: w.trainer_fio } }));
     }
     let wq = sb().from('workouts')
-      .select('id,branch,workout_date,trainer_id,profiles!trainer_id(fio)')
+      .select('id,branch,workout_date,trainer_id,client_id,is_drop_in,clients(fio),profiles!trainer_id(fio)')
       .eq('reception_status','pending').eq('pending_confirmation',false)
       .order('workout_date',{ascending:true});
     wq = _brFilter(wq, branch);
     const {data,error} = await wq;
-    if (error) throw error; return data||[];
+    if (error) throw error;
+    const rows = data||[];
+    await this._enrichReceptionSeq(rows);
+    return rows;
   },
 
   /** Статистика подтверждено/отклонено по тренерам за месяц (для «Контроля») */

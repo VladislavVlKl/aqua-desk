@@ -187,6 +187,10 @@ async function doAddGroupClient(groupId) {
 function toggleGroupPayment(groupId, clientId, paid, amount, month) {
   const isPaid = paid==='true'||paid===true;
   if (isPaid) {
+    // Дефолт начала = фактическая дата оплаты (сегодня), если она в просматриваемом месяце;
+    // при вводе задним числом за прошлый месяц — 1-е число того месяца.
+    const _today = new Date().toISOString().slice(0,10);
+    const defStart = _today.slice(0,7)===month.slice(0,7) ? _today : month.slice(0,10);
     // Открываем модал для ввода суммы и дат абонемента
     const m=el('div','modal-overlay');
     m.innerHTML=`<div class="modal">
@@ -195,9 +199,9 @@ function toggleGroupPayment(groupId, clientId, paid, amount, month) {
       <div class="form-group"><label>Сумма (сум)</label>
         <input id="gp-amount" type="number" value="${amount||0}"></div>
       <div class="form-group"><label>Начало абонемента</label>
-        <input id="gp-sub-start" type="date" value="${month.slice(0,10)}" onchange="syncGroupSubEnd()"></div>
-      <div class="form-group"><label>Конец абонемента <span style="font-size:11px;color:var(--hint)">(авто: 30 дней)</span></label>
-        <input id="gp-sub-end" type="date" value="${calcGroupSubEnd(month.slice(0,10))}"></div>
+        <input id="gp-sub-start" type="date" value="${defStart}" onchange="syncGroupSubEnd()"></div>
+      <div class="form-group"><label>Конец абонемента <span style="font-size:11px;color:var(--hint)">(авто: +1 месяц)</span></label>
+        <input id="gp-sub-end" type="date" value="${calcGroupSubEnd(defStart)}"></div>
       <button class="btn btn-primary btn-full"
         onclick="doSetGroupPayment('${groupId}','${clientId}','${month}',true)">✓ Оплачен</button>
     </div>`;

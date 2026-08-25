@@ -654,8 +654,21 @@ function exportChildGroupExcel(groupId, monthStr, report, groupInfo) {
   });
 
   const activeClients = clients.filter(c=>c.is_active!==false);
+  const archivedClients = report.archived || [];
   const totalPaid   = payments.filter(p=>p.paid).reduce((s,p)=>s+Number(p.amount||0),0);
   const totalUnpaid = payments.filter(p=>!p.paid).reduce((s,p)=>s+Number(p.amount||0),0);
+
+  // 4-статусная модель (docs/group-payment-status-4state.md): единый источник — statusMap
+  const statusMap = report.statusMap || {};
+  const statusOf = c => c.is_active===false ? 'left' : (statusMap[c.id]?.status || 'debt');
+  const ST = {
+    paid:  {label:'✅ Оплачено',        rgb:XL.GREEN_DARK},
+    carry: {label:'🟡 Оплачено в том мес.', rgb:'B45309'},
+    debt:  {label:'❌ Без оплаты',      rgb:'DC2626'},
+    left:  {label:'— Ушёл',             rgb:'64748B'},
+  };
+  const sCount = {paid:0, carry:0, debt:0, left:archivedClients.length};
+  activeClients.forEach(c=>{ sCount[statusOf(c)]++; });
 
   // ── Лист: Ведомость группы ──
   const rows = [];
@@ -668,52 +681,67 @@ function exportChildGroupExcel(groupId, monthStr, report, groupInfo) {
 
   // Шапка таблицы
   rows.push(sr(
-    ['N','Имя ребёнка','Возраст','Посещаемость','% явки','Сумма','Оплачено','Дата оплаты','Начало абонемента','Конец абонемента','Долг','Прогресс / заметка'],
+    ['N','Имя ребёнка','Возраст','Посещаемость','% явки','Сумма','Статус','Дата оплаты','Начало абонемента','Конец абонемента','Долг','Прогресс / заметка'],
     hStyle()
   ));
 
-  // Строки детей
-  activeClients.forEach((c,i) => {
-    const pay   = payMap[c.id];
+  // Строки активных детей
+  const clientRow = (c, i, forceLeft=false) => {
+    const pay   = statusMap[c.id]?.pay || payMap[c.id];
     const note  = noteMap[c.id];
     const att   = attByClient[c.id]||0;
     const pct   = sessionDates.length ? Math.round(att/sessionDates.length*100) : 0;
-    const isPaid = pay?.paid || false;
-    const amount = pay?.amount ? Number(pay.amount) : 0;
-    const debt   = isPaid ? 0 : amount;
+    const st    = forceLeft ? 'left' : statusOf(c);
+    const amount = st==='paid' && pay?.amount ? Number(pay.amount) : 0;
+    const debt   = st==='debt' ? Number((payMap[c.id]?.amount)||c.monthly_price||0) : 0;
 
     const rs = rStyle(i%2===0);
-    const paidStyle = isPaid
-      ? {...rs, font:{...rs.font, color:{rgb:XL.GREEN_DARK}}}
-      : {...rs, font:{...rs.font, color:{rgb:'DC2626'}}};
+    const stStyle = {...rs, font:{...rs.font, color:{rgb:ST[st].rgb}}};
 
-    rows.push([
+    return [
       tc(i+1, rs),
-      tc(c.name||'—', rs),
+      tc(c.name||'—', st==='left' ? {...rs, font:{...rs.font, color:{rgb:'94A3B8'}}} : rs),
       tc(c.age||'—', rs),
       tc(`${att}/${sessionDates.length}`, rs),
       {v:pct, t:'n', z:'0"%"', s:rs},
       mc(amount, rs),
-      tc(isPaid?'✅ Оплачено':'❌ Не оплачено', paidStyle),
+      tc(ST[st].label, stStyle),
       tc(pay?.paid_at ? new Date(pay.paid_at).toLocaleDateString('ru-RU') : '—', rs),
       tc(pay?.sub_start ? new Date(pay.sub_start).toLocaleDateString('ru-RU') : '—', rs),
       tc(pay?.sub_end ? new Date(pay.sub_end).toLocaleDateString('ru-RU') : '—', rs),
       mc(debt, {...rs, font:{...rs.font, color:{rgb:debt>0?'DC2626':XL.TEXT_DARK}}}),
       tc(note?.note||'—', rs),
-    ]);
-  });
+    ];
+  };
+  activeClients.forEach((c,i)=> rows.push(clientRow(c,i)));
+  // Ушедшие — отдельным блоком в конце (согласовано: включаем в файл)
+  if (archivedClients.length) {
+    rows.push(sr(['','── Ушли (архив) ──','','','','','','','','','',''], {
+      ...rStyle(false), font:{color:{rgb:'64748B'},bold:true,sz:10,name:'Arial'}
+    }));
+    archivedClients.forEach((c,i)=> rows.push(clientRow(c, activeClients.length+i, true)));
+  }
 
   rows.push([]);
 
-  // Итоговые строки
-  rows.push(sr(['','ИТОГО:','',`${activeClients.length} детей`,'','','','','','','',''], tStyle()));
-  rows.push(sr(['','Оплачено:','','','','','','','','','',`${payments.filter(p=>p.paid).length} чел.`], {
+  // Итоговые строки — 4 статуса
+  rows.push(sr(['','ИТОГО:','',`${activeClients.length} активных`,'','','','','','','',''], tStyle()));
+  rows.push(sr(['','Оплатили (этот месяц):','','','','','','','','','',`${sCount.paid} чел.`], {
     ...rStyle(false), font:{...rStyle(false).font, color:{rgb:XL.GREEN_DARK}, bold:true}
   }));
-  rows.push(sr(['','Не оплатили:','','','','','','','','','',`${activeClients.length-payments.filter(p=>p.paid).length} чел.`], {
-    ...rStyle(true), font:{...rStyle(true).font, color:{rgb:'DC2626'}, bold:true}
+  rows.push(sr(['','Оплатили в том месяце:','','','','','','','','','',`${sCount.carry} чел.`], {
+    ...rStyle(true), font:{...rStyle(true).font, color:{rgb:'B45309'}, bold:true}
   }));
-  rows.push(sr(['','Сумма оплат:','','','', mc(totalPaid),'','','','','',''], gStyle()));
+  rows.push(sr(['','Без оплаты:','','','','','','','','','',`${sCount.debt} чел.`], {
+    ...rStyle(false), font:{...rStyle(false).font, color:{rgb:'DC2626'}, bold:true}
+  }));
+  rows.push(sr(['','Ушли (архив):','','','','','','','','','',`${sCount.left} чел.`], {
+    ...rStyle(true), font:{...rStyle(true).font, color:{rgb:'64748B'}, bold:true}
+  }));
+  rows.push(sr(['','Оплачено сейчас (🟢+🟡):','','','','','','','','','',`${sCount.paid+sCount.carry} чел.`], {
+    ...rStyle(false), font:{...rStyle(false).font, bold:true}
+  }));
+  rows.push(sr(['','Сумма оплат (этот месяц):','','','', mc(totalPaid),'','','','','',''], gStyle()));
   if (totalUnpaid > 0)
     rows.push(sr(['','Задолженность:','','','', mc(totalUnpaid),'','','','','',''], {
       ...rStyle(false), fill:{fgColor:{rgb:'FEE2E2'}}, font:{color:{rgb:'DC2626'},bold:true,sz:10,name:'Arial'}

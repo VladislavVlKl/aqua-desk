@@ -4,8 +4,22 @@
 // ============================================================
 // ── КОНТРОЛЬ: очередь действий (inbox координатора) ──
 // Наблюдательные метрики вынесены в renderAdminMonitoring («Ещё»).
+// Память раскрытости наблюдательных блоков «Контроля» (переживает перерисовку/обновление)
+function _ctrlOpenState() {
+  try { return JSON.parse(localStorage.getItem('ctrl_open')||'{}'); } catch(e) { return {}; }
+}
+function _ctrlSetOpen(key, val) {
+  const s = _ctrlOpenState(); s[key] = !!val;
+  try { localStorage.setItem('ctrl_open', JSON.stringify(s)); } catch(e) {}
+}
+
 async function renderAdminControl(force=false) {
-  $('#tab-content').innerHTML=`<div class="tab-pad">
+  // При обновлении (🔄 или после действия) не показываем спиннер и сохраняем скролл,
+  // чтобы страница не «прыгала» наверх и блоки не схлопывались.
+  const scroller = document.getElementById('tab-content');
+  const savedTop = force ? (scroller?.scrollTop||0) : 0;
+  const savedWin = force ? (window.scrollY||0) : 0;
+  if (!force) $('#tab-content').innerHTML=`<div class="tab-pad">
     <div class="section-header"><h3>Контроль</h3>
       <button class="btn-icon" onclick="renderAdminControl(true)" title="Обновить">🔄</button></div>
     <div class="center-screen"><div class="spinner"></div></div></div>`;
@@ -17,22 +31,27 @@ async function renderAdminControl(force=false) {
     if (force) invalidateCache(cacheKey);
     const D = await cached(cacheKey, async () => {
       const monthFrom=`${y}-${_p2(mo)}-01`, monthTo=`${y}-${_p2(mo)}-${_p2(now.getDate())}`;
-      const [lateRequests, workoutDelReqs, deleteReqs, recHanging, recRejected, pendingSubs, catRecalcReqs, trialDelReqs] = await Promise.all([
+      // «Списанные» храним в списке 3 дня (потом — в отдельный архив/выгрузку)
+      const d3=new Date(now); d3.setDate(d3.getDate()-2);
+      const confFrom=`${d3.getFullYear()}-${_p2(d3.getMonth()+1)}-${_p2(d3.getDate())}`;
+      const [lateRequests, workoutDelReqs, deleteReqs, recHanging, recRejected, recConfirmed, pendingSubs, catRecalcReqs, trialDelReqs] = await Promise.all([
         DB.getPendingLateRequests(null).catch(()=>[]),
         DB.getAllWorkoutDeleteRequests().catch(()=>[]),
         DB.getAllDeleteRequests().catch(()=>[]),
         DB.getReceptionHanging(branches).catch(()=>[]),
         DB.getReceptionRejected(branches, monthFrom, monthTo).catch(()=>({workouts:[],trials:[]})),
+        DB.getReceptionConfirmed(branches, confFrom, monthTo).catch(()=>({workouts:[],trials:[]})),
         DB.getPendingSubstitutions().catch(()=>[]),   // замены — все филиалы
         DB.getPendingCategoryRecalcRequests(null).catch(()=>[]),
         DB.getAllTrialDeleteRequests().catch(()=>[]),
       ]);
-      return {lateRequests, workoutDelReqs, deleteReqs, recHanging, recRejected, pendingSubs, catRecalcReqs, trialDelReqs};
+      return {lateRequests, workoutDelReqs, deleteReqs, recHanging, recRejected, recConfirmed, pendingSubs, catRecalcReqs, trialDelReqs};
     }, 60000);
-    const {lateRequests, workoutDelReqs, deleteReqs, recHanging, recRejected, pendingSubs, catRecalcReqs, trialDelReqs} = D;
-    const sections=[];
+    const {lateRequests, workoutDelReqs, deleteReqs, recHanging, recRejected, recConfirmed, pendingSubs, catRecalcReqs, trialDelReqs} = D;
+    const actionSections=[];   // ⚡ требует решения (кнопки Одобрить/Отклонить/Удалить)
+    const monitorSections=[];  // 👁 контроль/наблюдение (сворачиваемое)
     // 🔄 Запросы на замену (подтверждает координатор или старший — кто первый)
-    if (pendingSubs.length) sections.push(`<div class="control-section">
+    if (pendingSubs.length) actionSections.push(`<div class="control-section">
       <div class="control-title warn">🔄 Запросы на замену (${pendingSubs.length})</div>
       ${pendingSubs.map(s=>{
         const sugg = (s.trainer_groups?.group_types?.billing_model==='headcount' && s.headcount) ? getAdultGroupRate(s.headcount) : '';
@@ -47,36 +66,67 @@ async function renderAdminControl(force=false) {
         </div>
       </div>`;}).join('')}
     </div>`);
-    // 🛎 Висящие подтверждения ресепшн (эскалация >24ч)
+    // Списания ресепшн: три раскрывающихся блока (несписанные / отказанные / списанные).
+    // Номер списания в абонементе (N/M) — у всех; пробные без номера.
+    const seqStr = it => (it._kind!=='t' && it.balance_after!=null) ? ` · остаток ${it.balance_after} ПТ` : '';
+    // Наблюдательный блок: <details> с запоминанием раскрытости (по умолчанию свёрнут).
+    const _open = _ctrlOpenState();
+    const collapse = (key, title, cls, inner) => {
+      const isOpen = (key in _open) ? _open[key] : false;
+      return `<details class="control-section" data-sec="${key}"${isOpen?' open':''}
+        ontoggle="_ctrlSetOpen('${key}', this.open)">
+        <summary class="control-title ${cls}" style="cursor:pointer">${title}</summary>${inner}</details>`;
+    };
+
+    // 🛎 НЕСПИСАННЫЕ — висящие подтверждения ресепшн (эскалация >24ч)
     if (recHanging.length) {
       const escThreshold = Date.now() - RECEPTION_ESCALATE_HRS*3600000;
       const overdue = recHanging.filter(w=>new Date(w.workout_date).getTime() < escThreshold);
       const ageStr = (d)=>{ const h=Math.floor((Date.now()-new Date(d))/3600000); return h<24?`${h} ч`:`${Math.floor(h/24)} дн.`; };
-      sections.push(`<div class="control-section">
-        <div class="control-title ${overdue.length?'danger':'warn'}">🛎 Висящие подтверждения ресепшн (${recHanging.length}${overdue.length?` · ⏰ ${overdue.length} > ${RECEPTION_ESCALATE_HRS}ч`:''})</div>
-        ${recHanging.slice(0,30).map(w=>{
+      monitorSections.push(collapse('hanging',
+        `🛎 Несписанные — висят у ресепшн (${recHanging.length}${overdue.length?` · ⏰ ${overdue.length} > ${RECEPTION_ESCALATE_HRS}ч`:''})`,
+        overdue.length?'danger':'warn',
+        recHanging.slice(0,30).map(w=>{
           const esc=new Date(w.workout_date).getTime()<escThreshold;
           return `<div class="control-item" ${esc?'style="border-left:3px solid var(--danger)"':''}>
-            <div class="ci-main">${w.profiles?.fio||'?'} <span class="hint">${w.branch||''}</span></div>
-            <div class="ci-sub">${fmtDT(w.workout_date)} · висит ${ageStr(w.workout_date)}${esc?' ⏰':''}</div>
+            <div class="ci-main">${w.clients?.fio||'?'} <span class="hint">← ${w.profiles?.fio||'?'}</span>${seqStr(w)}</div>
+            <div class="ci-sub">🏊 ${w.branch||'—'} · ПТ ${fmtDT(w.workout_date)} · висит ${ageStr(w.workout_date)}${esc?' ⏰':''}</div>
           </div>`;
-        }).join('')}
-      </div>`);
+        }).join('')));
     }
-    // 🔴 Отклонённые «вопросы по списанию» (сигнал расхождений)
-    const recQuestions=[
-      ...(recRejected.workouts||[]).filter(w=>w.reception_reason==='questions').map(w=>({fio:w.clients?.fio||'?',trainer:w.profiles?.fio||'?',ts:w.reception_at})),
-      ...(recRejected.trials||[]).filter(t=>t.reception_reason==='questions').map(t=>({fio:`${t.first_name}${t.last_name?' '+t.last_name:''}`,trainer:t.profiles?.fio||'?',ts:t.reception_at})),
+    // 🔴 ОТКАЗАННЫЕ — все причины; клуб + время ПТ + время отклонения (тренер может быть в 2 клубах)
+    const recRej=[
+      ...(recRejected.workouts||[]).map(w=>({...w, _kind:'w', fio:w.clients?.fio||'?', trainer:w.profiles?.fio||'?',
+        branch:w.branch||'', wdate:w.workout_date, ts:w.reception_at, reason:w.reception_reason})),
+      ...(recRejected.trials||[]).map(t=>({...t, _kind:'t', fio:`${t.first_name}${t.last_name?' '+t.last_name:''}`, trainer:t.profiles?.fio||'?',
+        branch:t.branch||'', wdate:t.session_date, ts:t.reception_at, reason:t.reception_reason})),
     ].sort((a,b)=>new Date(b.ts)-new Date(a.ts));
-    if (recQuestions.length) sections.push(`<div class="control-section">
-      <div class="control-title danger">🔴 Отклонено: вопросы по списанию (${recQuestions.length})</div>
-      ${recQuestions.map(q=>`<div class="control-item">
-        <div class="ci-main">${q.fio} <span class="hint">← ${q.trainer}</span></div>
-        <div class="ci-sub">отклонено ${fmtDT(q.ts)}</div>
-      </div>`).join('')}
-    </div>`);
+    if (recRej.length) monitorSections.push(collapse('rejected',
+      `🔴 Отказанные списания (${recRej.length})`, 'danger',
+      recRej.map(q=>`<div class="control-item" id="recrej-${q._kind}-${q.id}">
+        <div class="ci-main">${q.fio} <span class="hint">← ${q.trainer}</span>${q._kind==='t'?' <span class="hint">(пробное)</span>':''}${seqStr(q)}</div>
+        <div class="ci-sub">🏊 ${q.branch||'—'} · ПТ ${fmtDT(q.wdate)}</div>
+        <div class="ci-sub">✗ отклонено ${fmtDT(q.ts)}${q.reason?` · ${RECEPTION_REJECT_REASONS[q.reason]||q.reason}`:''}</div>
+        ${q._kind==='w'?`<div style="margin-top:8px">
+          <button class="btn btn-sm btn-primary" onclick="doRestoreRejectedWorkout('${q.id}')" title="Отклонили ошибочно — заново списать ПТ и засчитать в ЗП">↩︎ Вернуть списание</button>
+        </div>`:''}
+      </div>`).join('')));
+    // 🧾 СПИСАННЫЕ — подтверждённые за последние 3 дня (потом переносятся в архив/выгрузку)
+    const recConf=[
+      ...(recConfirmed.workouts||[]).map(w=>({...w, _kind:'w', fio:w.clients?.fio||'?', trainer:w.profiles?.fio||'?',
+        branch:w.branch||'', wdate:w.workout_date, ts:w.reception_at})),
+      ...(recConfirmed.trials||[]).map(t=>({...t, _kind:'t', fio:`${t.first_name}${t.last_name?' '+t.last_name:''}`, trainer:t.profiles?.fio||'?',
+        branch:t.branch||'', wdate:t.session_date, ts:t.reception_at})),
+    ].sort((a,b)=>new Date(b.ts)-new Date(a.ts));
+    if (recConf.length) monitorSections.push(collapse('confirmed',
+      `🧾 Списанные за 3 дня (${recConf.length})`, '',
+      recConf.slice(0,100).map(q=>`<div class="control-item">
+        <div class="ci-main">${q.fio} <span class="hint">← ${q.trainer}</span>${q._kind==='t'?' <span class="hint">(пробное)</span>':''}${seqStr(q)}</div>
+        <div class="ci-sub">🏊 ${q.branch||'—'} · ПТ ${fmtDT(q.wdate)}</div>
+      </div>`).join('')
+      + (recConf.length>100?`<div class="ci-sub" style="padding:8px 0;color:var(--hint)">…показаны первые 100 из ${recConf.length}</div>`:'')));
     // ⏰ Запросы на поздние тренировки
-    if (lateRequests.length) sections.push(`<div class="control-section">
+    if (lateRequests.length) actionSections.push(`<div class="control-section">
       <div class="control-title danger">⏰ Запросы на поздние тренировки (${lateRequests.length})</div>
       ${lateRequests.map(r=>`<div class="control-item">
         <div class="ci-main"><b>${r.clients?.fio||'?'}</b> · кат.${r.category} · ${r.profiles?.fio||'?'}</div>
@@ -89,7 +139,7 @@ async function renderAdminControl(force=false) {
       </div>`).join('')}
     </div>`);
     // 🔄 Запросы на пересчёт категории прошлых ПТ
-    if (catRecalcReqs.length) sections.push(`<div class="control-section">
+    if (catRecalcReqs.length) actionSections.push(`<div class="control-section">
       <div class="control-title warn">🔄 Пересчёт категории прошлых ПТ (${catRecalcReqs.length})</div>
       ${catRecalcReqs.map(r=>`<div class="control-item">
         <div class="ci-main"><b>${r.clients?.fio||r.client_fio||'?'}</b> · Кат.${r.clients?.category||'?'} → Кат.${r.new_category}</div>
@@ -101,7 +151,7 @@ async function renderAdminControl(force=false) {
       </div>`).join('')}
     </div>`);
     // 🗑 Запросы на удаление ПТ
-    if (workoutDelReqs.length) sections.push(`<div class="control-section">
+    if (workoutDelReqs.length) actionSections.push(`<div class="control-section">
       <div class="control-title danger">🗑 Запросы на удаление ПТ (${workoutDelReqs.length})</div>
       ${workoutDelReqs.map(r=>`<div class="control-item">
         <div class="ci-main">${r.client_name||'—'} · ${fmtDate(r.workout_date)}</div>
@@ -114,7 +164,7 @@ async function renderAdminControl(force=false) {
       </div>`).join('')}
     </div>`);
     // 🗑 Запросы на удаление пробной
-    if (trialDelReqs.length) sections.push(`<div class="control-section">
+    if (trialDelReqs.length) actionSections.push(`<div class="control-section">
       <div class="control-title danger">🗑 Запросы на удаление пробной (${trialDelReqs.length})</div>
       ${trialDelReqs.map(r=>`<div class="control-item">
         <div class="ci-main">${r.client_name||'—'} · ${fmtDate(r.session_date)}</div>
@@ -127,7 +177,7 @@ async function renderAdminControl(force=false) {
       </div>`).join('')}
     </div>`);
     // 🗑 Запросы на удаление клиента
-    if (deleteReqs.length) sections.push(`<div class="control-section">
+    if (deleteReqs.length) actionSections.push(`<div class="control-section">
       <div class="control-title danger">🗑 Запросы на удаление (${deleteReqs.length})</div>
       ${deleteReqs.map(r=>`<div class="control-item">
         <div class="ci-main">${r.client_name} <span class="hint">← ${r.profiles?.fio||'?'}</span></div>
@@ -142,12 +192,22 @@ async function renderAdminControl(force=false) {
       </div>`).join('')}
     </div>`);
 
+    const nothing = !actionSections.length && !monitorSections.length;
     $('#tab-content').innerHTML=`<div class="tab-pad">
       <div class="section-header"><h3>Контроль</h3>
         <button class="btn-icon" onclick="renderAdminControl(true)" title="Обновить">🔄</button></div>
       <p class="hint" style="margin-bottom:16px">На ${todayStr()} · очередь действий</p>
-      ${sections.length?sections.join(''):'<div class="empty-state">✅<p>Очередь пуста</p></div>'}
+      ${nothing ? '<div class="empty-state">✅<p>Очередь пуста</p></div>' : `
+        ${actionSections.length
+          ? `<div style="font-size:12px;font-weight:700;color:var(--hint);letter-spacing:.03em;margin:0 0 8px">⚡ ТРЕБУЕТ РЕШЕНИЯ</div>${actionSections.join('')}`
+          : '<div class="empty-state" style="padding:16px">✅<p style="margin:4px 0 0">Активных запросов нет</p></div>'}
+        ${monitorSections.length
+          ? `<div style="border-top:1px solid var(--border);margin:18px 0 10px"></div>
+             <div style="font-size:12px;font-weight:700;color:var(--hint);letter-spacing:.03em;margin:0 0 8px">👁 КОНТРОЛЬ · НАБЛЮДЕНИЕ</div>${monitorSections.join('')}`
+          : ''}`}
     </div>`;
+    // Восстанавливаем позицию прокрутки после обновления (без прыжка наверх)
+    if (force) { if (scroller) scroller.scrollTop = savedTop; if (savedWin) window.scrollTo(0, savedWin); }
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 
@@ -170,6 +230,23 @@ async function doApproveSubstitutionAdmin(id) {
     invalidateCachePrefix('adm_control'); renderAdminControl(true);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
   finally { _pending.delete('asub_'+id); }
+}
+
+// Вернуть ошибочно отклонённое ресепшном списание: rejected → confirmed + заново списать ПТ.
+// Если баланс 0 — оформляется долгом (в минус не уводим).
+async function doRestoreRejectedWorkout(id) {
+  if (_pending.has('recrestore_'+id)) return;
+  if (!confirm('Вернуть это списание? ПТ снова спишется у клиента и попадёт в ЗП тренера.')) return;
+  _pending.add('recrestore_'+id);
+  try {
+    const res = await DB.restoreRejectedWorkout(id, STATE.profile.id, STATE.profile.fio);
+    document.getElementById(`recrej-w-${id}`)?.remove();
+    toast(res.wentDebt ? '↩︎ Возвращено · баланс 0 → оформлено долгом' : '↩︎ Списание возвращено', 'success');
+    invalidateCachePrefix('adm_control'); renderAdminControl(true);
+  } catch(e) {
+    toast(String(e.message||'').includes('not_rejected') ? 'Уже обработано' : 'Ошибка','error');
+    console.error(e);
+  } finally { _pending.delete('recrestore_'+id); }
 }
 
 // ── МОНИТОРИНГ: наблюдательные метрики координатора (открывается из «Ещё») ──
