@@ -326,6 +326,7 @@ Object.assign(DB, {
    *  оплату, клиент остаётся должен. Долг/разовое баланс не трогали → просто confirmed.
    *  Возвращает {wentDebt, balanceAfter}. */
   async restoreRejectedWorkout(id, actorId, actorFio) {
+    if (useApi('reception')) return await api('/reception/workouts/'+id+'/restore', { method:'POST' });
     const {data:w, error:ge} = await sb().from('workouts')
       .select('id,client_id,is_debt,is_drop_in,reception_status,branch').eq('id',id).single();
     if (ge) throw ge;

@@ -410,9 +410,14 @@ async unassignTrainerGroup(id) {
   async getActiveGroupPaymentsMap(groupId, monthStr, groupInstanceId=undefined) {
     let inst = groupInstanceId;
     if (inst === undefined) {
-      const {data:tg} = await sb().from('trainer_groups')
-        .select('group_instance_id').eq('id',groupId).maybeSingle();
-      inst = tg?.group_instance_id || null;
+      if (useApi('groups')) {
+        const tg = await DB.getTrainerGroupById(groupId);
+        inst = tg?.group_instance_id || null;
+      } else {
+        const {data:tg} = await sb().from('trainer_groups')
+          .select('group_instance_id').eq('id',groupId).maybeSingle();
+        inst = tg?.group_instance_id || null;
+      }
     }
     let data;
     if (useApi('groups')) {
@@ -445,9 +450,14 @@ async unassignTrainerGroup(id) {
   async getGroupStatusMap(groupId, monthStr, groupInstanceId=undefined, todayStr=null) {
     let inst = groupInstanceId;
     if (inst === undefined) {
-      const {data:tg} = await sb().from('trainer_groups')
-        .select('group_instance_id').eq('id',groupId).maybeSingle();
-      inst = tg?.group_instance_id || null;
+      if (useApi('groups')) {
+        const tg = await DB.getTrainerGroupById(groupId);
+        inst = tg?.group_instance_id || null;
+      } else {
+        const {data:tg} = await sb().from('trainer_groups')
+          .select('group_instance_id').eq('id',groupId).maybeSingle();
+        inst = tg?.group_instance_id || null;
+      }
     }
     const mStart = String(monthStr).slice(0,10);                 // 'YYYY-MM-01'
     const d = new Date(mStart); d.setMonth(d.getMonth()+1); d.setDate(0);
@@ -456,10 +466,15 @@ async unassignTrainerGroup(id) {
     const refDate = today < mStart ? mStart : (today > mEnd ? mEnd : today);
     const mKey = monthStr.slice(0,7);
 
-    let q = sb().from('group_payments').select('*').eq('paid', true);
-    q = inst ? q.eq('group_instance_id', inst) : q.eq('group_id', groupId);
-    const {data,error} = await q;
-    if (error) throw error;
+    let data;
+    if (useApi('groups')) {
+      data = await api('/group-payments/paid', { query: inst ? { group_instance_id: inst } : { group_id: groupId } });
+    } else {
+      let q = sb().from('group_payments').select('*').eq('paid', true);
+      q = inst ? q.eq('group_instance_id', inst) : q.eq('group_id', groupId);
+      const res = await q;
+      if (res.error) throw res.error; data = res.data;
+    }
     const map = {};
     (data||[]).forEach(p=>{
       const isThisMonth = String(p.month).slice(0,7) === mKey;

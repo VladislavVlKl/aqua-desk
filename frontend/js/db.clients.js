@@ -122,6 +122,11 @@ Object.assign(DB, {
   // Коррекция остатка — ЯВНОЕ исправление ошибки (не пополнение). Пишется в audit_log
   // с причиной. Пополнение оформляется через buyNewPackage (создаёт абонемент).
   async correctBalance(clientId, newBalance, reason, actor) {
+    if (useApi('clients')) {
+      const r = await api('/clients/'+clientId+'/correct-balance', { method:'POST', body:{ new_balance: parseInt(newBalance)||0, reason: reason||null } });
+      invalidateCache('clients');
+      return r;
+    }
     const {data:cl} = await sb().from('clients').select('balance,fio').eq('id',clientId).single();
     const before = cl?.balance || 0;
     const after = Math.max(0, parseInt(newBalance) || 0);
