@@ -37,7 +37,7 @@ const CONFIG = {
   // Домены: auth, clients, schedule, groups, salary, requests, ops, analytics, misc.
   // ОТКАТ на живом проде — вернуть нужный домен в 'supabase' и задеплоить.
   API_MODE: {
-    all: 'api',   // ФЛИП 2026-08-26: весь трафик на FastAPI (api.aqua-desk.uz). Откат: 'supabase'.
+    all: 'supabase',   // ОТКАТ 2026-08-26: назад на Supabase (в путях записи asyncpg date-баги). Флип: 'api'.
   },
 };
 
