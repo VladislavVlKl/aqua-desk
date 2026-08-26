@@ -27,7 +27,7 @@ const CONFIG = {
   // Базовый URL нового API (модульный монолит aqua-desk-v2). Локальная разработка —
   // docker на 127.0.0.1:8000; прод (после деплоя Hetzner+домен) — api.<домен>.
   // Переопределяется через ?api= в URL (для быстрого теста) и localStorage 'aq_api_base'.
-  API_BASE: 'http://localhost:8000/api/v1',
+  API_BASE: 'https://api.aqua-desk.uz/api/v1',
 
   // Пофайловый (по-доменный) переключатель источника данных. Пока идёт миграция,
   // каждый домен независимо смотрит либо в Supabase (старое), либо в новый API.
@@ -37,8 +37,7 @@ const CONFIG = {
   // Домены: auth, clients, schedule, groups, salary, requests, ops, analytics, misc.
   // ОТКАТ на живом проде — вернуть нужный домен в 'supabase' и задеплоить.
   API_MODE: {
-    all: 'supabase',
-    // auth: 'api',   // ← включается по мере готовности домена
+    all: 'api',   // ФЛИП 2026-08-26: весь трафик на FastAPI (api.aqua-desk.uz). Откат: 'supabase'.
   },
 };
 
