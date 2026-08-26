@@ -193,9 +193,10 @@ async function _apiTelegramProfile(tgId) {
   if (data.access_token)  setApiToken(data.access_token);
   if (data.status === 'needs_registration') return null;
   if (data.status === 'needs_pin') {
-    // Профиль пока не отдан (только preauth). Заглушка ведёт boot к PIN-экрану;
-    // реальный профиль придёт из /auth/pin после ввода PIN (см. verifyPin).
-    return { id: null, tg_id: Number(tgId), fio: '', role: '', branches: [], has_pin: true };
+    // Профиль приходит для приветствия по имени на PIN-экране; access-токен — после PIN
+    // (см. verifyPin). has_pin:true держит PIN-гейт (токена ещё нет → boot идёт на PIN).
+    const pr = data.profile || { id: null, tg_id: Number(tgId), fio: '', role: '', branches: [] };
+    return { ...pr, tg_id: pr.tg_id || Number(tgId), has_pin: true };
   }
   // status 'ok' — профиль привязан и PIN не требуется (или dev-login).
   if (data.profile) {
