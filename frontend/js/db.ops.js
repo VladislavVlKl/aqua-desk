@@ -462,6 +462,19 @@ Object.assign(DB, {
     return rows;
   },
 
+  /** Все висящие pending пробные (для «Контроля» координатора; branch — строка/массив/null) */
+  async getReceptionHangingTrials(branch) {
+    if (useApi('reception')) return [];   // API пока не отдаёт висящие пробные
+    let tq = sb().from('trial_sessions')
+      .select('id,branch,session_date,trainer_id,first_name,last_name,category,profiles!trainer_id(fio)')
+      .eq('reception_status','pending')
+      .order('session_date',{ascending:true});
+    tq = _brFilter(tq, branch);
+    const {data,error} = await tq;
+    if (error) throw error;
+    return data||[];
+  },
+
   /** Статистика подтверждено/отклонено по тренерам за месяц (для «Контроля») */
   async getReceptionStats(branch, year, month) {
     if (useApi('reception')) {

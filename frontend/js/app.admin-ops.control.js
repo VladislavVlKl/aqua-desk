@@ -34,20 +34,21 @@ async function renderAdminControl(force=false) {
       // «Списанные» храним в списке 3 дня (потом — в отдельный архив/выгрузку)
       const d3=new Date(now); d3.setDate(d3.getDate()-2);
       const confFrom=`${d3.getFullYear()}-${_p2(d3.getMonth()+1)}-${_p2(d3.getDate())}`;
-      const [lateRequests, workoutDelReqs, deleteReqs, recHanging, recRejected, recConfirmed, pendingSubs, catRecalcReqs, trialDelReqs] = await Promise.all([
+      const [lateRequests, workoutDelReqs, deleteReqs, recHanging, recHangingTrials, recRejected, recConfirmed, pendingSubs, catRecalcReqs, trialDelReqs] = await Promise.all([
         DB.getPendingLateRequests(null).catch(()=>[]),
         DB.getAllWorkoutDeleteRequests().catch(()=>[]),
         DB.getAllDeleteRequests().catch(()=>[]),
         DB.getReceptionHanging(branches).catch(()=>[]),
+        DB.getReceptionHangingTrials(branches).catch(()=>[]),
         DB.getReceptionRejected(branches, monthFrom, monthTo).catch(()=>({workouts:[],trials:[]})),
         DB.getReceptionConfirmed(branches, confFrom, monthTo).catch(()=>({workouts:[],trials:[]})),
         DB.getPendingSubstitutions().catch(()=>[]),   // замены — все филиалы
         DB.getPendingCategoryRecalcRequests(null).catch(()=>[]),
         DB.getAllTrialDeleteRequests().catch(()=>[]),
       ]);
-      return {lateRequests, workoutDelReqs, deleteReqs, recHanging, recRejected, recConfirmed, pendingSubs, catRecalcReqs, trialDelReqs};
+      return {lateRequests, workoutDelReqs, deleteReqs, recHanging, recHangingTrials, recRejected, recConfirmed, pendingSubs, catRecalcReqs, trialDelReqs};
     }, 60000);
-    const {lateRequests, workoutDelReqs, deleteReqs, recHanging, recRejected, recConfirmed, pendingSubs, catRecalcReqs, trialDelReqs} = D;
+    const {lateRequests, workoutDelReqs, deleteReqs, recHanging, recHangingTrials, recRejected, recConfirmed, pendingSubs, catRecalcReqs, trialDelReqs} = D;
     const actionSections=[];   // ⚡ требует решения (кнопки Одобрить/Отклонить/Удалить)
     const monitorSections=[];  // 👁 контроль/наблюдение (сворачиваемое)
     // 🔄 Запросы на замену (подтверждает координатор или старший — кто первый)
@@ -88,9 +89,28 @@ async function renderAdminControl(force=false) {
         overdue.length?'danger':'warn',
         recHanging.slice(0,30).map(w=>{
           const esc=new Date(w.workout_date).getTime()<escThreshold;
-          return `<div class="control-item" ${esc?'style="border-left:3px solid var(--danger)"':''}>
+          return `<div class="control-item" id="ctrl-hang-${w.id}" ${esc?'style="border-left:3px solid var(--danger)"':''}>
             <div class="ci-main">${w.clients?.fio||'?'} <span class="hint">← ${w.profiles?.fio||'?'}</span>${seqStr(w)}</div>
             <div class="ci-sub">🏊 ${w.branch||'—'} · ПТ ${fmtDT(w.workout_date)} · висит ${ageStr(w.workout_date)}${esc?' ⏰':''}</div>
+            <div style="margin-top:8px">
+              <button class="btn btn-sm btn-primary" onclick="doControlConfirmDeduction('${w.id}')" title="Подтвердить списание за ресепшн (Шаг 1 → 1С)">✓ Подтвердить</button>
+            </div>
+          </div>`;
+        }).join('')));
+    }
+    // 🆕 НЕСПИСАННЫЕ ПРОБНЫЕ — висят у ресепшн (отдельная таблица trial_sessions)
+    if (recHangingTrials.length) {
+      const ageStrT = (d)=>{ const h=Math.floor((Date.now()-new Date(d))/3600000); return h<24?`${h} ч`:`${Math.floor(h/24)} дн.`; };
+      monitorSections.push(collapse('hanging_trials',
+        `🆕 Несписанные пробные — висят у ресепшн (${recHangingTrials.length})`, 'warn',
+        recHangingTrials.slice(0,30).map(t=>{
+          const cname = `${t.first_name||''}${t.last_name?' '+t.last_name:''}`.trim()||'?';
+          return `<div class="control-item" id="ctrl-hangt-${t.id}">
+            <div class="ci-main">${cname} <span class="hint">← ${t.profiles?.fio||'?'}</span>${t.category?` <span class="hi-cat cat-${t.category}">Кат.${t.category}</span>`:''}</div>
+            <div class="ci-sub">🏊 ${t.branch||'—'} · 🆕 Пробная ${fmtDT(t.session_date)} · висит ${ageStrT(t.session_date)}</div>
+            <div style="margin-top:8px">
+              <button class="btn btn-sm btn-primary" onclick="doControlConfirmTrial('${t.id}')" title="Подтвердить пробную за ресепшн (Шаг 1 → 1С)">✓ Подтвердить</button>
+            </div>
           </div>`;
         }).join('')));
     }
@@ -247,6 +267,37 @@ async function doRestoreRejectedWorkout(id) {
     toast(String(e.message||'').includes('not_rejected') ? 'Уже обработано' : 'Ошибка','error');
     console.error(e);
   } finally { _pending.delete('recrestore_'+id); }
+}
+
+// Координатор подтверждает списание тренера за ресепшн (Шаг 1 → 1С).
+// То же действие, что «✓ Подтвердить» в панели ресепшена (confirmWorkout).
+async function doControlConfirmDeduction(id) {
+  if (_pending.has('ctrlconf_'+id)) return;
+  _pending.add('ctrlconf_'+id);
+  try {
+    await DB.confirmWorkout(id, STATE.profile.id);
+    document.getElementById(`ctrl-hang-${id}`)?.remove();
+    try { DB.auditLog('reception_confirm', STATE.profile.id, STATE.profile.fio, id, 'workout',
+      { via:'admin_control' }, STATE.profile.branches?.[0]); } catch(_){}
+    toast('✓ Списание подтверждено','success');
+    invalidateCachePrefix('adm_control'); renderAdminControl(true);
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+  finally { _pending.delete('ctrlconf_'+id); }
+}
+
+// Координатор подтверждает пробную за ресепшн (Шаг 1 → 1С).
+async function doControlConfirmTrial(id) {
+  if (_pending.has('ctrlconft_'+id)) return;
+  _pending.add('ctrlconft_'+id);
+  try {
+    await DB.confirmTrial(id, STATE.profile.id);
+    document.getElementById(`ctrl-hangt-${id}`)?.remove();
+    try { DB.auditLog('reception_confirm', STATE.profile.id, STATE.profile.fio, id, 'trial',
+      { via:'admin_control' }, STATE.profile.branches?.[0]); } catch(_){}
+    toast('✓ Пробная подтверждена','success');
+    invalidateCachePrefix('adm_control'); renderAdminControl(true);
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+  finally { _pending.delete('ctrlconft_'+id); }
 }
 
 // ── МОНИТОРИНГ: наблюдательные метрики координатора (открывается из «Ещё») ──
