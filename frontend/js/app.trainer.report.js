@@ -812,8 +812,7 @@ function _seqDeadlineLabel() {
 async function renderSeqSurveyBanner() {
   const box = document.getElementById('seq-survey-banner');
   if (!box) return;
-  const branch = STATE.profile?.branches?.[0];
-  if (!seqSurveyEnabledForBranch(branch)) { box.innerHTML=''; return; }
+  if (!seqSurveyEnabled(STATE.profile)) { box.innerHTML=''; return; }
   let prog;
   try { prog = await DB.getSeqSurveyProgress(STATE.profile.id, SEQ_SURVEY.round); }
   catch(e) { console.error('[seq] progress', e); box.innerHTML=''; return; }

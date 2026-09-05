@@ -142,9 +142,16 @@ const SEQ_SURVEY = {
   branch:   'Chekhov Moms',
   round:    '2026-09',
   deadline: '2026-09-08',   // завтра (вс) + понедельник
+  // Точечный тест: перечисленные profiles.id видят баннер вне зависимости от филиала.
+  // На боевой запуск — очистить ([]), чтобы работал только гейт по branch.
+  testTrainerIds: [3],      // Владислав (тест)
 };
-function seqSurveyEnabledForBranch(branch) {
-  return !!(SEQ_SURVEY && SEQ_SURVEY.active && branch && branch === SEQ_SURVEY.branch);
+// Показывать ли опросник этому профилю: по филиалу ИЛИ по тестовому id.
+function seqSurveyEnabled(profile) {
+  if (!(SEQ_SURVEY && SEQ_SURVEY.active && profile)) return false;
+  const br = Array.isArray(profile.branches) ? profile.branches[0] : null;
+  if (br && br === SEQ_SURVEY.branch) return true;
+  return Array.isArray(SEQ_SURVEY.testTrainerIds) && SEQ_SURVEY.testTrainerIds.includes(profile.id);
 }
 
 // Причины отклонения списания ресепшеном (код → подпись)

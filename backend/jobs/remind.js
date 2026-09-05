@@ -136,6 +136,49 @@ async function ruleInactive() {
   for (const a of admins) { if (await tg(a.tg_id, msg)) console.log('[inactive] sent to admin:', a.fio); }
 }
 
+// Правило 5: Опросник сверки списаний (тест, филиал Chekhov Moms).
+// Расписание (время Ташкента): вс 07.09 в 10 и 18, пн 08.09 в 10.
+// Дублирует SEQ_SURVEY из frontend/config.js (node-джоб не импортирует браузерный конфиг).
+const SEQ_SURVEY_JOB = {
+  branch: 'Chekhov Moms',
+  round:  '2026-09',
+  schedule: { '2026-09-07': [10, 18], '2026-09-08': [10] },
+};
+async function ruleSeqSurvey(today, hourTashkent) {
+  const hours = SEQ_SURVEY_JOB.schedule[today];
+  if (!hours || !hours.includes(hourTashkent)) return;
+
+  const { data: trainers } = await sb.from('profiles')
+    .select('id,fio,tg_id,branches')
+    .in('role', ['trainer', 'senior_trainer'])
+    .not('tg_id', 'is', null);
+  const moms = (trainers || []).filter(t => Array.isArray(t.branches) && t.branches.includes(SEQ_SURVEY_JOB.branch));
+  console.log('[seq_survey] Moms trainers:', moms.length);
+  let sent = 0;
+
+  for (const tr of moms) {
+    // total = активные клиенты с активным абонементом (initial_balance>0)
+    const { data: clients } = await sb.from('clients').select('id')
+      .eq('trainer_id', tr.id).eq('is_archived', false);
+    const ids = (clients || []).map(c => c.id);
+    if (!ids.length) continue;
+    const { data: subs } = await sb.from('subscriptions').select('client_id')
+      .eq('is_active', true).gt('initial_balance', 0).in('client_id', ids);
+    const total = new Set((subs || []).map(s => s.client_id)).size;
+    if (!total) continue;
+    const { count: answered } = await sb.from('pt_sequence_survey')
+      .select('id', { count: 'exact', head: true })
+      .eq('trainer_id', tr.id).eq('round', SEQ_SURVEY_JOB.round);
+    if ((answered || 0) >= total) continue;   // уже прошёл
+
+    const msg = '📋 <b>Сверка списаний</b>\n\nПройдите сверку порядка списаний в приложении — '
+      + (answered ? ('осталось ' + (total - answered) + ' из ' + total) : (total + ' клиентов'))
+      + '. Займёт ~5 минут. Срок — до конца 8 сентября.';
+    if (await tg(tr.tg_id, msg)) { sent++; console.log('[seq_survey] sent to:', tr.fio); }
+  }
+  console.log('[seq_survey] sent total:', sent);
+}
+
 async function main() {
   const hourTashkent = (new Date().getUTCHours() + 5) % 24;
   const now = new Date();
@@ -146,6 +189,7 @@ async function main() {
 
   if (hourTashkent === 22) await ruleOpenSessions(dow, today);
   if (hourTashkent === 9)  { await ruleSubExpiring(); await ruleDebtOverdue(); await ruleInactive(); }
+  await ruleSeqSurvey(today, hourTashkent);
 
   console.log('=== Done ===');
 }
