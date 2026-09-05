@@ -67,20 +67,19 @@ Object.assign(DB, {
   },
 
   // Upsert одного ответа (onConflict round+client_id) — резюме и защита от дублей.
+  // Идемпотентно за счёт UNIQUE(round,client_id): повторный ответ перезаписывает строку.
   async saveSeqSurveyAnswer(row) {
-    return once(`seq-save-${row.round}-${row.clientId}`, async () => {
-      const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
-      const total = row.finalTotal != null ? row.finalTotal : row.systemTotal;
-      const finalNext = clamp(row.finalNext, 1, total || row.finalNext);
-      const { error } = await sb().from('pt_sequence_survey').upsert({
-        round: row.round, trainer_id: row.trainerId, client_id: row.clientId, branch: row.branch || null,
-        system_next: row.systemNext ?? null, system_total: row.systemTotal ?? null,
-        matches: row.matches ?? null, final_next: finalNext, final_total: total ?? null,
-        comment: (row.comment || '').trim() || null, is_manual: !!row.isManual,
-        answered_at: new Date().toISOString(),
-      }, { onConflict: 'round,client_id' });
-      if (error) throw error;
-    });
+    const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+    const total = row.finalTotal != null ? row.finalTotal : row.systemTotal;
+    const finalNext = clamp(row.finalNext, 1, total || row.finalNext);
+    const { error } = await sb().from('pt_sequence_survey').upsert({
+      round: row.round, trainer_id: row.trainerId, client_id: row.clientId, branch: row.branch || null,
+      system_next: row.systemNext ?? null, system_total: row.systemTotal ?? null,
+      matches: row.matches ?? null, final_next: finalNext, final_total: total ?? null,
+      comment: (row.comment || '').trim() || null, is_manual: !!row.isManual,
+      answered_at: new Date().toISOString(),
+    }, { onConflict: 'round,client_id' });
+    if (error) throw error;
   },
 
   // Прогресс тренера (для баннера на главной): {answered, total}.
