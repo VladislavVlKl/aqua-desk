@@ -163,6 +163,7 @@ balance_before / balance_after (снимок остатка ПТ на момен
 **schedule_confirmations** — подтверждение слота на дату: `slot_id, session_date, status, actual_headcount, workout_id, cancel_reason`
 
 **duties** — дежурства: `trainer_id, branch, start_time, end_time (NULL = активное)`
+> Защита от дублей (миграция `20260906120000_duties_dedup_guards`): UNIQUE `duties_no_dup_completed` на `(trainer_id, branch, start_time, end_time) WHERE end_time IS NOT NULL` (повтор той же завершённой смены отвергается — INSERT кинет 23505, фронт `doLogDuty` ловит как «уже внесено»); UNIQUE `duties_one_active_per_trainer` на `(trainer_id) WHERE end_time IS NULL` (не более одного открытого дежурства на тренера).
 
 ### Группы
 

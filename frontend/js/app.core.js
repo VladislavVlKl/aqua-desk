@@ -61,6 +61,28 @@ function rateLimit(key, ms=2000) {
   _rateLimits[key] = now;
   return true;
 }
+// ── КУЛДАУН ПОСЛЕ УСПЕХА ──────────────────────
+// Отличие от rateLimit: метку ставит только cooldownMark (после успешной записи),
+// а не при попытке. Значит неудачное списание (нехватка баланса) не блокирует повтор,
+// но два одинаковых успешных списания (клиент+тип+даты) не пройдут чаще COOLDOWN_MS —
+// защита от дублей при лагах/двойном тапе даже после ответа сервера. См. _logKey ниже.
+const COOLDOWN_MS = 15000;
+const _cooldowns = {};
+function cooldownActive(key, ms=COOLDOWN_MS) {
+  const t = _cooldowns[key];
+  return t != null && (Date.now() - t) < ms;
+}
+function cooldownMark(key) { _cooldowns[key] = Date.now(); }
+// Ключ списания: клиент + тип (обычная/долг/разовое) + отсортированные даты ПТ.
+// Разные клиенты и разные реальные тренировки (утро/вечер = разные даты/время) —
+// разные ключи, поэтому легитимный повтор не блокируется; повторный сабмит той же
+// формы — тот же ключ, отсекается.
+function _logKey(rows) {
+  const r = (rows && rows[0]) || {};
+  const type = r.is_debt ? 'debt' : (r.is_drop_in ? 'dropin'+(r.drop_in_category||'') : 'reg');
+  const dates = (rows||[]).map(x => x.workout_date).sort().join(',');
+  return `log_${r.client_id}_${type}_${dates}`;
+}
 // Для PIN-входа: блокируем после 5 неверных попыток на 30 сек
 let _pinFailCount = 0;
 let _pinBlockedUntil = 0;

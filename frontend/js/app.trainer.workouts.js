@@ -233,9 +233,12 @@ async function _doLogWorkoutInner() {
     drop_in_category:dropInCat,
   }));
   // Замена и долг/разовое — прямое списание без конспектов
+  const _ck = _logKey(rows);
+  if (cooldownActive(_ck)) return toast('Уже списано — подождите перед повтором','info');
   if (isSubstitute) {
     try {
       await DB.logSubstituteWorkout(rows, STATE.profile.id, subTrainerId);
+      cooldownMark(_ck);
       toast('✅ Замена записана — тренер получит уведомление для подтверждения','success');
       refreshTrainerScreen();
     } catch(e) { toast('Ошибка','error'); console.error(e); }
@@ -244,6 +247,7 @@ async function _doLogWorkoutInner() {
   if (isDebt||isDropIn) {
     try {
       await DB.logWorkouts(rows);
+      cooldownMark(_ck);
       toast(isDebt?'✅ В долг':'✅ Разовое','success');
       refreshTrainerScreen();
     } catch(e) { toast('Ошибка','error'); console.error(e); }
@@ -302,6 +306,9 @@ async function doConfirmLogWorkout() {
   if (_pending.has('confirmLog')) return;
   if (!_pendingLogData) return toast('Ошибка: нет данных','error');
   const { rows, clientId, count, overdueNotes } = _pendingLogData;
+  // Кулдаун: то же списание (клиент+тип+даты) не чаще 15 сек — от дублей при лагах.
+  const _ck = _logKey(rows);
+  if (cooldownActive(_ck)) return toast('Уже списано — подождите перед повтором','info');
 
   // Валидация долговых конспектов
   for (const w of overdueNotes) {
@@ -326,6 +333,7 @@ async function doConfirmLogWorkout() {
 
     // Списываем тренировки
     const result = await DB.logWorkouts(rows);
+    cooldownMark(_ck);  // метка кулдауна только после успешной записи
 
     // Сохраняем конспект за новую тренировку если заполнен
     const newAcc = document.getElementById('note-acc-new')?.value.trim();

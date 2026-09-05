@@ -578,6 +578,9 @@ function _refreshDutyModal() {
   renderDutyModal();
 }
 async function doLogDuty() {
+  // Гвард от двойного тапа: без него быстрый двойной клик успевал вставить дежурство
+  // дважды (кейс авг-2026: Халитов, смена 10.08 задвоилась 9 раз).
+  if (_pending.has('logDuty')) return;
   const start=document.getElementById('duty-start')?.value;
   const end=document.getElementById('duty-end')?.value;
   const branch=getBranch('duty-branch');
@@ -586,11 +589,28 @@ async function doLogDuty() {
   if (!branch) return toast('Выберите филиал','error');
   const h=hoursFromDuty(new Date(start),new Date(end));
   if (h>16) return toast('Не более 16 часов','error');
+  const startIso=new Date(start).toISOString(), endIso=new Date(end).toISOString();
+  // Кулдаун: та же смена (филиал+начало+конец) не чаще 15 сек — от дублей при лагах.
+  const ck=`duty_${branch}_${startIso}_${endIso}`;
+  if (cooldownActive(ck)) return toast('Дежурство уже внесено — подождите перед повтором','info');
+  _pending.add('logDuty');
+  const btn=document.querySelector('button[onclick="doLogDuty()"]');
+  if (btn) { btn.disabled=true; }
   try {
-    await DB.addDuty(STATE.profile.id, branch, new Date(start).toISOString(), new Date(end).toISOString());
+    await DB.addDuty(STATE.profile.id, branch, startIso, endIso);
+    cooldownMark(ck);
     toast(`✅ ${h.toFixed(1)}ч = ${fmt(Math.round(h*RATES.duty_per_hour))} сум`,'success');
     _refreshDutyModal();
-  } catch(e) { toast('Ошибка','error'); console.error(e); }
+  } catch(e) {
+    // UNIQUE-индекс duties_no_dup_completed отверг дубль (две вкладки / сетевой ретрай) —
+    // это не ошибка для пользователя: смена уже есть.
+    const dup = String(e?.code)==='23505' || /duplicate|unique|уже/i.test(String(e?.message||''));
+    if (dup) { cooldownMark(ck); toast('Дежурство уже внесено','info'); _refreshDutyModal(); }
+    else { toast('Ошибка','error'); console.error(e); }
+  } finally {
+    _pending.delete('logDuty');
+    if (btn) { btn.disabled=false; }
+  }
 }
 
 // ── ПОЗДНИЕ ТРЕНИРОВКИ (>72ч) ─────────────────
