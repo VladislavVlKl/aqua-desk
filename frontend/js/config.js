@@ -132,6 +132,21 @@ function receptionEnabledForBranch(branch) {
 const RECEPTION_EOD_HOUR     = 21;  // час «конца дня»: напоминание ресепшену о висящих pending
 const RECEPTION_ESCALATE_HRS = 24;  // pending старше → эскалация в «Контроле» координатора
 
+// ─── ОПРОСНИК: СВЕРКА ПОРЯДКОВЫХ СПИСАНИЙ (тест) ───
+// Тренер один раз сверяет расчётный номер списания (N из M) с листами/1С.
+// Сбор данных; clients.balance НЕ трогаем. active=false — фича выключена (баннер скрыт).
+// branch — точное название из таблицы branches. round — метка прогона (в pt_sequence_survey).
+// deadline — дата (YYYY-MM-DD), до конца которой нужно пройти (показывается в баннере).
+const SEQ_SURVEY = {
+  active:   true,
+  branch:   'Chekhov Moms',
+  round:    '2026-09',
+  deadline: '2026-09-08',   // завтра (вс) + понедельник
+};
+function seqSurveyEnabledForBranch(branch) {
+  return !!(SEQ_SURVEY && SEQ_SURVEY.active && branch && branch === SEQ_SURVEY.branch);
+}
+
 // Причины отклонения списания ресепшеном (код → подпись)
 const RECEPTION_REJECT_REASONS = {
   not_found: 'Не нашли клиента в базе',
