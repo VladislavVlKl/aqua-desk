@@ -4,6 +4,91 @@ function _apiRcWo(w) { return { ...w, clients: { fio: w.client_fio, age: w.clien
 function _apiRcTr(t) { return { ...t, profiles: { fio: t.trainer_fio } }; }
 
 Object.assign(DB, {
+  // ─── СВЕРКА ПОРЯДКОВЫХ СПИСАНИЙ (опросник, Supabase-only) ───
+  // Тренер сверяет расчётный номер следующего списания (N из M) с листами/1С.
+  // Сбор данных: clients.balance НЕ трогаем. Таблица pt_sequence_survey.
+  // Возвращает всё для экрана: авто-клиенты (активный абонемент) + вручную
+  // добавленные + кандидаты на добавление (упущенные) + прогресс.
+  async getSeqSurveyList(trainerId, round) {
+    const [clientsRes, answersRes] = await Promise.all([
+      sb().from('clients').select('id,fio,category,balance,is_archived')
+        .eq('trainer_id', trainerId).eq('is_archived', false),
+      sb().from('pt_sequence_survey').select('*')
+        .eq('trainer_id', trainerId).eq('round', round),
+    ]);
+    if (clientsRes.error) throw clientsRes.error;
+    if (answersRes.error) throw answersRes.error;
+    const clients = clientsRes.data || [];
+    const answers = answersRes.data || [];
+    const clientMap = Object.fromEntries(clients.map(c => [c.id, c]));
+    const ids = clients.map(c => c.id);
+
+    // Активные абонементы с ненулевым пакетом — за один запрос
+    let subs = [];
+    if (ids.length) {
+      const { data, error } = await sb().from('subscriptions')
+        .select('client_id,initial_balance')
+        .eq('is_active', true).gt('initial_balance', 0).in('client_id', ids);
+      if (error) throw error;
+      subs = data || [];
+    }
+    const subMap = {};
+    subs.forEach(s => { if (!(s.client_id in subMap)) subMap[s.client_id] = s.initial_balance; });
+    const ansMap = Object.fromEntries(answers.map(a => [a.client_id, a]));
+
+    const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+    const items = [];
+    // 1) Авто-список: клиенты с активным абонементом
+    for (const c of clients) {
+      const total = subMap[c.id];
+      if (total == null) continue;                 // нет активного пакета → не в авто-списке
+      const used = clamp(total - (c.balance || 0), 0, total);
+      const next = clamp(used + 1, 1, total);
+      items.push({ client_id: c.id, fio: c.fio, category: c.category,
+        total, used, next, is_manual: false, answer: ansMap[c.id] || null });
+    }
+    // 2) Вручную добавленные (ответ есть, is_manual) — даже если без активного пакета
+    for (const a of answers) {
+      if (!a.is_manual) continue;
+      if (items.some(it => it.client_id === a.client_id)) continue;
+      const c = clientMap[a.client_id];
+      items.push({ client_id: a.client_id, fio: c ? c.fio : '(клиент)', category: c ? c.category : null,
+        total: a.final_total, used: (a.final_next || 1) - 1, next: a.final_next,
+        is_manual: true, answer: a });
+    }
+    // 3) Кандидаты на добавление = не-архивные клиенты, которых нет в списке
+    const listedIds = new Set(items.map(it => it.client_id));
+    const candidates = clients.filter(c => !listedIds.has(c.id))
+      .map(c => ({ client_id: c.id, fio: c.fio }))
+      .sort((a, b) => a.fio.localeCompare(b.fio, 'ru'));
+
+    const answeredCount = items.filter(it => it.answer).length;
+    return { round, items, candidates, answeredCount, totalCount: items.length };
+  },
+
+  // Upsert одного ответа (onConflict round+client_id) — резюме и защита от дублей.
+  async saveSeqSurveyAnswer(row) {
+    return once(`seq-save-${row.round}-${row.clientId}`, async () => {
+      const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+      const total = row.finalTotal != null ? row.finalTotal : row.systemTotal;
+      const finalNext = clamp(row.finalNext, 1, total || row.finalNext);
+      const { error } = await sb().from('pt_sequence_survey').upsert({
+        round: row.round, trainer_id: row.trainerId, client_id: row.clientId, branch: row.branch || null,
+        system_next: row.systemNext ?? null, system_total: row.systemTotal ?? null,
+        matches: row.matches ?? null, final_next: finalNext, final_total: total ?? null,
+        comment: (row.comment || '').trim() || null, is_manual: !!row.isManual,
+        answered_at: new Date().toISOString(),
+      }, { onConflict: 'round,client_id' });
+      if (error) throw error;
+    });
+  },
+
+  // Прогресс тренера (для баннера на главной): {answered, total}.
+  async getSeqSurveyProgress(trainerId, round) {
+    const r = await DB.getSeqSurveyList(trainerId, round);
+    return { answered: r.answeredCount, total: r.totalCount };
+  },
+
   // ─── УВЕДОМЛЕНИЯ ─────────────────────────────
   async getNotificationRules() {
     if (useApi('notifications')) return await api('/notifications/rules');

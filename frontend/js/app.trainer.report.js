@@ -2,6 +2,7 @@
 async function renderReportTab() {
   const now=new Date(); let year=now.getFullYear(), month=now.getMonth()+1;
   $('#tab-content').innerHTML=`<div class="tab-pad">
+    <div id="seq-survey-banner"></div>
     <div class="section-header"><h3>Мой отчёт</h3>
       <div style="display:flex;align-items:center;gap:6px">
         <div class="month-nav">
@@ -16,6 +17,7 @@ async function renderReportTab() {
   document.getElementById('prev-m')?.addEventListener('click',()=>{if(month===1){year--;month=12;}else month--;document.getElementById('rep-month').textContent=fmtMY(year,month);load();});
   document.getElementById('next-m')?.addEventListener('click',()=>{if(month===12){year++;month=1;}else month++;document.getElementById('rep-month').textContent=fmtMY(year,month);load();});
   document.getElementById('rep-excel')?.addEventListener('click',()=>doExportTrainer(STATE.profile.id,encodeURIComponent(STATE.profile.fio),year,month));
+  renderSeqSurveyBanner();   // баннер опросника «Сверка списаний» (если включён для филиала)
   await load();
 }
 // ============================================================
@@ -790,3 +792,228 @@ async function doAdminTransfer(clientId) {
 }
 
 
+
+// ============================================================
+// SECTION: TRAINER:SEQ_SURVEY — опросник «Сверка порядковых списаний»
+// Тренер сверяет расчётный номер списания (N из M) с листами/1С.
+// Только сбор (clients.balance не трогаем). Данные → pt_sequence_survey.
+// ============================================================
+
+// Человекочитаемый дедлайн: '2026-09-08' → '8 сентября'
+function _seqDeadlineLabel() {
+  try {
+    const M = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
+    const [y,m,d] = SEQ_SURVEY.deadline.split('-').map(Number);
+    return `${d} ${M[m-1]}`;
+  } catch(e) { return SEQ_SURVEY.deadline; }
+}
+
+// Баннер на главной тренера. Три состояния: не начато / в процессе / пройдено.
+async function renderSeqSurveyBanner() {
+  const box = document.getElementById('seq-survey-banner');
+  if (!box) return;
+  if (!seqSurveyEnabled(STATE.profile)) { box.innerHTML=''; return; }
+  let prog;
+  try { prog = await DB.getSeqSurveyProgress(STATE.profile.id, SEQ_SURVEY.round); }
+  catch(e) { console.error('[seq] progress', e); box.innerHTML=''; return; }
+  if (!prog.total) { box.innerHTML=''; return; }   // нечего сверять
+
+  const { answered, total } = prog;
+  const dl = _seqDeadlineLabel();
+  if (answered >= total) {
+    box.innerHTML = `<div class="seq-done-chip" onclick="openSeqSurvey()">
+      <span>✓ Сверка списаний пройдена — ${total} клиентов</span><span class="seq-open">открыть →</span></div>`;
+    return;
+  }
+  if (answered === 0) {
+    box.innerHTML = `<div class="seq-hero" onclick="openSeqSurvey()">
+      <span class="seq-pin">★ Важно · до ${dl}</span>
+      <h3>Сверьте порядок списаний</h3>
+      <p>Проверьте, что номер занятия у клиентов совпадает с листами и 1С. ~5 минут.</p>
+      <button class="seq-cta" onclick="event.stopPropagation();openSeqSurvey()">Пройти сверку →</button>
+      <div class="seq-hero-meta"><span class="seq-chip">0 из ${total} готово</span><span class="seq-chip">≈ 5 мин</span></div>
+    </div>`;
+    return;
+  }
+  const pct = Math.round(answered/total*100);
+  box.innerHTML = `<div class="seq-hero" onclick="openSeqSurvey()">
+    <span class="seq-pin">Продолжите сверку · срок ${dl}</span>
+    <h3>Сверено ${answered} из ${total}</h3>
+    <div class="seq-hbar"><i style="width:${pct}%"></i></div>
+    <button class="seq-cta" onclick="event.stopPropagation();openSeqSurvey()">Продолжить →</button>
+  </div>`;
+}
+
+// Экран опросника
+async function openSeqSurvey() {
+  const branch = STATE.profile?.branches?.[0];
+  loading('Загружаю базу...');
+  let data;
+  try { data = await DB.getSeqSurveyList(STATE.profile.id, SEQ_SURVEY.round); }
+  catch(e) { console.error('[seq] list', e); toast('Не удалось загрузить','error'); renderTrainerApp(); switchTab('home'); return; }
+  window._seq = { round: SEQ_SURVEY.round, trainerId: STATE.profile.id, branch, data };
+  navPush(()=>{ renderTrainerApp(); switchTab('home'); });
+  setScreen(`
+    <div class="seq-screen">
+      <div class="seq-head">
+        ${backBtn('←')}
+        <div>
+          <h2>Сверка списаний</h2>
+          <div class="seq-sub">Совпадает ли номер занятия с листами и 1С? · срок ${_seqDeadlineLabel()}</div>
+        </div>
+      </div>
+      <div class="seq-progress">
+        <div class="seq-pbar"><span id="seq-pfill"></span></div>
+        <div class="seq-pcap"><span>Сверено</span><span><b id="seq-pdone">0</b> из <b id="seq-ptot">0</b></span></div>
+      </div>
+      <div id="seq-body" class="seq-list"></div>
+    </div>`);
+  setupBack(goBack);
+  _seqRenderBody();
+}
+
+function _seqCardHtml(it) {
+  const initials = (it.fio||'?').split(' ').map(s=>s[0]).join('').slice(0,2);
+  const cat = it.category ? `Категория ${it.category} · ` : '';
+  const pkg = it.total != null ? `пакет ${it.total} ПТ` : 'без пакета';
+  const reopen = it._reopen;
+  // Состояние «отвечено»
+  if (it.answer && !reopen) {
+    const a = it.answer;
+    if (a.is_manual) {
+      return `<div class="seq-card done-manual" data-cid="${it.client_id}">
+        <div class="seq-top"><div class="seq-cav" style="background:#0ea5e9">${initials}</div>
+          <div class="seq-nm">${it.fio}<small>добавлен вручную · ${cat}${pkg}</small></div>
+          <div class="seq-seq"><div class="big">${a.final_next} из ${a.final_total ?? '?'}</div><div class="lbl2">учтено</div></div></div>
+        <button class="seq-edit" onclick="seqEdit('${it.client_id}')">Изменить</button></div>`;
+    }
+    const yes = a.matches === true;
+    return `<div class="seq-card ${yes?'done-yes':'done-no'}" data-cid="${it.client_id}">
+      <div class="seq-top"><div class="seq-cav" style="background:${yes?'var(--success)':'var(--danger)'}">${initials}</div>
+        <div class="seq-nm">${it.fio}<small>${cat}${pkg}</small></div>
+        <div class="seq-seq"><div class="big" style="color:${yes?'var(--success)':'var(--danger)'}">${yes?'✓':'✗'} ${a.final_next} из ${a.final_total ?? it.total}</div>
+          <div class="lbl2">${yes?'совпадает':'исправлено'}</div></div></div>
+      ${a.comment?`<div class="seq-cmt">💬 ${a.comment}</div>`:''}
+      <button class="seq-edit" onclick="seqEdit('${it.client_id}')">Изменить</button></div>`;
+  }
+  // Состояние «вопрос»
+  const barPct = it.total ? Math.round(it.used/it.total*100) : 0;
+  return `<div class="seq-card" data-cid="${it.client_id}">
+    <div class="seq-top"><div class="seq-cav" style="background:var(--accent)">${initials}</div>
+      <div class="seq-nm">${it.fio}<small>${cat}${pkg}</small></div>
+      <div class="seq-seq"><div class="big">след. <b>${it.next}</b> из ${it.total}</div><div class="lbl2">сделано ${it.used}</div></div></div>
+    <div class="seq-bar"><span>${it.used}</span><div class="track"><i style="width:${barPct}%"></i></div><span>осталось ${it.total-it.used}</span></div>
+    <div class="seq-ask">Следующее списание — <b>${it.next}-е</b>. Совпадает с листами и 1С?</div>
+    <div class="seq-yn">
+      <button onclick="seqYes('${it.client_id}')">✓ Да, совпадает</button>
+      <button class="no" onclick="seqNo('${it.client_id}')">✕ Нет, другое</button>
+    </div>
+    <div class="seq-fix" id="fix-${it.client_id}">
+      <label>Правильный номер следующего занятия:</label>
+      <div class="in"><input type="number" id="fixn-${it.client_id}" value="${it.next}" min="1" max="${it.total}"><span class="of">из ${it.total}</span></div>
+      <textarea id="fixc-${it.client_id}" rows="2" placeholder="Комментарий: напр. в 1С уже другое число"></textarea>
+      <button class="seq-save" onclick="seqSaveNo('${it.client_id}')">Сохранить</button>
+    </div>
+  </div>`;
+}
+
+function _seqRenderBody() {
+  const s = window._seq; if (!s) return;
+  const body = document.getElementById('seq-body'); if (!body) return;
+  const { items, candidates } = s.data;
+  const answered = items.filter(it=>it.answer).length;
+  const total = items.length;
+
+  const cards = items.map(_seqCardHtml).join('');
+
+  // Финальный блок: «все ли отметили?» + добавить упущенного
+  const allDone = total>0 && answered===total;
+  const candOpts = candidates.map(c=>`<option value="${c.client_id}">${c.fio}</option>`).join('');
+  const finalBlock = `
+    <div class="seq-final ${allDone?'ok':''}">
+      ${allDone
+        ? `<div class="seq-final-done">✓ Все ${total} клиентов отмечены</div>`
+        : `<div class="seq-final-cap">Отмечено <b>${answered}</b> из <b>${total}</b> — отметьте оставшихся</div>`}
+      <div class="seq-add-q">Кого-то из клиентов нет в списке?</div>
+      ${candidates.length
+        ? `<div class="seq-add">
+             <select id="seq-add-sel"><option value="">— выберите упущенного клиента —</option>${candOpts}</select>
+             <div class="seq-add-nums">
+               <label>Уже сделано</label>
+               <input type="number" id="seq-add-used" min="0" placeholder="напр. 6"> из
+               <input type="number" id="seq-add-total" min="1" placeholder="напр. 10">
+             </div>
+             <textarea id="seq-add-cmt" rows="1" placeholder="Комментарий"></textarea>
+             <button class="seq-save" onclick="seqAddManual()">Добавить клиента</button>
+           </div>`
+        : `<div class="seq-add-empty">Все ваши клиенты уже в списке — добавлять некого.</div>`}
+    </div>`;
+
+  body.innerHTML = cards + finalBlock;
+
+  // прогресс
+  const pfill = document.getElementById('seq-pfill');
+  const pct = total ? Math.round(answered/total*100) : 0;
+  if (pfill) { pfill.style.width = Math.max(pct,3)+'%'; pfill.style.background = allDone ? 'var(--success)' : 'var(--warn)'; }
+  const pd = document.getElementById('seq-pdone'); if (pd) pd.textContent = answered;
+  const pt = document.getElementById('seq-ptot');  if (pt) pt.textContent = total;
+}
+
+function _seqItem(clientId) { return window._seq?.data.items.find(it=>it.client_id===clientId); }
+
+async function seqYes(clientId) {
+  const it = _seqItem(clientId); if (!it) return;
+  try {
+    await DB.saveSeqSurveyAnswer({ round: window._seq.round, trainerId: window._seq.trainerId, branch: window._seq.branch,
+      clientId, systemNext: it.next, systemTotal: it.total, matches: true, finalNext: it.next, finalTotal: it.total });
+    it.answer = { matches:true, final_next:it.next, final_total:it.total, comment:null };
+    it._reopen = false; _seqRenderBody();
+  } catch(e) { console.error('[seq] yes', e); toast('Не сохранилось','error'); }
+}
+
+function seqNo(clientId) {
+  const fix = document.getElementById('fix-'+clientId);
+  if (fix) { fix.classList.add('show'); document.getElementById('fixn-'+clientId)?.focus(); }
+}
+
+async function seqSaveNo(clientId) {
+  const it = _seqItem(clientId); if (!it) return;
+  const v = parseInt(document.getElementById('fixn-'+clientId)?.value, 10);
+  if (!Number.isFinite(v) || v < 1) { toast('Укажите номер','error'); return; }
+  const cmt = document.getElementById('fixc-'+clientId)?.value || '';
+  try {
+    await DB.saveSeqSurveyAnswer({ round: window._seq.round, trainerId: window._seq.trainerId, branch: window._seq.branch,
+      clientId, systemNext: it.next, systemTotal: it.total, matches: false, finalNext: v, finalTotal: it.total, comment: cmt });
+    it.answer = { matches:false, final_next: Math.min(v, it.total||v), final_total:it.total, comment:cmt.trim()||null };
+    it._reopen = false; _seqRenderBody();
+  } catch(e) { console.error('[seq] no', e); toast('Не сохранилось','error'); }
+}
+
+function seqEdit(clientId) {
+  const it = _seqItem(clientId); if (!it) return;
+  it._reopen = true; _seqRenderBody();
+  if (it.answer && it.answer.matches === false) seqNo(clientId);
+}
+
+async function seqAddManual() {
+  const s = window._seq; if (!s) return;
+  const clientId = document.getElementById('seq-add-sel')?.value;
+  const used = parseInt(document.getElementById('seq-add-used')?.value, 10);
+  const total = parseInt(document.getElementById('seq-add-total')?.value, 10);
+  const cmt = document.getElementById('seq-add-cmt')?.value || '';
+  if (!clientId) { toast('Выберите клиента','error'); return; }
+  if (!Number.isFinite(total) || total < 1) { toast('Укажите размер пакета','error'); return; }
+  if (!Number.isFinite(used) || used < 0 || used > total) { toast('«Сделано» должно быть 0…'+total,'error'); return; }
+  const next = Math.min(used + 1, total);
+  try {
+    await DB.saveSeqSurveyAnswer({ round: s.round, trainerId: s.trainerId, branch: s.branch,
+      clientId, systemNext: null, systemTotal: null, matches: null,
+      finalNext: next, finalTotal: total, comment: cmt, isManual: true });
+    const cand = s.data.candidates.find(c=>c.client_id===clientId);
+    s.data.candidates = s.data.candidates.filter(c=>c.client_id!==clientId);
+    s.data.items.push({ client_id: clientId, fio: cand?cand.fio:'(клиент)', category: null,
+      total, used, next, is_manual: true, answer: { is_manual:true, matches:null, final_next:next, final_total:total, comment:cmt.trim()||null } });
+    _seqRenderBody();
+    toast('Клиент добавлен','success');
+  } catch(e) { console.error('[seq] add', e); toast('Не сохранилось','error'); }
+}
