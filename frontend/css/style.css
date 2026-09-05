@@ -522,3 +522,7 @@ select option{background:#1a1a2e;}
 .seq-add-nums{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--hint);}
 .seq-add-nums input{width:80px;background:var(--bg);border:1px solid var(--border);border-radius:9px;color:var(--text);font-size:15px;padding:8px;text-align:center;font-variant-numeric:tabular-nums;}
 .seq-add-empty{font-size:12px;color:var(--hint);}
+.seq-finish{width:100%;margin-top:4px;border:none;border-radius:11px;padding:14px;font-size:14px;font-weight:700;cursor:pointer;
+  background:rgba(255,255,255,.06);color:var(--text);border:1px solid var(--border);}
+.seq-finish.done{background:var(--success);color:#fff;border-color:var(--success);box-shadow:0 8px 22px -8px rgba(16,185,129,.7);}
+.seq-autosave{font-size:11px;color:var(--hint);text-align:center;margin-top:8px;line-height:1.4;}

@@ -947,6 +947,9 @@ function _seqRenderBody() {
              <button class="seq-save" onclick="seqAddManual()">Добавить клиента</button>
            </div>`
         : `<div class="seq-add-empty">Все ваши клиенты уже в списке — добавлять некого.</div>`}
+      <button class="seq-finish ${allDone?'done':''}" onclick="seqFinish()">
+        ${allDone ? '✓ Готово — вернуться на главную' : 'Выйти — прогресс сохранён'}</button>
+      <div class="seq-autosave">Каждый ответ сохраняется сразу — можно выйти и вернуться в любой момент.</div>
     </div>`;
 
   body.innerHTML = cards + finalBlock;
@@ -957,6 +960,13 @@ function _seqRenderBody() {
   if (pfill) { pfill.style.width = Math.max(pct,3)+'%'; pfill.style.background = allDone ? 'var(--success)' : 'var(--warn)'; }
   const pd = document.getElementById('seq-pdone'); if (pd) pd.textContent = answered;
   const pt = document.getElementById('seq-ptot');  if (pt) pt.textContent = total;
+}
+
+function seqFinish() {
+  const s = window._seq;
+  const done = s && s.data.items.length>0 && s.data.items.every(it=>it.answer);
+  toast(done ? 'Сверка сохранена ✓' : 'Прогресс сохранён', 'success');
+  goBack();
 }
 
 function _seqItem(clientId) { return window._seq?.data.items.find(it=>it.client_id===clientId); }
