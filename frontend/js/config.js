@@ -146,11 +146,11 @@ const SEQ_SURVEY = {
   // На боевой запуск — очистить ([]), чтобы работал только гейт по branch.
   testTrainerIds: [],       // боевой запуск: только гейт по branch (Chekhov Moms)
 };
-// Показывать ли опросник этому профилю: по филиалу ИЛИ по тестовому id.
+// Показывать ли опросник этому профилю: если филиал есть СРЕДИ его филиалов
+// (не только первый — у тренеров/старших бывает несколько) ИЛИ по тестовому id.
 function seqSurveyEnabled(profile) {
   if (!(SEQ_SURVEY && SEQ_SURVEY.active && profile)) return false;
-  const br = Array.isArray(profile.branches) ? profile.branches[0] : null;
-  if (br && br === SEQ_SURVEY.branch) return true;
+  if (Array.isArray(profile.branches) && profile.branches.includes(SEQ_SURVEY.branch)) return true;
   return Array.isArray(SEQ_SURVEY.testTrainerIds) && SEQ_SURVEY.testTrainerIds.includes(profile.id);
 }
 
