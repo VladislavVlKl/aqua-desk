@@ -137,26 +137,43 @@ async function ruleInactive() {
 }
 
 // Правило 5: Опросник сверки списаний (тест, филиал Chekhov Moms).
-// Расписание (время Ташкента): вс 07.09 в 10 и 18, пн 08.09 в 10.
+// Расписание — ОКНА по Ташкенту [начало, конец), а не точные часы: почасовой
+// крон GitHub Actions ненадёжен (пропускает часы блоками), поэтому напоминание
+// уходит один раз за окно — как только крон впервые попал в окно. Дедуп на
+// тренера+день+окно (маркер-строка в notifications_queue, ставится при успехе).
+// Две рамки: утро [8,12) и день [12,20) — до двух волн в день.
 // Дублирует SEQ_SURVEY из frontend/config.js (node-джоб не импортирует браузерный конфиг).
 const SEQ_SURVEY_JOB = {
   branch: 'Chekhov Moms',
   round:  '2026-09-verify',
-  schedule: { '2026-09-10': [10, 18], '2026-09-11': [10], '2026-09-12': [10] },
+  windows: {
+    '2026-09-10': [[8, 12], [12, 20]],  // две волны: утро и день
+    '2026-09-11': [[8, 12]],
+    '2026-09-12': [[8, 12]],
+  },
 };
 async function ruleSeqSurvey(today, hourTashkent) {
-  const hours = SEQ_SURVEY_JOB.schedule[today];
-  if (!hours || !hours.includes(hourTashkent)) return;
+  const wins = SEQ_SURVEY_JOB.windows[today];
+  if (!wins) return;
+  const win = wins.find(([a, b]) => hourTashkent >= a && hourTashkent < b);
+  if (!win) return;
+  const winTag = win[0] + '-' + win[1];
 
   const { data: trainers } = await sb.from('profiles')
     .select('id,fio,tg_id,branches')
     .in('role', ['trainer', 'senior_trainer'])
     .not('tg_id', 'is', null);
   const moms = (trainers || []).filter(t => Array.isArray(t.branches) && t.branches.includes(SEQ_SURVEY_JOB.branch));
-  console.log('[seq_survey] Moms trainers:', moms.length);
-  let sent = 0;
+  console.log('[seq_survey] window', today, winTag, '| Moms trainers:', moms.length);
+  let sent = 0, dedup = 0;
 
   for (const tr of moms) {
+    // Дедуп окна: уже успешно слали этому тренеру в это окно? (маркер = status sent)
+    const ruleKey = 'seqsurvey:' + SEQ_SURVEY_JOB.round + ':' + today + ':' + winTag + ':' + tr.id;
+    const { data: dupe } = await sb.from('notifications_queue')
+      .select('id').eq('rule_key', ruleKey).limit(1);
+    if (dupe && dupe.length) { dedup++; continue; }
+
     // total = активные клиенты с активным абонементом (initial_balance>0)
     const { data: clients } = await sb.from('clients').select('id')
       .eq('trainer_id', tr.id).eq('is_archived', false);
@@ -174,9 +191,19 @@ async function ruleSeqSurvey(today, hourTashkent) {
     const msg = '📋 <b>Повторная сверка списаний</b>\n\nМы поправили остатки по прошлой сверке — проверьте в приложении, что теперь всё совпадает. '
       + (answered ? ('Осталось ' + (total - answered) + ' из ' + total) : (total + ' клиентов'))
       + '. Займёт ~5 минут. Срок — до конца 12 сентября.';
-    if (await tg(tr.tg_id, msg)) { sent++; console.log('[seq_survey] sent to:', tr.fio); }
+    const ok = await tg(tr.tg_id, msg);
+    if (ok) {
+      // Маркер окна = дедуп + запись в колокольчик приложения. Пишем только при
+      // успехе, чтобы при сбое отправки следующий заход крона в окно повторил.
+      await sb.from('notifications_queue').insert({
+        recipient_tg_id: tr.tg_id, recipient_name: tr.fio, message: msg,
+        scheduled_for: new Date().toISOString(), sent_at: new Date().toISOString(),
+        status: 'sent', rule_key: ruleKey,
+      });
+      sent++; console.log('[seq_survey] sent to:', tr.fio);
+    }
   }
-  console.log('[seq_survey] sent total:', sent);
+  console.log('[seq_survey] window done. sent:', sent, '| dedup-skip:', dedup);
 }
 
 async function main() {

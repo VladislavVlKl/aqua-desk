@@ -1,8 +1,12 @@
 name: Process Notification Queue
 
 on:
-  schedule:
-    - cron: '*/5 * * * *'
+  # Регулярную доставку ведёт pg_cron внутри Supabase (job process-notif-queue,
+  # раз в минуту → Edge Function process-queue). GitHub Actions крон отключён:
+  # он исполнялся раз в 6–21 ч вместо 5 мин. Оставлен только ручной запуск
+  # как аварийный канал (той же логикой: вайтлист «замен» + ретраи).
+  # schedule:
+  #   - cron: '*/5 * * * *'
   workflow_dispatch:
 
 jobs:
