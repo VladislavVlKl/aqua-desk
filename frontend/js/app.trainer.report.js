@@ -828,8 +828,10 @@ async function renderSeqSurveyBanner() {
   if (answered === 0) {
     box.innerHTML = `<div class="seq-hero" onclick="openSeqSurvey()">
       <span class="seq-pin">★ Важно · до ${dl}</span>
-      <h3>Сверьте порядок списаний</h3>
-      <p>Проверьте, что номер занятия у клиентов совпадает с листами и 1С. ~5 минут.</p>
+      <h3>${SEQ_SURVEY.verify ? 'Повторная сверка списаний' : 'Сверьте порядок списаний'}</h3>
+      <p>${SEQ_SURVEY.verify
+        ? 'Мы поправили остатки по прошлой сверке. Проверьте, что теперь всё совпадает с листами и 1С.'
+        : 'Проверьте, что номер занятия у клиентов совпадает с листами и 1С. ~5 минут.'}</p>
       <button class="seq-cta" onclick="event.stopPropagation();openSeqSurvey()">Пройти сверку →</button>
       <div class="seq-hero-meta"><span class="seq-chip">0 из ${total} готово</span><span class="seq-chip">≈ 5 мин</span></div>
     </div>`;
@@ -893,6 +895,7 @@ function _seqCardHtml(it) {
         <div class="seq-nm">${it.fio}<small>${cat}${pkg}</small></div>
         <div class="seq-seq"><div class="big" style="color:${yes?'var(--success)':'var(--danger)'}">${yes?'✓':'✗'} ${a.final_next} из ${a.final_total ?? it.total}</div>
           <div class="lbl2">${yes?'совпадает':'исправлено'}</div></div></div>
+      ${a.debt_final!=null?`<div class="seq-cmt">🔴 Долг подтверждён: ${a.debt_final}</div>`:''}
       ${a.comment?`<div class="seq-cmt">💬 ${a.comment}</div>`:''}
       <button class="seq-edit" onclick="seqEdit('${it.client_id}')">Изменить</button></div>`;
   }
@@ -902,6 +905,12 @@ function _seqCardHtml(it) {
     <div class="seq-top"><div class="seq-cav" style="background:var(--accent)">${initials}</div>
       <div class="seq-nm">${it.fio}<small>${cat}${pkg}</small></div>
       <div class="seq-seq"><div class="big">след. <b>${it.next}</b> из ${it.total}</div><div class="lbl2">сделано ${it.used}</div></div></div>
+    ${it.aligned ? `<div class="seq-badge fix">⚠ Мы поправили остаток по прошлой сверке — проверьте по листам / 1С</div>` : ''}
+    ${it.debt ? `<div class="seq-debt">
+      <span class="seq-debt-lbl">🔴 В долге, шт:</span>
+      <div class="seq-debt-in"><input type="number" id="debt-${it.client_id}" min="0"
+        value="${(it.answer && it.answer.debt_final != null) ? it.answer.debt_final : it.debt}"></div>
+    </div>` : ''}
     <div class="seq-bar"><span>${it.used}</span><div class="track"><i style="width:${barPct}%"></i></div><span>осталось ${it.total-it.used}</span></div>
     <div class="seq-ask">Следующее списание — <b>${it.next}-е</b>. Совпадает с листами и 1С?</div>
     <div class="seq-yn">
@@ -971,12 +980,23 @@ function seqFinish() {
 
 function _seqItem(clientId) { return window._seq?.data.items.find(it=>it.client_id===clientId); }
 
+// Долг из редактируемого поля карточки (если есть). Возвращает {debtShown, debtFinal}.
+function _seqDebt(it) {
+  if (!it.debt) return { debtShown: null, debtFinal: null };
+  const el = document.getElementById('debt-' + it.client_id);
+  let v = el ? parseInt(el.value, 10) : it.debt;
+  if (!Number.isFinite(v) || v < 0) v = it.debt;
+  return { debtShown: it.debt, debtFinal: v };
+}
+
 async function seqYes(clientId) {
   const it = _seqItem(clientId); if (!it) return;
+  const d = _seqDebt(it);
   try {
     await DB.saveSeqSurveyAnswer({ round: window._seq.round, trainerId: window._seq.trainerId, branch: window._seq.branch,
-      clientId, systemNext: it.next, systemTotal: it.total, matches: true, finalNext: it.next, finalTotal: it.total });
-    it.answer = { matches:true, final_next:it.next, final_total:it.total, comment:null };
+      clientId, systemNext: it.next, systemTotal: it.total, matches: true, finalNext: it.next, finalTotal: it.total,
+      debtShown: d.debtShown, debtFinal: d.debtFinal });
+    it.answer = { matches:true, final_next:it.next, final_total:it.total, comment:null, debt_final:d.debtFinal };
     it._reopen = false; _seqRenderBody();
   } catch(e) { console.error('[seq] yes', e); toast('Не сохранилось','error'); }
 }
@@ -991,10 +1011,12 @@ async function seqSaveNo(clientId) {
   const v = parseInt(document.getElementById('fixn-'+clientId)?.value, 10);
   if (!Number.isFinite(v) || v < 1) { toast('Укажите номер','error'); return; }
   const cmt = document.getElementById('fixc-'+clientId)?.value || '';
+  const d = _seqDebt(it);
   try {
     await DB.saveSeqSurveyAnswer({ round: window._seq.round, trainerId: window._seq.trainerId, branch: window._seq.branch,
-      clientId, systemNext: it.next, systemTotal: it.total, matches: false, finalNext: v, finalTotal: it.total, comment: cmt });
-    it.answer = { matches:false, final_next: Math.min(v, it.total||v), final_total:it.total, comment:cmt.trim()||null };
+      clientId, systemNext: it.next, systemTotal: it.total, matches: false, finalNext: v, finalTotal: it.total, comment: cmt,
+      debtShown: d.debtShown, debtFinal: d.debtFinal });
+    it.answer = { matches:false, final_next: Math.min(v, it.total||v), final_total:it.total, comment:cmt.trim()||null, debt_final:d.debtFinal };
     it._reopen = false; _seqRenderBody();
   } catch(e) { console.error('[seq] no', e); toast('Не сохранилось','error'); }
 }

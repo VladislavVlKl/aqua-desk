@@ -62,6 +62,20 @@ Object.assign(DB, {
       .map(c => ({ client_id: c.id, fio: c.fio }))
       .sort((a, b) => a.fio.localeCompare(b.fio, 'ru'));
 
+    // Обогащение для повторной сверки: пометка «поправлено» (был seq_align в аудите)
+    // и счётчик неподтверждённого долга. Один запрос на каждый — необязательные.
+    const itemIds = items.map(it => it.client_id);
+    if (itemIds.length) {
+      const [alignRes, debtRes] = await Promise.all([
+        sb().from('audit_log').select('target_id').eq('action', 'seq_align').in('target_id', itemIds),
+        sb().from('workouts').select('client_id').eq('is_debt', true).is('debt_confirmed_at', null).in('client_id', itemIds),
+      ]);
+      const aligned = new Set((alignRes.data || []).map(r => r.target_id));
+      const debt = {};
+      (debtRes.data || []).forEach(w => { debt[w.client_id] = (debt[w.client_id] || 0) + 1; });
+      items.forEach(it => { it.aligned = aligned.has(it.client_id); it.debt = debt[it.client_id] || 0; });
+    }
+
     const answeredCount = items.filter(it => it.answer).length;
     return { round, items, candidates, answeredCount, totalCount: items.length };
   },
@@ -77,6 +91,7 @@ Object.assign(DB, {
       system_next: row.systemNext ?? null, system_total: row.systemTotal ?? null,
       matches: row.matches ?? null, final_next: finalNext, final_total: total ?? null,
       comment: (row.comment || '').trim() || null, is_manual: !!row.isManual,
+      debt_shown: row.debtShown ?? null, debt_final: row.debtFinal ?? null,
       answered_at: new Date().toISOString(),
     }, { onConflict: 'round,client_id' });
     if (error) throw error;

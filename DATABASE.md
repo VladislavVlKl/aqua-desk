@@ -138,7 +138,8 @@ balance_before / balance_after (снимок остатка ПТ на момен
 **trial_sessions** — пробные: `trainer_id, branch, session_date, first_name, last_name, phone, age, category, reception_status (pending|confirmed|rejected), reception_reason, reception_by, reception_at`
 > Пробные подтверждаются ресепшеном так же, как ПТ: проведена, но не оплачена → ресепшн отклоняет → в ЗП не идёт (только `confirmed` начисляется). Индекс `idx_trials_reception (branch, reception_status, session_date)`.
 
-**pt_sequence_survey** — опросник сверки порядковых списаний ПТ (тест, `SEQ_SURVEY` в config.js): `round, trainer_id, client_id, branch, system_next, system_total, matches, final_next, final_total, comment, is_manual, answered_at`
+**pt_sequence_survey** — опросник сверки порядковых списаний ПТ (тест, `SEQ_SURVEY` в config.js): `round, trainer_id, client_id, branch, system_next, system_total, matches, final_next, final_total, comment, is_manual, answered_at, debt_shown, debt_final`
+> `debt_shown`/`debt_final` (миграция 20260909120000) — раунд 2: показанное и подтверждённое тренером число долговых занятий (правится в той же карточке, рядом с пакетом).
 > Тренер сверяет расчётный номер следующего списания (`system_next = initial_balance − clients.balance + 1` из `system_total = initial_balance`) с листами/1С. `matches`: true=совпадает, false=исправлено (правильный номер в `final_next`), NULL=ручное добавление упущенного клиента (`is_manual=true`, `system_*` пусты, «сделано X из Y» → `final_next=X+1`, `final_total=Y`). **Только сбор — `clients.balance` НЕ меняется**; выравнивание отдельным шагом. `UNIQUE(round, client_id)` (upsert + резюме). RLS: anon+authenticated `USING(true)`. Миграция 20260906130000. Данные: `db.ops.js` (`getSeqSurveyList`/`saveSeqSurveyAnswer`/`getSeqSurveyProgress`), UI: `app.trainer.report.js` (SECTION TRAINER:SEQ_SURVEY).
 
 ### Запросы (флоу одобрения)
@@ -235,8 +236,10 @@ leader_name + leader_fee_percent · group_instance_id uuid · days_of_week text[
 
 ### Уведомления
 
-**notifications_queue**: `recipient_tg_id, recipient_name, message, scheduled_for, sent_at, error_text, status, created_by, rule_key, read_at`
+**notifications_queue**: `recipient_tg_id, recipient_name, message, scheduled_for, sent_at, error_text, status, created_by, rule_key, read_at, attempts`
 **notification_rules**: `name, rule_key, description, active`
+
+> **Доставка пушей в чат:** `pg_cron` job `process-notif-queue` (раз в минуту) → `pg_net` → Edge Function `process-queue`. Шлёт в Telegram-чат только вайтлист rule_key (`substitution`, `substitution_approve`); прочие pending уводит в `status='skipped'`. Ретраи до 5 попыток (`attempts`), реальный текст ошибки Telegram в `error_text`. GitHub Actions крон (`process-queue.yml`) отключён, оставлен как ручной аварийный канал. Колокольчик в приложении (`getMyNotifications`) читает таблицу напрямую и от этого не зависит.
 
 ---
 
