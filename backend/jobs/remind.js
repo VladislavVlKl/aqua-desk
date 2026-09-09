@@ -141,8 +141,8 @@ async function ruleInactive() {
 // Дублирует SEQ_SURVEY из frontend/config.js (node-джоб не импортирует браузерный конфиг).
 const SEQ_SURVEY_JOB = {
   branch: 'Chekhov Moms',
-  round:  '2026-09',
-  schedule: { '2026-09-07': [10, 18], '2026-09-08': [10] },
+  round:  '2026-09-verify',
+  schedule: { '2026-09-10': [10, 18], '2026-09-11': [10], '2026-09-12': [10] },
 };
 async function ruleSeqSurvey(today, hourTashkent) {
   const hours = SEQ_SURVEY_JOB.schedule[today];
@@ -171,9 +171,9 @@ async function ruleSeqSurvey(today, hourTashkent) {
       .eq('trainer_id', tr.id).eq('round', SEQ_SURVEY_JOB.round);
     if ((answered || 0) >= total) continue;   // уже прошёл
 
-    const msg = '📋 <b>Сверка списаний</b>\n\nПройдите сверку порядка списаний в приложении — '
-      + (answered ? ('осталось ' + (total - answered) + ' из ' + total) : (total + ' клиентов'))
-      + '. Займёт ~5 минут. Срок — до конца 8 сентября.';
+    const msg = '📋 <b>Повторная сверка списаний</b>\n\nМы поправили остатки по прошлой сверке — проверьте в приложении, что теперь всё совпадает. '
+      + (answered ? ('Осталось ' + (total - answered) + ' из ' + total) : (total + ' клиентов'))
+      + '. Займёт ~5 минут. Срок — до конца 12 сентября.';
     if (await tg(tr.tg_id, msg)) { sent++; console.log('[seq_survey] sent to:', tr.fio); }
   }
   console.log('[seq_survey] sent total:', sent);
