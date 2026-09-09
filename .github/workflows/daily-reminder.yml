@@ -1,8 +1,12 @@
 name: Daily Trainer Reminder
 
 on:
-  schedule:
-    - cron: '0 * * * *'
+  # Регулярный запуск ведёт pg_cron внутри Supabase (job daily-reminder-hourly,
+  # каждый час → Edge Function daily-reminder). GitHub Actions крон отключён:
+  # он пропускал часы блоками, из-за чего часовые гейты (9:00/22:00) и окна
+  # опросника промахивались. Оставлен только ручной запуск как аварийный.
+  # schedule:
+  #   - cron: '0 * * * *'
   workflow_dispatch:
 
 jobs:

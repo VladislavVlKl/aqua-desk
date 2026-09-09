@@ -1,4 +1,8 @@
-// remind.js — Автоматические правила уведомлений (Supabase JS SDK)
+// remind.js — АВАРИЙНЫЙ ручной канал правил уведомлений (Supabase JS SDK).
+// Регулярный запуск ведёт pg_cron внутри Supabase (job daily-reminder-hourly,
+// каждый час → Edge Function supabase/functions/daily-reminder — порт этого файла).
+// Этот скрипт запускается только вручную (workflow_dispatch). Держать логику
+// синхронно с Edge Function daily-reminder.
 const { createClient } = require('@supabase/supabase-js');
 
 const sb  = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);

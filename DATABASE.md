@@ -240,6 +240,8 @@ leader_name + leader_fee_percent · group_instance_id uuid · days_of_week text[
 **notification_rules**: `name, rule_key, description, active`
 
 > **Доставка пушей в чат:** `pg_cron` job `process-notif-queue` (раз в минуту) → `pg_net` → Edge Function `process-queue`. Шлёт в Telegram-чат только вайтлист rule_key (`substitution`, `substitution_approve`); прочие pending уводит в `status='skipped'`. Ретраи до 5 попыток (`attempts`), реальный текст ошибки Telegram в `error_text`. GitHub Actions крон (`process-queue.yml`) отключён, оставлен как ручной аварийный канал. Колокольчик в приложении (`getMyNotifications`) читает таблицу напрямую и от этого не зависит.
+>
+> **Правила-напоминания:** `pg_cron` job `daily-reminder-hourly` (каждый час в :00 UTC) → `pg_net` → Edge Function `daily-reminder` (порт `backend/jobs/remind.js`): незакрытые занятия (22:00), истекающие абонементы/долги/неактивность (9:00), окна опросника сверки. GitHub Actions крон (`daily-reminder.yml`) отключён, `remind.js` — ручной аварийный канал (держать синхронно с Edge Function).
 
 ---
 
