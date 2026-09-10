@@ -265,13 +265,13 @@ async function _doLogWorkoutInner() {
 // Пилот: обязательный конспект «Что сделали» на КАЖДУЮ обычную ПТ прямо при
 // списании. Просроченные конспекты здесь не показываем (прошлое прощаем),
 // поля «Задача на следующее» нет (следующее занятие тут же списывается).
-// Кнопка «Списать» заблокирована, пока не заполнены все поля.
+// Кнопка «Списать» активна; при пустом конспекте — объяснение + подсветка поля.
 function showMandatoryNotesModal(clientId, dates) {
   const rowsHtml = dates.map((d,i)=>`
     <div style="border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px">
       <div style="font-weight:600;font-size:13px;margin-bottom:8px">📝 Конспект за ${fmtDate(d)}</div>
       <div class="form-group" style="margin-bottom:0"><label>Что сделали <span style="color:var(--danger)">*</span></label>
-        <textarea id="note-acc-new-${i}" rows="2" placeholder="Освоили..." oninput="mandatoryNotesReady(${dates.length})"></textarea></div>
+        <textarea id="note-acc-new-${i}" rows="2" placeholder="Освоили..." oninput="this.style.borderColor=''"></textarea></div>
     </div>`).join('');
   const m = el('div','modal-overlay');
   m.innerHTML=`<div class="modal" style="max-height:90vh;overflow-y:auto">
@@ -281,20 +281,10 @@ function showMandatoryNotesModal(clientId, dates) {
     </div>
     <p class="hint" style="margin-bottom:12px">Заполните «Что сделали» по каждой тренировке — без этого списать нельзя.</p>
     ${rowsHtml}
-    <button class="btn btn-primary btn-full" id="btn-confirm-log" disabled
+    <button class="btn btn-primary btn-full" id="btn-confirm-log"
       onclick="doConfirmLogWorkout()">✅ Списать</button>
   </div>`;
   document.body.appendChild(m);
-}
-// Разблокировать «Списать» только когда все n полей «Что сделали» заполнены.
-function mandatoryNotesReady(n) {
-  let ok = true;
-  for (let i=0;i<n;i++) {
-    const t = document.getElementById(`note-acc-new-${i}`);
-    if (!t || !t.value.trim()) { ok = false; break; }
-  }
-  const btn = document.getElementById('btn-confirm-log');
-  if (btn) btn.disabled = !ok;
 }
 
 function showLogWithNotesModal(overdueNotes, clientId, dates, mandatory=false) {
@@ -349,10 +339,21 @@ async function doConfirmLogWorkout() {
   if (cooldownActive(_ck)) return toast('Уже списано — подождите перед повтором','info');
 
   // Пилот: конспект «Что сделали» обязателен на каждую списываемую ПТ.
+  // При пустом поле — не молчим: объясняем, подсвечиваем и ведём к первому пустому.
   if (mandatory) {
+    let firstEmpty = null;
     for (let i=0;i<rows.length;i++) {
-      const acc = document.getElementById(`note-acc-new-${i}`)?.value.trim();
-      if (!acc) return toast('Заполните конспект по каждой тренировке','error');
+      const t = document.getElementById(`note-acc-new-${i}`);
+      if (!t || !t.value.trim()) {
+        if (t) t.style.borderColor = 'var(--danger)';
+        if (firstEmpty==null && t) firstEmpty = t;
+      }
+    }
+    if (firstEmpty) {
+      firstEmpty.scrollIntoView({ behavior:'smooth', block:'center' });
+      firstEmpty.focus({ preventScroll:true });
+      toast('📝 Сначала конспект: коротко напишите, что делали на тренировке — без этого ПТ не спишется','info');
+      return;
     }
   }
 
