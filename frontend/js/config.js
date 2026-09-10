@@ -137,14 +137,17 @@ const RECEPTION_ESCALATE_HRS = 24;  // pending старше → эскалаци
 // откладывать нельзя, кнопка «Списать» заблокирована пока не заполнены все поля.
 // Просроченные (старые) конспекты списание больше НЕ блокируют («прошлое прощаем»).
 // Разовые/долг/замены — как раньше, без конспекта.
-// Пилот: только перечисленные profiles.id (тест) ИЛИ филиалы из branches.
-// Боевой запуск — добавить филиалы в branches (или снять гейт полностью).
+// enabledForAll:true — боевой запуск на ВСЕХ тренеров (2026-09-10, после теста
+//   на Владиславе). Откат к пилоту — enabledForAll:false (тогда работают
+//   testTrainerIds/branches). Полное выключение — все три пустые/false.
 const MANDATORY_NOTE = {
-  testTrainerIds: [3],   // Владислав (тест-аккаунт)
-  branches:       [],    // филиалы полного включения (пока пусто)
+  enabledForAll:  true,  // на всех тренеров
+  testTrainerIds: [3],   // Владислав (тест-аккаунт) — используется при enabledForAll:false
+  branches:       [],    // филиалы частичного включения — при enabledForAll:false
 };
 function mandatoryNoteEnabled(profile) {
   if (!profile) return false;
+  if (MANDATORY_NOTE.enabledForAll) return true;
   if (Array.isArray(MANDATORY_NOTE.testTrainerIds) && MANDATORY_NOTE.testTrainerIds.includes(profile.id)) return true;
   const br = profile.branches || [];
   return Array.isArray(MANDATORY_NOTE.branches) && MANDATORY_NOTE.branches.some(b => br.includes(b));
