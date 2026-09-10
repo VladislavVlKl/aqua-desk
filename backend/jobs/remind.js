@@ -144,7 +144,7 @@ async function ruleInactive() {
 // Расписание — ОКНА по Ташкенту [начало, конец), а не точные часы: почасовой
 // крон GitHub Actions ненадёжен (пропускает часы блоками), поэтому напоминание
 // уходит один раз за окно — как только крон впервые попал в окно. Дедуп на
-// тренера+день+окно (маркер-строка в notifications_queue, ставится при успехе).
+// тренера+день+окно — атомарная резервация rule_key в notif_dedup (PK).
 // Две рамки: утро [8,12) и день [12,20) — до двух волн в день.
 // Дублирует SEQ_SURVEY из frontend/config.js (node-джоб не импортирует браузерный конфиг).
 const SEQ_SURVEY_JOB = {
@@ -172,13 +172,7 @@ async function ruleSeqSurvey(today, hourTashkent) {
   let sent = 0, dedup = 0;
 
   for (const tr of moms) {
-    // Дедуп окна: уже успешно слали этому тренеру в это окно? (маркер = status sent)
-    const ruleKey = 'seqsurvey:' + SEQ_SURVEY_JOB.round + ':' + today + ':' + winTag + ':' + tr.id;
-    const { data: dupe } = await sb.from('notifications_queue')
-      .select('id').eq('rule_key', ruleKey).limit(1);
-    if (dupe && dupe.length) { dedup++; continue; }
-
-    // total = активные клиенты с активным абонементом (initial_balance>0)
+    // Сначала прогресс — прошедшим (answered>=total) не шлём вовсе.
     const { data: clients } = await sb.from('clients').select('id')
       .eq('trainer_id', tr.id).eq('is_archived', false);
     const ids = (clients || []).map(c => c.id);
@@ -192,13 +186,17 @@ async function ruleSeqSurvey(today, hourTashkent) {
       .eq('trainer_id', tr.id).eq('round', SEQ_SURVEY_JOB.round);
     if ((answered || 0) >= total) continue;   // уже прошёл
 
+    // Атомарная резервация окна: успешный INSERT = «шлю»; ошибка (unique_violation/сбой) = «уже слали» → пропуск.
+    const ruleKey = 'seqsurvey:' + SEQ_SURVEY_JOB.round + ':' + today + ':' + winTag + ':' + tr.id;
+    const { error: resErr } = await sb.from('notif_dedup').insert({ rule_key: ruleKey });
+    if (resErr) { dedup++; continue; }
+
     const msg = '📋 <b>Повторная сверка списаний</b>\n\nМы поправили остатки по прошлой сверке — проверьте в приложении, что теперь всё совпадает. '
       + (answered ? ('Осталось ' + (total - answered) + ' из ' + total) : (total + ' клиентов'))
       + '. Займёт ~5 минут. Срок — до конца 12 сентября.';
     const ok = await tg(tr.tg_id, msg);
     if (ok) {
-      // Маркер окна = дедуп + запись в колокольчик приложения. Пишем только при
-      // успехе, чтобы при сбое отправки следующий заход крона в окно повторил.
+      // Запись в колокольчик приложения (дедуп теперь на notif_dedup выше).
       await sb.from('notifications_queue').insert({
         recipient_tg_id: tr.tg_id, recipient_name: tr.fio, message: msg,
         scheduled_for: new Date().toISOString(), sent_at: new Date().toISOString(),

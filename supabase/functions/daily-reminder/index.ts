@@ -145,9 +145,9 @@ async function ruleInactive() {
 }
 
 // Правило 5: Опросник сверки списаний (филиал Chekhov Moms).
-// Окна по Ташкенту [начало, конец), одно срабатывание за окно (дедуп на
-// тренера+день+окно — маркер-строка в notifications_queue при успехе).
-// Держать синхронно с backend/jobs/remind.js.
+// Окна по Ташкенту [начало, конец), одно срабатывание за окно. Дедуп на
+// тренера+день+окно — атомарная резервация rule_key в notif_dedup (PK).
+// Прошедшим (answered>=total) не шлём. Держать синхронно с backend/jobs/remind.js.
 const SEQ_SURVEY_JOB = {
   branch: "Chekhov Moms",
   round: "2026-09-verify",
@@ -173,11 +173,7 @@ async function ruleSeqSurvey(today: string, hourTashkent: number) {
   let sent = 0, dedup = 0;
 
   for (const tr of moms) {
-    const ruleKey = "seqsurvey:" + SEQ_SURVEY_JOB.round + ":" + today + ":" + winTag + ":" + tr.id;
-    const { data: dupe } = await sb.from("notifications_queue")
-      .select("id").eq("rule_key", ruleKey).limit(1);
-    if (dupe && dupe.length) { dedup++; continue; }
-
+    // Сначала считаем прогресс — прошедшим (answered>=total) не шлём вовсе.
     const { data: clients } = await sb.from("clients").select("id")
       .eq("trainer_id", tr.id).eq("is_archived", false);
     const ids = (clients || []).map((c) => c.id);
@@ -190,6 +186,12 @@ async function ruleSeqSurvey(today: string, hourTashkent: number) {
       .select("id", { count: "exact", head: true })
       .eq("trainer_id", tr.id).eq("round", SEQ_SURVEY_JOB.round);
     if ((answered || 0) >= total) continue;
+
+    // Атомарная резервация окна: успешный INSERT = «шлю»; unique_violation (или сбой) = «уже слали» → пропуск.
+    // Надёжнее select-потом-insert (тот двоил пуши при транзиентной ошибке чтения между часовыми прогонами).
+    const ruleKey = "seqsurvey:" + SEQ_SURVEY_JOB.round + ":" + today + ":" + winTag + ":" + tr.id;
+    const { error: resErr } = await sb.from("notif_dedup").insert({ rule_key: ruleKey });
+    if (resErr) { dedup++; continue; }
 
     const msg = "📋 <b>Повторная сверка списаний</b>\n\nМы поправили остатки по прошлой сверке — проверьте в приложении, что теперь всё совпадает. "
       + (answered ? ("Осталось " + (total - answered) + " из " + total) : (total + " клиентов"))
