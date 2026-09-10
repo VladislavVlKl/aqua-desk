@@ -132,6 +132,24 @@ function receptionEnabledForBranch(branch) {
 const RECEPTION_EOD_HOUR     = 21;  // час «конца дня»: напоминание ресепшену о висящих pending
 const RECEPTION_ESCALATE_HRS = 24;  // pending старше → эскалация в «Контроле» координатора
 
+// ─── ОБЯЗАТЕЛЬНЫЙ КОНСПЕКТ ПРИ СПИСАНИИ (пилот) ───
+// Конспект «Что сделали» на КАЖДУЮ обычную ПТ обязателен прямо при списании —
+// откладывать нельзя, кнопка «Списать» заблокирована пока не заполнены все поля.
+// Просроченные (старые) конспекты списание больше НЕ блокируют («прошлое прощаем»).
+// Разовые/долг/замены — как раньше, без конспекта.
+// Пилот: только перечисленные profiles.id (тест) ИЛИ филиалы из branches.
+// Боевой запуск — добавить филиалы в branches (или снять гейт полностью).
+const MANDATORY_NOTE = {
+  testTrainerIds: [3],   // Владислав (тест-аккаунт)
+  branches:       [],    // филиалы полного включения (пока пусто)
+};
+function mandatoryNoteEnabled(profile) {
+  if (!profile) return false;
+  if (Array.isArray(MANDATORY_NOTE.testTrainerIds) && MANDATORY_NOTE.testTrainerIds.includes(profile.id)) return true;
+  const br = profile.branches || [];
+  return Array.isArray(MANDATORY_NOTE.branches) && MANDATORY_NOTE.branches.some(b => br.includes(b));
+}
+
 // ─── ОПРОСНИК: СВЕРКА ПОРЯДКОВЫХ СПИСАНИЙ (тест) ───
 // Тренер один раз сверяет расчётный номер списания (N из M) с листами/1С.
 // Сбор данных; clients.balance НЕ трогаем. active=false — фича выключена (баннер скрыт).

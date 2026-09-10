@@ -254,13 +254,51 @@ async function _doLogWorkoutInner() {
     return;
   }
 
-  // Обычные ПТ: собираем долговые конспекты и показываем один экран
-  const overdueNotes = await DB.getOverdueNotes(clientId, STATE.profile.id);
-  _pendingLogData = { rows, clientId, count, overdueNotes };
-  showLogWithNotesModal(overdueNotes, clientId, dates);
+  // Обычные ПТ: показываем экран с конспектами.
+  // Пилот обязательного конспекта — прошлые (просроченные) НЕ форсим.
+  const mandatory = mandatoryNoteEnabled(STATE.profile);
+  const overdueNotes = mandatory ? [] : await DB.getOverdueNotes(clientId, STATE.profile.id);
+  _pendingLogData = { rows, clientId, count, overdueNotes, mandatory };
+  showLogWithNotesModal(overdueNotes, clientId, dates, mandatory);
 }
 
-function showLogWithNotesModal(overdueNotes, clientId, dates) {
+// Пилот: обязательный конспект «Что сделали» на КАЖДУЮ обычную ПТ прямо при
+// списании. Просроченные конспекты здесь не показываем (прошлое прощаем),
+// поля «Задача на следующее» нет (следующее занятие тут же списывается).
+// Кнопка «Списать» заблокирована, пока не заполнены все поля.
+function showMandatoryNotesModal(clientId, dates) {
+  const rowsHtml = dates.map((d,i)=>`
+    <div style="border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px">
+      <div style="font-weight:600;font-size:13px;margin-bottom:8px">📝 Конспект за ${fmtDate(d)}</div>
+      <div class="form-group" style="margin-bottom:0"><label>Что сделали <span style="color:var(--danger)">*</span></label>
+        <textarea id="note-acc-new-${i}" rows="2" placeholder="Освоили..." oninput="mandatoryNotesReady(${dates.length})"></textarea></div>
+    </div>`).join('');
+  const m = el('div','modal-overlay');
+  m.innerHTML=`<div class="modal" style="max-height:90vh;overflow-y:auto">
+    <div class="modal-header">
+      <h3>${dates.length>1?'Конспекты + Списать':'Конспект + Списать'}</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove();_pendingLogData=null">✕</button>
+    </div>
+    <p class="hint" style="margin-bottom:12px">Заполните «Что сделали» по каждой тренировке — без этого списать нельзя.</p>
+    ${rowsHtml}
+    <button class="btn btn-primary btn-full" id="btn-confirm-log" disabled
+      onclick="doConfirmLogWorkout()">✅ Списать</button>
+  </div>`;
+  document.body.appendChild(m);
+}
+// Разблокировать «Списать» только когда все n полей «Что сделали» заполнены.
+function mandatoryNotesReady(n) {
+  let ok = true;
+  for (let i=0;i<n;i++) {
+    const t = document.getElementById(`note-acc-new-${i}`);
+    if (!t || !t.value.trim()) { ok = false; break; }
+  }
+  const btn = document.getElementById('btn-confirm-log');
+  if (btn) btn.disabled = !ok;
+}
+
+function showLogWithNotesModal(overdueNotes, clientId, dates, mandatory=false) {
+  if (mandatory) return showMandatoryNotesModal(clientId, dates);
   const overdueHtml = overdueNotes.map(w=>`
     <div style="border:1px solid var(--danger);border-radius:10px;padding:12px;margin-bottom:12px">
       <div style="color:var(--danger);font-weight:600;font-size:13px;margin-bottom:8px">⛔ Конспект за ${fmtDate(w.workout_date)}</div>
@@ -305,12 +343,20 @@ async function doConfirmLogWorkout() {
   // btn.disabled ставится позже и от гонки не спасает.
   if (_pending.has('confirmLog')) return;
   if (!_pendingLogData) return toast('Ошибка: нет данных','error');
-  const { rows, clientId, count, overdueNotes } = _pendingLogData;
+  const { rows, clientId, count, overdueNotes, mandatory } = _pendingLogData;
   // Кулдаун: то же списание (клиент+тип+даты) не чаще 15 сек — от дублей при лагах.
   const _ck = _logKey(rows);
   if (cooldownActive(_ck)) return toast('Уже списано — подождите перед повтором','info');
 
-  // Валидация долговых конспектов
+  // Пилот: конспект «Что сделали» обязателен на каждую списываемую ПТ.
+  if (mandatory) {
+    for (let i=0;i<rows.length;i++) {
+      const acc = document.getElementById(`note-acc-new-${i}`)?.value.trim();
+      if (!acc) return toast('Заполните конспект по каждой тренировке','error');
+    }
+  }
+
+  // Валидация долговых конспектов (легаси-режим)
   for (const w of overdueNotes) {
     const acc = document.getElementById(`note-acc-${w.id}`)?.value.trim();
     if (!acc) return toast('Заполните все долговые конспекты','error');
@@ -322,9 +368,9 @@ async function doConfirmLogWorkout() {
 
   try {
     // Одна подписка на весь блок сохранений
-    const sub = overdueNotes.length>0 ? await DB.getActiveSubscription(clientId) : null;
+    const sub = (mandatory || overdueNotes.length>0) ? await DB.getActiveSubscription(clientId) : null;
 
-    // Сохраняем долговые конспекты
+    // Сохраняем долговые конспекты (легаси-режим)
     for (const w of overdueNotes) {
       const acc  = document.getElementById(`note-acc-${w.id}`)?.value.trim();
       const next = document.getElementById(`note-next-${w.id}`)?.value.trim()||null;
@@ -335,7 +381,25 @@ async function doConfirmLogWorkout() {
     const result = await DB.logWorkouts(rows);
     cooldownMark(_ck);  // метка кулдауна только после успешной записи
 
-    // Сохраняем конспект за новую тренировку если заполнен
+    // Пилот: конспект на каждую созданную ПТ (валидированы выше — все заполнены).
+    if (mandatory) {
+      for (let i=0;i<(result||[]).length;i++) {
+        const acc = document.getElementById(`note-acc-new-${i}`)?.value.trim();
+        if (acc && result[i]) await DB.upsertNote(result[i].id, clientId, STATE.profile.id, sub?.id||null, acc, null, null);
+      }
+      document.querySelector('.modal-overlay')?.remove();
+      _pendingLogData = null;
+      toast(`✅ ПТ`,'success');
+      refreshTrainerScreen();
+      const firstRow = rows[0];
+      DB.auditLog('workout_add', STATE.profile.id, STATE.profile.fio, clientId, 'workout', {
+        count, dates: rows.map(r=>r.workout_date?.slice(0,10)),
+        category: firstRow?.category_at_moment, is_drop_in: firstRow?.is_drop_in||false,
+      }, firstRow?.branch);
+      return;
+    }
+
+    // Сохраняем конспект за новую тренировку если заполнен (легаси-режим)
     const newAcc = document.getElementById('note-acc-new')?.value.trim();
     if (newAcc && result?.[0]) {
       const newSub = sub || await DB.getActiveSubscription(clientId);
