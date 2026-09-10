@@ -43,7 +43,7 @@ Object.assign(DB, {
       const total = subMap[c.id];
       if (total == null) continue;                 // нет активного пакета → не в авто-списке
       const used = clamp(total - (c.balance || 0), 0, total);
-      const next = clamp(used + 1, 1, total);
+      const next = used + 1;   // used==total → next=total+1 (остаток 0, пакет завершён)
       items.push({ client_id: c.id, fio: c.fio, category: c.category,
         total, used, next, is_manual: false, answer: ansMap[c.id] || null });
     }
@@ -85,7 +85,7 @@ Object.assign(DB, {
   async saveSeqSurveyAnswer(row) {
     const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
     const total = row.finalTotal != null ? row.finalTotal : row.systemTotal;
-    const finalNext = clamp(row.finalNext, 1, total || row.finalNext);
+    const finalNext = clamp(row.finalNext, 1, (total != null ? total + 1 : row.finalNext)); // total+1 = остаток 0
     const { error } = await sb().from('pt_sequence_survey').upsert({
       round: row.round, trainer_id: row.trainerId, client_id: row.clientId, branch: row.branch || null,
       system_next: row.systemNext ?? null, system_total: row.systemTotal ?? null,

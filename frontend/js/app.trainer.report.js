@@ -883,17 +883,20 @@ function _seqCardHtml(it) {
   if (it.answer && !reopen) {
     const a = it.answer;
     if (a.is_manual) {
+      const mRem = (a.final_total != null && a.final_next != null) ? (a.final_total - (a.final_next - 1)) : null;
       return `<div class="seq-card done-manual" data-cid="${it.client_id}">
         <div class="seq-top"><div class="seq-cav" style="background:#0ea5e9">${initials}</div>
           <div class="seq-nm">${it.fio}<small>добавлен вручную · ${cat}${pkg}</small></div>
-          <div class="seq-seq"><div class="big">${a.final_next} из ${a.final_total ?? '?'}</div><div class="lbl2">учтено</div></div></div>
+          <div class="seq-seq"><div class="big">${mRem===0?'завершён · 0':('осталось '+(mRem??'?'))}</div><div class="lbl2">учтено</div></div></div>
         <button class="seq-edit" onclick="seqEdit('${it.client_id}')">Изменить</button></div>`;
     }
     const yes = a.matches === true;
+    const aTotal = a.final_total ?? it.total;
+    const aRem = (aTotal != null && a.final_next != null) ? (aTotal - (a.final_next - 1)) : null;
     return `<div class="seq-card ${yes?'done-yes':'done-no'}" data-cid="${it.client_id}">
       <div class="seq-top"><div class="seq-cav" style="background:${yes?'var(--success)':'var(--danger)'}">${initials}</div>
         <div class="seq-nm">${it.fio}<small>${cat}${pkg}</small></div>
-        <div class="seq-seq"><div class="big" style="color:${yes?'var(--success)':'var(--danger)'}">${yes?'✓':'✗'} ${a.final_next} из ${a.final_total ?? it.total}</div>
+        <div class="seq-seq"><div class="big" style="color:${yes?'var(--success)':'var(--danger)'}">${yes?'✓':'✗'} ${aRem===0?'завершён · 0':('осталось '+aRem)}</div>
           <div class="lbl2">${yes?'совпадает':'исправлено'}</div></div></div>
       ${a.debt_final!=null?`<div class="seq-cmt">🔴 Долг подтверждён: ${a.debt_final}</div>`:''}
       ${a.comment?`<div class="seq-cmt">💬 ${a.comment}</div>`:''}
@@ -901,26 +904,32 @@ function _seqCardHtml(it) {
   }
   // Состояние «вопрос»
   const barPct = it.total ? Math.round(it.used/it.total*100) : 0;
+  const remaining = it.total - it.used;          // сколько осталось (может быть 0 = пакет завершён)
+  const finished = it.next > it.total;            // остаток 0
   return `<div class="seq-card" data-cid="${it.client_id}">
     <div class="seq-top"><div class="seq-cav" style="background:var(--accent)">${initials}</div>
       <div class="seq-nm">${it.fio}<small>${cat}${pkg}</small></div>
-      <div class="seq-seq"><div class="big">след. <b>${it.next}</b> из ${it.total}</div><div class="lbl2">сделано ${it.used}</div></div></div>
+      <div class="seq-seq">${finished
+        ? `<div class="big" style="color:var(--hint)">0 осталось</div><div class="lbl2">пакет завершён</div>`
+        : `<div class="big">след. <b>${it.next}</b> из ${it.total}</div><div class="lbl2">сделано ${it.used}</div>`}</div></div>
     ${it.aligned ? `<div class="seq-badge fix">⚠ Мы поправили остаток по прошлой сверке — проверьте по листам / 1С</div>` : ''}
     ${it.debt ? `<div class="seq-debt">
       <span class="seq-debt-lbl">🔴 В долге, шт:</span>
       <div class="seq-debt-in"><input type="number" id="debt-${it.client_id}" min="0"
         value="${(it.answer && it.answer.debt_final != null) ? it.answer.debt_final : it.debt}"></div>
     </div>` : ''}
-    <div class="seq-bar"><span>${it.used}</span><div class="track"><i style="width:${barPct}%"></i></div><span>осталось ${it.total-it.used}</span></div>
-    <div class="seq-ask">Следующее списание — <b>${it.next}-е</b>. Совпадает с листами и 1С?</div>
+    <div class="seq-bar"><span>${it.used}</span><div class="track"><i style="width:${barPct}%"></i></div><span>осталось ${remaining}</span></div>
+    <div class="seq-ask">${finished
+      ? `Пакет завершён — <b>0</b> занятий осталось. Верно?`
+      : `Следующее списание — <b>${it.next}-е</b> (осталось ${remaining}). Совпадает с листами и 1С?`}</div>
     <div class="seq-yn">
       <button onclick="seqYes('${it.client_id}')">✓ Да, совпадает</button>
       <button class="no" onclick="seqNo('${it.client_id}')">✕ Нет, другое</button>
     </div>
     <div class="seq-fix" id="fix-${it.client_id}">
-      <label>Правильный номер следующего занятия:</label>
-      <div class="in"><input type="number" id="fixn-${it.client_id}" value="${it.next}" min="1" max="${it.total}"><span class="of">из ${it.total}</span></div>
-      <textarea id="fixc-${it.client_id}" rows="2" placeholder="Комментарий: напр. в 1С уже другое число"></textarea>
+      <label>Сколько занятий реально осталось (0 — если пакет сгорел/завершён):</label>
+      <div class="in"><input type="number" id="fixn-${it.client_id}" value="${remaining}" min="0" max="${it.total}"><span class="of">из ${it.total}</span></div>
+      <textarea id="fixc-${it.client_id}" rows="2" placeholder="Комментарий: напр. сгорел в августе"></textarea>
       <button class="seq-save" onclick="seqSaveNo('${it.client_id}')">Сохранить</button>
     </div>
   </div>`;
@@ -1008,15 +1017,16 @@ function seqNo(clientId) {
 
 async function seqSaveNo(clientId) {
   const it = _seqItem(clientId); if (!it) return;
-  const v = parseInt(document.getElementById('fixn-'+clientId)?.value, 10);
-  if (!Number.isFinite(v) || v < 1) { toast('Укажите номер','error'); return; }
+  const rem = parseInt(document.getElementById('fixn-'+clientId)?.value, 10);   // сколько осталось (0..total)
+  if (!Number.isFinite(rem) || rem < 0 || rem > it.total) { toast('Остаток: 0…'+it.total,'error'); return; }
+  const finalNext = it.total - rem + 1;   // rem=0 → next=total+1
   const cmt = document.getElementById('fixc-'+clientId)?.value || '';
   const d = _seqDebt(it);
   try {
     await DB.saveSeqSurveyAnswer({ round: window._seq.round, trainerId: window._seq.trainerId, branch: window._seq.branch,
-      clientId, systemNext: it.next, systemTotal: it.total, matches: false, finalNext: v, finalTotal: it.total, comment: cmt,
+      clientId, systemNext: it.next, systemTotal: it.total, matches: false, finalNext, finalTotal: it.total, comment: cmt,
       debtShown: d.debtShown, debtFinal: d.debtFinal });
-    it.answer = { matches:false, final_next: Math.min(v, it.total||v), final_total:it.total, comment:cmt.trim()||null, debt_final:d.debtFinal };
+    it.answer = { matches:false, final_next: finalNext, final_total:it.total, comment:cmt.trim()||null, debt_final:d.debtFinal };
     it._reopen = false; _seqRenderBody();
   } catch(e) { console.error('[seq] no', e); toast('Не сохранилось','error'); }
 }
@@ -1036,7 +1046,7 @@ async function seqAddManual() {
   if (!clientId) { toast('Выберите клиента','error'); return; }
   if (!Number.isFinite(total) || total < 1) { toast('Укажите размер пакета','error'); return; }
   if (!Number.isFinite(used) || used < 0 || used > total) { toast('«Сделано» должно быть 0…'+total,'error'); return; }
-  const next = Math.min(used + 1, total);
+  const next = used + 1;   // used==total → next=total+1 (остаток 0)
   try {
     await DB.saveSeqSurveyAnswer({ round: s.round, trainerId: s.trainerId, branch: s.branch,
       clientId, systemNext: null, systemTotal: null, matches: null,
