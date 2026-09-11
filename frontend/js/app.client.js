@@ -22,6 +22,10 @@ async function renderClientProfile(clientId, backTab='home') {
     const isChildClient = isChild(client.age);
     const subExpired  = activeSub?.end_date && daysUntil(activeSub.end_date) < 0;
     const balanceZero = (client.balance||0) <= 0;
+    // Флаг расхождения с 1С (для кнопки/бейджа). Только у своего неархивного клиента.
+    const canFlagMismatch = typeof PT_MISMATCH !== 'undefined' && PT_MISMATCH.enabled && canEdit && !client.is_archived;
+    const mismatchFlag = canFlagMismatch ? await DB.getMismatchFlag(clientId).catch(()=>null) : null;
+    window._mmClient = { id: clientId, fio: client.fio, balance: client.balance||0, branch: (client.profiles?.branches?.[0])||STATE.profile.branches?.[0] };
 
     $('#tab-content').innerHTML=`<div class="tab-pad">
       <div class="client-header">
@@ -45,6 +49,9 @@ async function renderClientProfile(clientId, backTab='home') {
             <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
               onclick="renderClientReportModal('${clientId}')">
               📊 Отчёт</button>
+            ${canFlagMismatch && !mismatchFlag ? `<button class="btn btn-sm" style="background:rgba(245,158,11,.18);color:#fcd34d;border:1px solid rgba(245,158,11,.5);font-weight:700"
+              onclick="renderMismatchModal('${clientId}')">⚠ Не совпадает с 1С</button>` : ''}
+            ${mismatchFlag ? `<span class="btn btn-sm" style="background:rgba(245,158,11,.12);color:#fcd34d;border:1px solid rgba(245,158,11,.4);cursor:default">⏳ На проверке (1С)</span>` : ''}
             ${canEdit?`<button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
               onclick="renderTransferClientModal('${clientId}','${client.fio}',${STATE.profile.id})">
               🔄 Передать</button>`:''}
@@ -603,4 +610,43 @@ async function doExportSummary(year,month,branch) {
       Открыть в браузере</button>
   </div>`;
   document.body.appendChild(m);
+}
+
+// ── РАСХОЖДЕНИЕ С 1С: тренер отмечает ──────────
+function renderMismatchModal(clientId) {
+  const c = window._mmClient || { id: clientId, fio: '', balance: 0 };
+  const m = el('div','modal-overlay'); m.id='mismatch-modal';
+  m.innerHTML=`<div class="modal">
+    <div class="modal-header"><h3>⚠ Расходится с 1С</h3>
+      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <p class="hint" style="margin:0 0 12px">${c.fio} · остаток в системе: <b>${c.balance}</b>. Отправим координатору и старшему на сверку с 1С.</p>
+    <div class="form-group">
+      <label>Сколько реально осталось (если знаешь, необязательно)</label>
+      <input type="number" id="mm-suggested" min="0" placeholder="напр. 6" style="width:120px">
+    </div>
+    <div class="form-group">
+      <label>Комментарий</label>
+      <textarea id="mm-note" rows="2" placeholder="напр. клиент говорит, что оплатил ещё 5, в 1С есть"></textarea>
+    </div>
+    <button class="btn btn-primary btn-full" onclick="doFlagMismatch('${clientId}')">Отправить на проверку</button>
+  </div>`;
+  document.body.appendChild(m);
+}
+async function doFlagMismatch(clientId) {
+  if (_pending.has('mm-'+clientId)) return; _pending.add('mm-'+clientId);
+  try {
+    const c = window._mmClient || {};
+    await DB.flagPtMismatch({
+      clientId, trainerId: STATE.profile.id, trainerFio: STATE.profile.fio,
+      branch: c.branch, systemBalance: c.balance,
+      note: document.getElementById('mm-note')?.value || '',
+      suggested: document.getElementById('mm-suggested')?.value,
+    });
+    document.getElementById('mismatch-modal')?.remove();
+    toast('Отправлено на проверку ✓','success');
+    renderClientProfile(clientId);
+  } catch(e) {
+    if (String(e.message)==='already_open') { toast('Уже на проверке','info'); document.getElementById('mismatch-modal')?.remove(); renderClientProfile(clientId); }
+    else { console.error('[mismatch] flag', e); toast('Не удалось отправить','error'); }
+  } finally { _pending.delete('mm-'+clientId); }
 }

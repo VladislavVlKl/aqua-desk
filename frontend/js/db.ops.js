@@ -103,6 +103,84 @@ Object.assign(DB, {
     return { answered: r.answeredCount, total: r.totalCount };
   },
 
+  // ─── РАСХОЖДЕНИЕ ОСТАТКА ПТ С 1С (Supabase-only) ───
+  // Открытый флаг по клиенту (для бейджа на карточке). null если нет.
+  async getMismatchFlag(clientId) {
+    const { data, error } = await sb().from('pt_mismatch_flags')
+      .select('*').eq('client_id', clientId).eq('status', 'open').maybeSingle();
+    if (error) throw error; return data || null;
+  },
+  // Тренер отмечает расхождение. Дедуп — частичный unique-индекс (один open на клиента).
+  // Шлёт пуш старшим+координаторам филиала.
+  async flagPtMismatch({ clientId, trainerId, trainerFio, branch, systemBalance, note, suggested }) {
+    const { error } = await sb().from('pt_mismatch_flags').insert({
+      client_id: clientId, trainer_id: trainerId, branch: branch || null,
+      system_balance_at_flag: systemBalance ?? null,
+      trainer_note: (note || '').trim() || null,
+      trainer_suggested: (suggested === '' || suggested == null) ? null : Number(suggested),
+      status: 'open',
+    });
+    if (error) { if (String(error.message || '').includes('duplicate') || error.code === '23505') throw new Error('already_open'); throw error; }
+    // уведомление старшим/координаторам филиала
+    try {
+      const { data: recips } = await sb().from('profiles').select('id,role,branches,tg_id')
+        .in('role', ['senior_trainer', 'admin']).not('tg_id', 'is', null);
+      const msg = '⚠️ <b>Расхождение с 1С</b>\n\nТренер ' + (trainerFio || '') + ' отметил, что остаток ПТ не сходится с 1С'
+        + (note ? ('\nКомментарий: ' + note) : '') + '.\n\nПроверьте в разделе «Расхождения с 1С».';
+      for (const r of (recips || [])) {
+        if (branch && Array.isArray(r.branches) && !r.branches.includes(branch)) continue;
+        DB.enqueueTrainerNotification(r.id, msg, 'pt_mismatch');
+      }
+    } catch (e) { console.error('[mismatch] notify', e); }
+  },
+  // Список открытых флагов для филиала(ов) — координатору/старшему.
+  async getPtMismatchFlags(branches) {
+    let q = sb().from('pt_mismatch_flags')
+      .select('*, clients(fio,balance,category,is_archived), profiles!trainer_id(fio)')
+      .eq('status', 'open').order('created_at');
+    if (Array.isArray(branches) && branches.length) q = q.in('branch', branches);
+    const { data, error } = await q;
+    if (error) throw error; return data || [];
+  },
+  // Перерасчёт: ставим остаток из 1С + (опц.) корректировка ФОТ строкой month_adjustments.
+  // fotDelta > 0 — доначислить (bonus), < 0 — снять (penalty). Всё в audit_log (pt_recalc).
+  async resolvePtMismatch({ flagId, clientId, trainerId, beforeBalance, correctedBalance, category, applyFot, branch, resolvedBy }) {
+    const now = new Date();
+    // 1) остаток
+    const { error: e1 } = await sb().from('clients').update({ balance: correctedBalance }).eq('id', clientId);
+    if (e1) throw e1;
+    // 2) ФОТ (опционально): остаток ↑ → система переплатила → снять; остаток ↓ → доначислить
+    let fotDelta = null;
+    if (applyFot) {
+      const rate = (typeof RATES !== 'undefined' && RATES.pt && RATES.pt[category]) || 0;
+      const diff = (correctedBalance || 0) - (beforeBalance || 0);   // +N остаток вырос
+      fotDelta = -diff * rate;                                       // + доначислить / − снять
+      if (fotDelta !== 0) {
+        const row = { trainer_id: trainerId, year: now.getFullYear(), month: now.getMonth() + 1,
+          bonus: fotDelta > 0 ? fotDelta : 0, penalty: fotDelta < 0 ? -fotDelta : 0,
+          notes: 'Перерасчёт ПТ (сверка с 1С): остаток ' + beforeBalance + '→' + correctedBalance, branch: branch || null };
+        const { error: e2 } = await sb().from('month_adjustments').insert(row);
+        if (e2) throw e2;
+      }
+    }
+    // 3) закрыть флаг
+    const { error: e3 } = await sb().from('pt_mismatch_flags')
+      .update({ status: 'resolved', corrected_balance: correctedBalance, fot_delta: fotDelta,
+        resolved_by: resolvedBy || null, resolved_at: now.toISOString() }).eq('id', flagId);
+    if (e3) throw e3;
+    // 4) аудит
+    await sb().from('audit_log').insert({
+      action: 'pt_recalc', actor_fio: 'Перерасчёт (сверка 1С)', target_id: clientId, target_type: 'client',
+      details: { flag_id: flagId, before: beforeBalance, after: correctedBalance, fot_delta: fotDelta }, branch: branch || null,
+    }).select().maybeSingle().then(()=>{}).catch(()=>{});
+  },
+  async rejectPtMismatch(flagId, reason, resolvedBy) {
+    const { error } = await sb().from('pt_mismatch_flags')
+      .update({ status: 'rejected', reject_reason: (reason || '').trim() || null,
+        resolved_by: resolvedBy || null, resolved_at: new Date().toISOString() }).eq('id', flagId);
+    if (error) throw error;
+  },
+
   // ─── УВЕДОМЛЕНИЯ ─────────────────────────────
   async getNotificationRules() {
     if (useApi('notifications')) return await api('/notifications/rules');
