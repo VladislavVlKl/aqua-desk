@@ -176,6 +176,11 @@ function seqSurveyEnabled(profile) {
   return Array.isArray(SEQ_SURVEY.testTrainerIds) && SEQ_SURVEY.testTrainerIds.includes(profile.id);
 }
 
+// ─── ФИЧА: РАСХОЖДЕНИЕ ОСТАТКА ПТ С 1С ───
+// Тренер отмечает на карточке клиента → координатор/старший филиала сверяет и пересчитывает.
+// enabled — рубильник фичи. Анонс «Что нового» — через APP_UPDATE (см. ниже).
+const PT_MISMATCH = { enabled: true };
+
 // Причины отклонения списания ресепшеном (код → подпись)
 const RECEPTION_REJECT_REASONS = {
   not_found: 'Не нашли клиента в базе',
@@ -242,14 +247,18 @@ function isChild(age) {
 // `roles`: null = всем; либо массив ролей ['trainer','senior_trainer',...] — кому показать.
 // Чтобы НИЧЕГО не показывать — оставь id прежним (или пустым '').
 const APP_UPDATE = {
-  id: '2026-08-24-groups-4status-trainers',
-  title: 'Что нового в группах',
-  roles: ['trainer'],
+  id: '2026-09-11-pt-mismatch-1c',
+  title: 'Расхождение с 1С',
+  roles: ['trainer', 'senior_trainer', 'admin'],
   items: [
-    '💳 Оплаты теперь в 4 статусах: «оплатили», «оплатили в том месяце», «без оплаты», «ушли» — сразу видно, кто есть кто.',
-    '📊 На главной группы — 4 счётчика. Тап по счётчику открывает список детей с этим фильтром.',
-    '👶 В списке детей — цветные бейджи и фильтры: быстро найти должников или посмотреть ушедших.',
-    '🗓 Абонемент действует ровно месяц от даты оплаты.',
+    'Теперь можно отметить, если остаток ПТ у клиента <b>не сходится с 1С</b>.',
+    'Кнопка — в <b>карточке клиента</b>, в ряду действий рядом с «📊 Отчёт»:',
+    '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:2px 0 2px 4px">'
+      + '<span style="font-size:12px;padding:5px 8px;border-radius:8px;background:var(--card);border:1px solid var(--border);color:var(--hint)">📊 Отчёт</span>'
+      + '<span style="font-size:16px">➡️</span>'
+      + '<span style="font-size:12px;padding:5px 8px;border-radius:8px;background:rgba(245,158,11,.18);border:1px solid rgba(245,158,11,.5);color:#fcd34d;font-weight:700">⚠ Не совпадает с 1С</span></div>',
+    'Тренер жмёт кнопку и оставляет комментарий → координатору и старшему приходит уведомление.',
+    'Координатор (в «Контроле») и старший тренер (во вкладке «Ещё») сверяют с 1С и жмут «Пересчитать» — остаток и ФОТ поправятся автоматически.',
   ],
 };
 

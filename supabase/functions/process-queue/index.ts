@@ -13,7 +13,7 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 // Событийные rule_key, разрешённые к отправке в чат. Расширять по мере надобности.
-const WHITELIST = ["substitution", "substitution_approve"];
+const WHITELIST = ["substitution", "substitution_approve", "pt_mismatch"];
 const MAX_ATTEMPTS = 5;
 const BATCH = 100;
 

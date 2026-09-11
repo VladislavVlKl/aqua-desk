@@ -9,7 +9,7 @@ const sb  = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY
 const BOT = process.env.BOT_TOKEN;
 
 // Разрешённые к отправке в чат события (должно совпадать с Edge Function).
-const WHITELIST = ['substitution', 'substitution_approve'];
+const WHITELIST = ['substitution', 'substitution_approve', 'pt_mismatch'];
 const MAX_ATTEMPTS = 5;
 
 async function tg(chatId, text) {

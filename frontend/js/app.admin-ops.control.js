@@ -34,7 +34,7 @@ async function renderAdminControl(force=false) {
       // «Списанные» храним в списке 3 дня (потом — в отдельный архив/выгрузку)
       const d3=new Date(now); d3.setDate(d3.getDate()-2);
       const confFrom=`${d3.getFullYear()}-${_p2(d3.getMonth()+1)}-${_p2(d3.getDate())}`;
-      const [lateRequests, workoutDelReqs, deleteReqs, recHanging, recHangingTrials, recRejected, recConfirmed, pendingSubs, catRecalcReqs, trialDelReqs] = await Promise.all([
+      const [lateRequests, workoutDelReqs, deleteReqs, recHanging, recHangingTrials, recRejected, recConfirmed, pendingSubs, catRecalcReqs, trialDelReqs, mismatchFlags] = await Promise.all([
         DB.getPendingLateRequests(null).catch(()=>[]),
         DB.getAllWorkoutDeleteRequests().catch(()=>[]),
         DB.getAllDeleteRequests().catch(()=>[]),
@@ -45,10 +45,12 @@ async function renderAdminControl(force=false) {
         DB.getPendingSubstitutions().catch(()=>[]),   // замены — все филиалы
         DB.getPendingCategoryRecalcRequests(null).catch(()=>[]),
         DB.getAllTrialDeleteRequests().catch(()=>[]),
+        DB.getPtMismatchFlags(branches).catch(()=>[]),
       ]);
-      return {lateRequests, workoutDelReqs, deleteReqs, recHanging, recHangingTrials, recRejected, recConfirmed, pendingSubs, catRecalcReqs, trialDelReqs};
+      return {lateRequests, workoutDelReqs, deleteReqs, recHanging, recHangingTrials, recRejected, recConfirmed, pendingSubs, catRecalcReqs, trialDelReqs, mismatchFlags};
     }, 60000);
-    const {lateRequests, workoutDelReqs, deleteReqs, recHanging, recHangingTrials, recRejected, recConfirmed, pendingSubs, catRecalcReqs, trialDelReqs} = D;
+    const {lateRequests, workoutDelReqs, deleteReqs, recHanging, recHangingTrials, recRejected, recConfirmed, pendingSubs, catRecalcReqs, trialDelReqs, mismatchFlags} = D;
+    window._mmFlags = Object.fromEntries((mismatchFlags||[]).map(f=>[String(f.id),f]));
     const actionSections=[];   // ⚡ требует решения (кнопки Одобрить/Отклонить/Удалить)
     const monitorSections=[];  // 👁 контроль/наблюдение (сворачиваемое)
     // 🔄 Запросы на замену (подтверждает координатор или старший — кто первый)
@@ -66,6 +68,11 @@ async function renderAdminControl(force=false) {
           <button class="btn btn-sm btn-primary" onclick="doApproveSubstitutionAdmin('${s.id}')">✓ Подтвердить</button>
         </div>
       </div>`;}).join('')}
+    </div>`);
+    // ⚠ Расхождения остатка ПТ с 1С (перерасчёт: остаток + ФОТ)
+    if (mismatchFlags.length) actionSections.push(`<div class="control-section">
+      <div class="control-title warn">⚠ Расхождения с 1С (${mismatchFlags.length})</div>
+      ${mismatchFlags.map(f=>_mmCard(f)).join('')}
     </div>`);
     // Списания ресепшн: три раскрывающихся блока (несписанные / отказанные / списанные).
     // Номер списания в абонементе (N/M) — у всех; пробные без номера.
@@ -458,4 +465,79 @@ async function renderAdminMonitoring(force=false) {
       ${sections.length?sections.join(''):'<div class="empty-state">✅<p>Всё спокойно</p></div>'}
     </div>`;
   } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+
+// ── РАСХОЖДЕНИЕ С 1С: перерасчёт (координатор + старший) ──
+// Карточка одного флага. c = f.clients, tr = f.profiles.
+function _mmCard(f) {
+  const c = f.clients || {}; const tr = f.profiles || {};
+  const cur = c.balance ?? 0;
+  const prefill = (f.trainer_suggested != null) ? f.trainer_suggested : cur;
+  const cat = c.category;
+  return `<div class="control-item" id="mm-item-${f.id}">
+    <div class="ci-main"><b>${c.fio||'клиент'}</b> <span class="hint">${f.branch||''}</span></div>
+    <div class="ci-sub">Отметил: ${tr.fio||'—'} · ${fmtDate(f.created_at)}</div>
+    <div class="ci-sub">Остаток в системе: <b>${cur}</b> · Кат.${cat||'?'}${f.trainer_suggested!=null?` · тренер считает: <b>${f.trainer_suggested}</b>`:''}</div>
+    ${f.trainer_note?`<div class="ci-sub" style="color:var(--hint)">💬 ${f.trainer_note}</div>`:''}
+    <div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap">
+      <input type="number" id="mm1c-${f.id}" value="${prefill}" min="0" placeholder="Остаток по 1С"
+        style="width:110px;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:6px;color:var(--text);font-size:13px">
+      <label style="font-size:12px;color:var(--hint);display:flex;align-items:center;gap:5px">
+        <input type="checkbox" id="mmfot-${f.id}" checked> корректировать ФОТ</label>
+    </div>
+    <div style="display:flex;gap:6px;margin-top:8px">
+      <button class="btn btn-sm btn-primary" onclick="doResolveMismatch('${f.id}')">Пересчитать</button>
+      <button class="btn btn-sm" style="background:rgba(239,68,68,.12);color:#fca5a5;border:1px solid rgba(239,68,68,.25)" onclick="doRejectMismatch('${f.id}')">Отклонить</button>
+    </div>
+  </div>`;
+}
+
+// Отдельный экран для старшего тренера (у координатора — внутри «Контроля»).
+async function renderMismatchFlags(branches, backFn) {
+  navPush(backFn || (()=>renderSeniorApp('more')));
+  setScreen(`<div class="center-screen"><div class="spinner"></div></div>`);
+  setupBack(goBack);
+  let flags = [];
+  try { flags = await DB.getPtMismatchFlags(branches); }
+  catch(e) { console.error('[mismatch] list', e); toast('Ошибка загрузки','error'); }
+  window._mmFlags = Object.fromEntries((flags||[]).map(f=>[String(f.id),f]));
+  setScreen(`<div class="tab-pad">
+    <div class="section-header">${backBtn()}<h3>⚠ Расхождения с 1С</h3></div>
+    ${flags.length ? `<div class="control-section">${flags.map(f=>_mmCard(f)).join('')}</div>`
+      : '<div class="empty-state">✅<p>Открытых расхождений нет</p></div>'}
+  </div>`);
+}
+
+function _mmRefresh() {
+  if (curRole()==='admin' || curRole()==='ceo') renderAdminControl(true);
+  else renderMismatchFlags(STATE.profile.branches);
+}
+
+async function doResolveMismatch(flagId) {
+  const f = (window._mmFlags||{})[String(flagId)]; if (!f) return;
+  const v = parseInt(document.getElementById('mm1c-'+flagId)?.value, 10);
+  if (!Number.isFinite(v) || v < 0) { toast('Укажите остаток по 1С','error'); return; }
+  const applyFot = !!document.getElementById('mmfot-'+flagId)?.checked;
+  if (_pending.has('mmres-'+flagId)) return; _pending.add('mmres-'+flagId);
+  try {
+    await DB.resolvePtMismatch({
+      flagId, clientId: f.client_id, trainerId: f.trainer_id,
+      beforeBalance: (f.clients?.balance ?? 0), correctedBalance: v,
+      category: f.clients?.category, applyFot, branch: f.branch, resolvedBy: STATE.profile.id,
+    });
+    toast('Пересчитано ✓','success');
+    _mmRefresh();
+  } catch(e) { console.error('[mismatch] resolve', e); toast('Не удалось пересчитать','error'); }
+  finally { _pending.delete('mmres-'+flagId); }
+}
+
+async function doRejectMismatch(flagId) {
+  const reason = prompt('Причина отклонения (необязательно):') ?? '';
+  if (_pending.has('mmrej-'+flagId)) return; _pending.add('mmrej-'+flagId);
+  try {
+    await DB.rejectPtMismatch(flagId, reason, STATE.profile.id);
+    toast('Отклонено','info');
+    _mmRefresh();
+  } catch(e) { console.error('[mismatch] reject', e); toast('Ошибка','error'); }
+  finally { _pending.delete('mmrej-'+flagId); }
 }

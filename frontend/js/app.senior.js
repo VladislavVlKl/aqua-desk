@@ -100,6 +100,8 @@ function renderSeniorMore() {
         onclick="renderSubstitutionsApproval()">🔄 Замены</button>
       <button class="btn btn-full" style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);text-align:left;padding:14px 16px;border-radius:12px"
         onclick="seniorTab('late_requests')" id="late-req-btn">⏰ Поздние тренировки</button>
+      <button class="btn btn-full" style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);text-align:left;padding:14px 16px;border-radius:12px"
+        onclick="renderMismatchFlags(STATE.profile.branches, ()=>renderSeniorApp('more'))">⚠ Расхождения с 1С</button>
       <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);text-align:left;padding:14px 16px;border-radius:12px"
         onclick="renderAdminSessionNotes()">📝 Конспекты и цели</button>
     </div>
