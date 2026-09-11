@@ -37,7 +37,9 @@ function calcSalary({workouts=[], duties=[], trainerGroups=[], groupSessions=[],
     .filter(w=>w.substitute_for!=null && w.substitute_rate!=null)
     .reduce((s,w)=>s+Number(w.substitute_rate),0);
 
-  const hours    = duties.reduce((s,d)=>s+(new Date(d.end_time)-new Date(d.start_time))/3600000,0);
+  // Отклонённые координатором дежурства (rejected_at) в ЗП не входят — «мягкий» апрув.
+  const hours    = duties.filter(d=>!d.rejected_at)
+                     .reduce((s,d)=>s+(new Date(d.end_time)-new Date(d.start_time))/3600000,0);
   const dutySum  = Math.round(hours*RATES.duty_per_hour);
 
   // Детские группы: полностью АВТО — сумма считается вызывающим через calcChildGroupPayroll
@@ -176,12 +178,19 @@ function calcChildGroupPayroll({payments=[], trainers=[], instanceSessions=[], s
   const adjByTrainer = {};
   (adjustments||[]).forEach(a=>{ adjByTrainer[a.trainer_id] = a; });
 
-  // ── НОВАЯ модель Арт-свим: ВСЁ считается от ПУЛА (вал/2) ──
-  // 1) руководитель = leaderPct% пула; 2) ставочники = занятия×ставка;
-  // 3) остаток пула делят процентники ПРОПОРЦИОНАЛЬНО своим % (один — берёт весь остаток);
-  // 4) процентников нет (все ставочники) → остаток уходит руководителю.
-  const leaderFeeBaseArt = leaderPct>0 ? Math.round(pool*leaderPct/100) : 0;
-  const remainderArt = pool - leaderFeeBaseArt - flatCost; // на процентников
+  // ── НОВАЯ модель Арт-свим: ВСЁ считается от ПУЛА (вал/2), пул — ЖЁСТКИЙ потолок ──
+  // Приоритет ставочникам: сперва оплачиваются проведённые занятия (заработанное),
+  // затем руководитель, затем процентники делят остаток. Если даже ставочники не влезают
+  // в пул — их суммы ужимаются пропорционально (flatScale<1). Так ФОТ арт-свима ≤ пула всегда.
+  // 1) ставочники = занятия×ставка (сумма ≤ пула); 2) руководитель = leaderPct% пула,
+  //    но не больше остатка после ставочников; 3) остаток делят процентники ПРОПОРЦИОНАЛЬНО %
+  //    (один — весь остаток); 4) процентников нет (все ставочники) → остаток руководителю.
+  const flatScale     = (flatCost > pool && flatCost > 0) ? pool / flatCost : 1; // ужатие ставочников
+  const flatPaid      = Math.min(flatCost, pool);        // реально уходит ставочникам
+  const poolAfterFlat = Math.max(0, pool - flatPaid);    // на руководителя + процентников
+  const leaderBaseUncapped = leaderPct>0 ? Math.round(pool*leaderPct/100) : 0;
+  const leaderFeeBaseArt   = Math.min(leaderBaseUncapped, poolAfterFlat);
+  const remainderArt = Math.max(0, poolAfterFlat - leaderFeeBaseArt); // на процентников (≥0)
   const sumPctWeight = percentTrainers.reduce((s,t)=>s+(Number(t.rate_value)||0),0);
   const pctShareArt = {}; // trainerId → доля остатка пула (до вычета его замен)
   percentTrainers.forEach(t=>{
@@ -214,11 +223,13 @@ function calcChildGroupPayroll({payments=[], trainers=[], instanceSessions=[], s
           ? `доля пула ${t.rate_value||0}%: ${F(share)}${mySubCost?` − замены (${F(mySubCost)})`:''}`
           : `остаток пула: ${F(share)}${mySubCost?` − замены (${F(mySubCost)})`:''}`;
       } else {
-        // Flat тренер: занятия × ставка (по истории на дату занятия)
-        autoAmt  = flatSessionsCost(t);
-        calcNote = hasHist
+        // Flat тренер: занятия × ставка (по истории на дату занятия); при переполнении пула — ужатие
+        const raw = flatSessionsCost(t);
+        autoAmt  = flatScale<1 ? Math.round(raw*flatScale) : raw;
+        calcNote = (hasHist
           ? `${mySessions.length} занятий × ставка на дату занятия`
-          : `${mySessions.length} занятий × ${F(t.rate_value||75000)}`;
+          : `${mySessions.length} занятий × ${F(t.rate_value||75000)}`)
+          + (flatScale<1 ? ` (ужато до пула ×${Math.round(flatScale*100)}%)` : '');
       }
     } else {
       // Детские группы (не Арт-свим) — старая логика
@@ -251,13 +262,16 @@ function calcChildGroupPayroll({payments=[], trainers=[], instanceSessions=[], s
   //  • Арт-свим, все ставочники   → leaderPct% пула + ВЕСЬ остаток пула (остаток руководителю).
   //  • Не арт-свим                → старая логика: % от полного вала.
   let leaderFee = 0;
-  let poolCapped = false; // в новой модели пул сходится по построению, ужатие не нужно
+  // poolCapped=true → начисления упёрлись в потолок пула (ставочники+руководитель просили больше вала/2).
+  let poolCapped = false;
   if (isArtSwim) {
     if (allFlat) {
-      const totalFlatPay = rows.reduce((s,r)=>s+r.autoAmt,0);
-      leaderFee = Math.max(0, pool - totalFlatPay); // 10% базы + остаток пула
+      const totalFlatPay = rows.reduce((s,r)=>s+r.autoAmt,0); // уже ужато flatScale
+      leaderFee = Math.max(0, pool - totalFlatPay); // остаток пула руководителю
+      poolCapped = flatCost > pool;
     } else {
       leaderFee = leaderFeeBaseArt;
+      poolCapped = (flatCost + leaderBaseUncapped) > pool;
     }
   } else {
     leaderFee = leaderPct>0 ? Math.round(totalRevenue*leaderPct/100) : 0;

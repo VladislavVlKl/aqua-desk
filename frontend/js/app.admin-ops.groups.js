@@ -816,6 +816,11 @@ async function renderGroupMonthReport(groupId, monthStr, view='full') {
             <div style="font-size:11px;color:var(--hint);margin-top:6px">Утвердите замены до расчёта ЗП — после утверждения они вычтутся у заменённого и уйдут заменяющему отдельной строкой.</div>
           </div>` : ''}
 
+          ${isArtSwim && poolCapped ? `<div style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.5);border-radius:10px;padding:12px;margin-bottom:12px">
+            <div style="font-weight:600;color:#ef4444;margin-bottom:4px">⚠️ Начисления упёрлись в потолок пула</div>
+            <div style="font-size:12px;color:var(--hint)">Ставочники и руководитель заработали больше 50% вала. Суммы ужаты пропорционально до пула (${fmt(pool)} сум) — приоритет ставочникам. Проверьте наполняемость и оплаты: при низкой выручке ФОТ ограничен половиной вала.</div>
+          </div>` : ''}
+
           ${isArtSwim ? `<div style="background:rgba(124,58,237,.08);border:1px solid rgba(124,58,237,.3);border-radius:10px;padding:12px;margin-bottom:12px">
             <div style="display:flex;justify-content:space-between;margin-bottom:4px">
               <span style="font-size:13px;color:var(--hint)">Вал (оплаты за месяц: ${paidCount} из ${activeCount} дет)</span>
