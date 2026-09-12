@@ -91,7 +91,13 @@ async function ruleSubExpiring() {
     const tgId = c.profiles?.tg_id; if (!tgId) continue;
     const days = Math.ceil((new Date(c.subscription_end)-new Date())/86400000);
     const msg  = '⏰ <b>Истекает абонемент</b>\n\nКлиент: <b>' + c.fio + '</b>\nОсталось: ' + days + ' дн.\n\nНапомните о продлении.';
-    if (await tg(tgId, msg)) console.log('[sub_expiring] sent for:', c.fio);
+    // App-only: rule_key вне чат-вайтлиста → воркер пометит 'skipped',
+    // в чат не уйдёт, покажется только в колокольчике приложения.
+    await sb.from('notifications_queue').insert({
+      recipient_tg_id: tgId, recipient_name: c.profiles?.fio || null, message: msg,
+      scheduled_for: new Date().toISOString(), status: 'pending', rule_key: 'sub_expiring',
+    });
+    console.log('[sub_expiring] queued (app-only) for:', c.fio);
   }
 }
 

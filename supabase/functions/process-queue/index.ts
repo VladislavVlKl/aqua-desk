@@ -3,17 +3,28 @@
 // 20260907_push_pg_cron_delivery.sql. Заменяет ненадёжный GitHub Actions крон.
 //
 // Что делает:
-//  1) Отправляет в Telegram-чат ТОЛЬКО «замены» (вайтлист rule_key ниже).
-//     Прочие события пока приостановлены — их ставим в 'skipped', чтобы не
-//     копились и при подключении позже не выстрелили задним числом.
+//  1) Отправляет в Telegram-чат события из вайтлиста (по «семье» rule_key —
+//     части до первого ':', чтобы ловить и динамические ключи вида
+//     reception_eod:<филиал>:<дата>). Не входящие в вайтлист (напр. sub_expiring,
+//     system) уводит в 'skipped' → они остаются только в колокольчике приложения.
 //  2) Хранит реальный текст ошибки Telegram и делает ретраи (до MAX_ATTEMPTS).
 //
 // Колокольчик в приложении читает notifications_queue напрямую и от этого
 // воркера не зависит — он показывает все события независимо от статуса.
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
-// Событийные rule_key, разрешённые к отправке в чат. Расширять по мере надобности.
-const WHITELIST = ["substitution", "substitution_approve", "pt_mismatch"];
+// «Семьи» rule_key, разрешённые к отправке в чат (часть до первого ':').
+const WHITELIST = new Set([
+  "substitution",         // ПТ-замена → тренеру Б
+  "substitution_approve", // замена в группе → апруверам
+  "client_transfer",      // передача клиента → принимающему
+  "cat_recalc_approved",  // пересчёт категории одобрен → тренеру
+  "cat_recalc_rejected",  // пересчёт категории отклонён → тренеру
+  "reception_reject",     // ресепшн отклонил списание → тренеру
+  "reception_eod",        // «конец дня» ресепшену (ключ reception_eod:<филиал>:<дата>)
+  "pt_mismatch",          // расхождение остатка ПТ с 1С → тренеру
+]);
+const family = (rk: string | null) => (rk || "").split(":")[0];
 const MAX_ATTEMPTS = 5;
 const BATCH = 100;
 
@@ -46,18 +57,10 @@ Deno.serve(async () => {
   }
   const nowIso = new Date().toISOString();
 
-  // 1) Приостановленные события — увести из pending, чтобы не копились и не
-  //    отправились задним числом при будущем расширении вайтлиста.
-  await sb.from("notifications_queue")
-    .update({ status: "skipped", error_text: "paused: rule not enabled" })
-    .eq("status", "pending")
-    .not("rule_key", "in", `(${WHITELIST.join(",")})`);
-
-  // 2) К отправке: разрешённые, наступившие, не исчерпавшие попытки.
+  // Наступившие pending-строки, ещё не исчерпавшие попытки.
   const { data: rows, error } = await sb.from("notifications_queue")
-    .select("id,recipient_tg_id,recipient_name,message,attempts")
+    .select("id,recipient_tg_id,message,attempts,rule_key")
     .eq("status", "pending")
-    .in("rule_key", WHITELIST)
     .lte("scheduled_for", nowIso)
     .lt("attempts", MAX_ATTEMPTS)
     .order("scheduled_for", { ascending: true })
@@ -70,8 +73,17 @@ Deno.serve(async () => {
     });
   }
 
+  // Разделяем по «семье»: в чат — вайтлист, остальное — skipped (только колокольчик).
+  const toSend = (rows ?? []).filter((n) => WHITELIST.has(family(n.rule_key)));
+  const skipIds = (rows ?? []).filter((n) => !WHITELIST.has(family(n.rule_key))).map((n) => n.id);
+  if (skipIds.length) {
+    await sb.from("notifications_queue")
+      .update({ status: "skipped", error_text: "app-only (не в чат-вайтлисте)" })
+      .in("id", skipIds);
+  }
+
   let sent = 0, failed = 0, retry = 0;
-  for (const n of rows ?? []) {
+  for (const n of toSend) {
     const res = await tg(n.recipient_tg_id, n.message);
     if (res.ok) {
       await sb.from("notifications_queue")
@@ -93,7 +105,7 @@ Deno.serve(async () => {
   }
 
   return new Response(
-    JSON.stringify({ processed: rows?.length ?? 0, sent, failed, retry, at: nowIso }),
+    JSON.stringify({ processed: toSend.length, skipped: skipIds.length, sent, failed, retry, at: nowIso }),
     { headers: { "Content-Type": "application/json" } },
   );
 });

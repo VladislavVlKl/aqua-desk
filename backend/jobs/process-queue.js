@@ -2,14 +2,19 @@
 // Регулярную доставку ведёт pg_cron внутри Supabase (job process-notif-queue,
 // раз в минуту → Edge Function supabase/functions/process-queue). Этот скрипт
 // запускается только вручную (workflow_dispatch) и повторяет ту же логику:
-// вайтлист «замен», реальный текст ошибки Telegram, ретраи.
+// вайтлист по «семье» rule_key, реальный текст ошибки Telegram, ретраи.
 const { createClient } = require('@supabase/supabase-js');
 
 const sb  = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 const BOT = process.env.BOT_TOKEN;
 
-// Разрешённые к отправке в чат события (должно совпадать с Edge Function).
-const WHITELIST = ['substitution', 'substitution_approve', 'pt_mismatch'];
+// «Семьи» rule_key, разрешённые к отправке в чат (должно совпадать с Edge Function).
+const WHITELIST = new Set([
+  'substitution', 'substitution_approve',
+  'client_transfer', 'cat_recalc_approved', 'cat_recalc_rejected',
+  'reception_reject', 'reception_eod', 'pt_mismatch',
+]);
+const family = (rk) => (rk || '').split(':')[0];
 const MAX_ATTEMPTS = 5;
 
 async function tg(chatId, text) {
@@ -28,25 +33,25 @@ async function main() {
   const now = new Date();
   console.log('=== Process Queue (manual fallback) ===', now.toISOString());
 
-  // Приостановленные события — увести из pending, чтобы не копились.
-  await sb.from('notifications_queue')
-    .update({ status: 'skipped', error_text: 'paused: rule not enabled' })
-    .eq('status', 'pending')
-    .not('rule_key', 'in', `(${WHITELIST.join(',')})`);
-
   const { data: rows, error } = await sb
     .from('notifications_queue')
-    .select('id,recipient_tg_id,recipient_name,message,attempts,scheduled_for')
+    .select('id,recipient_tg_id,recipient_name,message,attempts,scheduled_for,rule_key')
     .eq('status', 'pending')
-    .in('rule_key', WHITELIST)
     .lt('attempts', MAX_ATTEMPTS)
     .order('scheduled_for', { ascending: true })
     .limit(100);
 
   if (error) { console.error('Supabase error:', error.message, error.code); process.exit(1); }
 
-  const toSend = (rows || []).filter(n => new Date(n.scheduled_for).getTime() <= now.getTime());
-  console.log('Ready to send:', toSend.length);
+  const due = (rows || []).filter(n => new Date(n.scheduled_for).getTime() <= now.getTime());
+  const toSend = due.filter(n => WHITELIST.has(family(n.rule_key)));
+  const skipIds = due.filter(n => !WHITELIST.has(family(n.rule_key))).map(n => n.id);
+  if (skipIds.length) {
+    await sb.from('notifications_queue')
+      .update({ status: 'skipped', error_text: 'app-only (не в чат-вайтлисте)' })
+      .in('id', skipIds);
+  }
+  console.log('Ready to send:', toSend.length, '| skipped:', skipIds.length);
 
   let sent = 0, failed = 0, retry = 0;
   for (const n of toSend) {
