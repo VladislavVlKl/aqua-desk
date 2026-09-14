@@ -421,7 +421,9 @@ function renderReceptionApp(initialTab='pending') {
   receptionTab(initialTab);
   setTimeout(checkInAppNotifications, 2000);
   setTimeout(checkReceptionBadge, 1200);
-  setTimeout(maybeQueueReceptionEod, 2500);
+  // Вечерний пуш «конец дня» теперь ставит pg_cron (правило reception_eod в daily-reminder),
+  // а не заход в панель — фронт-триггер убран, чтобы не задваивать. maybeQueueReceptionEod/
+  // queueReceptionEodOnce оставлены как неиспользуемый резерв.
 }
 
 function receptionTab(tab) {

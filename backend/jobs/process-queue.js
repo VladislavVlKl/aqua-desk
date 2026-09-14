@@ -12,7 +12,7 @@ const BOT = process.env.BOT_TOKEN;
 const WHITELIST = new Set([
   'substitution', 'substitution_approve',
   'client_transfer', 'cat_recalc_approved', 'cat_recalc_rejected',
-  'reception_reject', 'reception_eod', 'pt_mismatch',
+  'reception_reject', 'reception_eod', 'reception_backlog', 'pt_mismatch',
 ]);
 const family = (rk) => (rk || '').split(':')[0];
 const MAX_ATTEMPTS = 5;

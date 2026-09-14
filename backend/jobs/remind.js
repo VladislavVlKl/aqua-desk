@@ -214,6 +214,68 @@ async function ruleSeqSurvey(today, hourTashkent) {
   console.log('[seq_survey] window done. sent:', sent, '| dedup-skip:', dedup);
 }
 
+// ── Ресепшн-правила (data-driven из notification_rules) — синхронно с daily-reminder ──
+function inWindow(schedule, hour) {
+  const wins = schedule && schedule.windows;
+  return Array.isArray(wins) && wins.some(w => Array.isArray(w) && hour >= w[0] && hour < w[1]);
+}
+async function receptionCounts(branch, today) {
+  const dayStart = `${today}T00:00:00+05:00`, dayEnd = `${today}T23:59:59+05:00`;
+  const [wToday, tToday, wOld, tOld] = await Promise.all([
+    sb.from('workouts').select('id',{count:'exact',head:true})
+      .eq('branch',branch).eq('reception_status','pending').eq('pending_confirmation',false)
+      .gte('workout_date',dayStart).lte('workout_date',dayEnd),
+    sb.from('trial_sessions').select('id',{count:'exact',head:true})
+      .eq('branch',branch).eq('reception_status','pending')
+      .gte('session_date',dayStart).lte('session_date',dayEnd),
+    sb.from('workouts').select('id',{count:'exact',head:true})
+      .eq('branch',branch).eq('reception_status','pending').eq('pending_confirmation',false)
+      .lt('workout_date',dayStart),
+    sb.from('trial_sessions').select('id',{count:'exact',head:true})
+      .eq('branch',branch).eq('reception_status','pending').lt('session_date',dayStart),
+  ]);
+  return { today:(wToday.count||0)+(tToday.count||0), older:(wOld.count||0)+(tOld.count||0) };
+}
+async function enqueueReception(branch, ruleKey, msg, today) {
+  const { data: recs } = await sb.from('profiles')
+    .select('id,fio,tg_id').eq('role','reception').eq('is_archived',false).contains('branches',[branch]);
+  for (const r of recs||[]) {
+    if (!r.tg_id) continue;
+    const { error } = await sb.from('notif_dedup').insert({ rule_key: `${ruleKey}:${branch}:${today}:${r.id}` });
+    if (error) continue;
+    await sb.from('notifications_queue').insert({
+      recipient_tg_id: r.tg_id, recipient_name: r.fio, message: msg,
+      scheduled_for: new Date().toISOString(), status: 'pending', rule_key: `${ruleKey}:${branch}:${today}`,
+    });
+    console.log(`[${ruleKey}] queued for`, r.fio);
+  }
+}
+async function ruleReceptionEod(today, hour) {
+  const { data: rule } = await sb.from('notification_rules')
+    .select('active,branches,schedule').eq('rule_key','reception_eod').maybeSingle();
+  if (!rule || !rule.active || !inWindow(rule.schedule, hour)) return;
+  for (const branch of rule.branches||[]) {
+    const { today:nToday, older:nOlder } = await receptionCounts(branch, today);
+    if (nToday===0 && nOlder===0) continue;
+    let msg;
+    if (nToday>0 && nOlder>0) msg = `🔔 Конец дня. Неотмеченных за сегодня — ${nToday}, за прошлые дни — ${nOlder}. Отметьте в панели «Ресепшн».`;
+    else if (nToday>0) msg = `🔔 Конец дня. Неотмеченных за сегодня — ${nToday}. Отметьте в панели «Ресепшн».`;
+    else msg = `🔔 За сегодня всё отмечено ✅. Остались за прошлые дни — ${nOlder}. Закройте в панели «Ресепшн».`;
+    await enqueueReception(branch, 'reception_eod', msg, today);
+  }
+}
+async function ruleReceptionBacklog(today, hour) {
+  const { data: rule } = await sb.from('notification_rules')
+    .select('active,branches,schedule').eq('rule_key','reception_backlog').maybeSingle();
+  if (!rule || !rule.active || !inWindow(rule.schedule, hour)) return;
+  for (const branch of rule.branches||[]) {
+    const { older } = await receptionCounts(branch, today);
+    if (older===0) continue;
+    await enqueueReception(branch, 'reception_backlog',
+      `☀️ Доброе утро. Неотмеченных за прошлые дни — ${older}. Пожалуйста, отметьте в панели «Ресепшн».`, today);
+  }
+}
+
 async function main() {
   const hourTashkent = (new Date().getUTCHours() + 5) % 24;
   const now = new Date();
@@ -225,6 +287,8 @@ async function main() {
   if (hourTashkent === 22) await ruleOpenSessions(dow, today);
   if (hourTashkent === 9)  { await ruleSubExpiring(); await ruleDebtOverdue(); await ruleInactive(); }
   await ruleSeqSurvey(today, hourTashkent);
+  await ruleReceptionEod(today, hourTashkent);
+  await ruleReceptionBacklog(today, hourTashkent);
 
   console.log('=== Done ===');
 }

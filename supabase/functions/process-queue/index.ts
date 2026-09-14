@@ -22,6 +22,7 @@ const WHITELIST = new Set([
   "cat_recalc_rejected",  // пересчёт категории отклонён → тренеру
   "reception_reject",     // ресепшн отклонил списание → тренеру
   "reception_eod",        // «конец дня» ресепшену (ключ reception_eod:<филиал>:<дата>)
+  "reception_backlog",    // утро: старые несписанные ресепшену (reception_backlog:<филиал>:<дата>)
   "pt_mismatch",          // расхождение остатка ПТ с 1С → тренеру
 ]);
 const family = (rk: string | null) => (rk || "").split(":")[0];

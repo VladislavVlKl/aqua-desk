@@ -215,6 +215,84 @@ async function ruleSeqSurvey(today: string, hourTashkent: number) {
   console.log("[seq_survey] window done. sent:", sent, "| dedup-skip:", dedup);
 }
 
+// ── Ресепшн-правила (data-driven из notification_rules: active + branches + schedule) ──
+// Гейты (вкл/выкл, филиалы, окна) меняются UPDATE'ом в БД без деплоя (Вариант B).
+function inWindow(schedule: { windows?: number[][] } | null, hour: number): boolean {
+  const wins = schedule?.windows;
+  return Array.isArray(wins) && wins.some((w) => Array.isArray(w) && hour >= w[0] && hour < w[1]);
+}
+
+// Неотмеченные списания ресепшена: за сегодня и за прошлые дни (ПТ + пробные).
+async function receptionCounts(branch: string, today: string) {
+  const dayStart = `${today}T00:00:00+05:00`;
+  const dayEnd = `${today}T23:59:59+05:00`;
+  const [wToday, tToday, wOld, tOld] = await Promise.all([
+    sb.from("workouts").select("id", { count: "exact", head: true })
+      .eq("branch", branch).eq("reception_status", "pending").eq("pending_confirmation", false)
+      .gte("workout_date", dayStart).lte("workout_date", dayEnd),
+    sb.from("trial_sessions").select("id", { count: "exact", head: true })
+      .eq("branch", branch).eq("reception_status", "pending")
+      .gte("session_date", dayStart).lte("session_date", dayEnd),
+    sb.from("workouts").select("id", { count: "exact", head: true })
+      .eq("branch", branch).eq("reception_status", "pending").eq("pending_confirmation", false)
+      .lt("workout_date", dayStart),
+    sb.from("trial_sessions").select("id", { count: "exact", head: true })
+      .eq("branch", branch).eq("reception_status", "pending")
+      .lt("session_date", dayStart),
+  ]);
+  return {
+    today: (wToday.count || 0) + (tToday.count || 0),
+    older: (wOld.count || 0) + (tOld.count || 0),
+  };
+}
+
+// Положить пуш каждому ресепшену филиала. Дедуп на филиал+день+профиль (атомарно в notif_dedup),
+// чтобы за окно ушло один раз, даже если часовой прогон повторился.
+async function enqueueReception(branch: string, ruleKey: string, msg: string, today: string) {
+  const { data: recs } = await sb.from("profiles")
+    .select("id,fio,tg_id").eq("role", "reception").eq("is_archived", false).contains("branches", [branch]);
+  for (const r of recs || []) {
+    if (!r.tg_id) continue;
+    const { error } = await sb.from("notif_dedup").insert({ rule_key: `${ruleKey}:${branch}:${today}:${r.id}` });
+    if (error) continue; // уже слали в это окно
+    await sb.from("notifications_queue").insert({
+      recipient_tg_id: r.tg_id, recipient_name: r.fio, message: msg,
+      scheduled_for: new Date().toISOString(), status: "pending",
+      rule_key: `${ruleKey}:${branch}:${today}`,
+    });
+    console.log(`[${ruleKey}] queued for`, r.fio);
+  }
+}
+
+// Вечер: неотмеченные за сегодня (+ за прошлые дни, если есть).
+async function ruleReceptionEod(today: string, hour: number) {
+  const { data: rule } = await sb.from("notification_rules")
+    .select("active,branches,schedule").eq("rule_key", "reception_eod").maybeSingle();
+  if (!rule?.active || !inWindow(rule.schedule, hour)) return;
+  for (const branch of rule.branches || []) {
+    const { today: nToday, older: nOlder } = await receptionCounts(branch, today);
+    if (nToday === 0 && nOlder === 0) continue;
+    let msg: string;
+    if (nToday > 0 && nOlder > 0) msg = `🔔 Конец дня. Неотмеченных за сегодня — ${nToday}, за прошлые дни — ${nOlder}. Отметьте в панели «Ресепшн».`;
+    else if (nToday > 0) msg = `🔔 Конец дня. Неотмеченных за сегодня — ${nToday}. Отметьте в панели «Ресепшн».`;
+    else msg = `🔔 За сегодня всё отмечено ✅. Остались за прошлые дни — ${nOlder}. Закройте в панели «Ресепшн».`;
+    await enqueueReception(branch, "reception_eod", msg, today);
+  }
+}
+
+// Утро: только неотмеченные за прошлые дни.
+async function ruleReceptionBacklog(today: string, hour: number) {
+  const { data: rule } = await sb.from("notification_rules")
+    .select("active,branches,schedule").eq("rule_key", "reception_backlog").maybeSingle();
+  if (!rule?.active || !inWindow(rule.schedule, hour)) return;
+  for (const branch of rule.branches || []) {
+    const { older } = await receptionCounts(branch, today);
+    if (older === 0) continue;
+    const msg = `☀️ Доброе утро. Неотмеченных за прошлые дни — ${older}. Пожалуйста, отметьте в панели «Ресепшн».`;
+    await enqueueReception(branch, "reception_backlog", msg, today);
+  }
+}
+
 Deno.serve(async () => {
   if (!BOT) {
     return new Response(JSON.stringify({ error: "BOT_TOKEN not set" }), {
@@ -231,6 +309,8 @@ Deno.serve(async () => {
   if (hourTashkent === 22) await ruleOpenSessions(dow, today);
   if (hourTashkent === 9) { await ruleSubExpiring(); await ruleDebtOverdue(); await ruleInactive(); }
   await ruleSeqSurvey(today, hourTashkent);
+  await ruleReceptionEod(today, hourTashkent);        // самогейтится по окну из notification_rules
+  await ruleReceptionBacklog(today, hourTashkent);    // самогейтится по окну из notification_rules
 
   console.log("=== Done ===");
   return new Response(JSON.stringify({ ok: true, hourTashkent, today }), {

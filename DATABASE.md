@@ -242,13 +242,19 @@ leader_name + leader_fee_percent · group_instance_id uuid · days_of_week text[
 ### Уведомления
 
 **notifications_queue**: `recipient_tg_id, recipient_name, message, scheduled_for, sent_at, error_text, status, created_by, rule_key, read_at, attempts`
-**notification_rules**: `name, rule_key, description, active`
+**notification_rules**: `name, rule_key, description, active, branches text[], schedule jsonb`
+> `branches`/`schedule` (миграция 20260914120000) — data-driven гейты (Вариант B): филиалы и окна времени правила меняются UPDATE'ом в БД без деплоя. `schedule` = `{"windows":[[начало,конец]]}` по Ташкенту. Сейчас так работают ресепшн-правила `reception_eod` (окно 21–23) и `reception_backlog` (окно 9–11).
 
 > **Доставка пушей в чат:** `pg_cron` job `process-notif-queue` (раз в минуту) → `pg_net` → Edge Function `process-queue`. Матч по «семье» rule_key (часть до первого `:`). В чат идут: `substitution`, `substitution_approve`, `client_transfer`, `cat_recalc_approved`, `cat_recalc_rejected`, `reception_reject`, `reception_eod` (динамический ключ `reception_eod:<филиал>:<дата>`). Прочее (`sub_expiring`, `system`) → `status='skipped'` = только колокольчик. Ретраи до 5 (`attempts`), реальный текст ошибки Telegram в `error_text`. GitHub Actions крон (`process-queue.yml`) отключён (ручной аварийный канал). Колокольчик (`getMyNotifications`) читает таблицу напрямую, от статуса не зависит. Вайтлист держать синхронно в Edge Function и `backend/jobs/process-queue.js`.
 >
 > **«Истекает абонемент» — app-only:** `daily-reminder` кладёт напоминание в очередь с `rule_key='sub_expiring'` (вне чат-вайтлиста) → в чат не уходит, видно только в колокольчике. «Долг 3+ дн» — по-прежнему в чат.
 >
 > **Правила-напоминания:** `pg_cron` job `daily-reminder-hourly` (каждый час в :00 UTC) → `pg_net` → Edge Function `daily-reminder` (порт `backend/jobs/remind.js`): незакрытые занятия (22:00), истекающие абонементы/долги/неактивность (9:00), окна опросника сверки. GitHub Actions крон (`daily-reminder.yml`) отключён, `remind.js` — ручной аварийный канал (держать синхронно с Edge Function).
+>
+> **Ресепшн-напоминания «отметить списания»** (data-driven из `notification_rules`, филиалы Sport/Light):
+> - `reception_eod` — вечер (окно 21–23): неотмеченные `reception_status='pending'` за сегодня + за прошлые дни (если есть). Молчит, если по нулям.
+> - `reception_backlog` — утро (окно 9–11): только неотмеченные за прошлые дни.
+> Дедуп на филиал+день+профиль в `notif_dedup`, доставка через `process-queue` (rule_key в вайтлисте). Считает ПТ (`workouts`, `pending_confirmation=false`) + пробные (`trial_sessions`). Старый фронт-триггер `maybeQueueReceptionEod` (app.exec.js) отключён — вечерний пуш теперь ставит pg_cron.
 
 ---
 
