@@ -14,7 +14,7 @@ function aggAdjustments(rows) {
 
 function calcSalary({workouts=[], duties=[], trainerGroups=[], groupSessions=[], adjustment=null,
                      groupPayouts=[], groupSubstitutions=[], trainerId=null, trialSessions=[],
-                     childAutoSum=0}) {
+                     childAutoSum=0, recalcSum=0}) {
   const cat={1:0,2:0,3:0,debt:0,dropIn1:0,dropIn2:0,dropIn3:0,trial1:0,trial2:0,trial3:0};
   workouts.forEach(w=>{
     // Замены с кастомной ставкой идут только в ptSubSum — не двойной счёт
@@ -72,8 +72,11 @@ function calcSalary({workouts=[], duties=[], trainerGroups=[], groupSessions=[],
 
   const bonus   = adjustment?.bonus  ||0;
   const penalty = adjustment?.penalty||0;
-  const total   = ptSum+dropInSum+trialSum+ptSubSum+dutySum+childSum+adultSum+groupSubSum+bonus-penalty;
-  return {cat,hours,ptSum,dropInSum,trialSum,ptSubSum,dutySum,childSum,adultSum,groupSubSum,bonus,penalty,total};
+  // Разница от пересчёта (сверка с 1С) — знаковая сумма fot_delta резолвнутых флагов
+  // pt_mismatch_flags за месяц. Отдельная статья, НЕ смешивается с ручной премией/штрафом.
+  const recalc  = Number(recalcSum)||0;
+  const total   = ptSum+dropInSum+trialSum+ptSubSum+dutySum+childSum+adultSum+groupSubSum+bonus-penalty+recalc;
+  return {cat,hours,ptSum,dropInSum,trialSum,ptSubSum,dutySum,childSum,adultSum,groupSubSum,bonus,penalty,recalcSum:recalc,total};
 }
 
 // ─── АВТО-РАСЧЁТ ЗП ДЕТСКОЙ ГРУППЫ ───────────

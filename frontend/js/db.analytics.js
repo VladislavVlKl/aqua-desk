@@ -301,9 +301,11 @@ Object.assign(DB, {
       _calcChildInstances({ childTgs, payments: b.gpay||[], sessions: groupSessions, substitutions: gsubData,
         adjustments: b.groupPayouts||[], rateHistory, attendance: b.gatt||[], monthStr: fromDay })
         .forEach(({result}) => { result.rows.forEach(r => { childAutoByTrainer[r.trainerId] = (childAutoByTrainer[r.trainerId]||0) + r.final; }); });
+      // Разница от пересчёта (сверка с 1С) — отдельная статья ЗП (Supabase-only, даже в API-режиме)
+      const recalcByTrainer = await DB.getRecalcByTrainer(year, month, branch||null);
       return { workouts, duties: b.duties||[], trainerGroups, groupSessions, profiles: b.profiles||[],
         adjustments: adjData, groupPayouts: b.groupPayouts||[], groupSubstitutions: gsubData,
-        ptSubstitutions: b.ptSubstitutions||[], trialSessions: b.trialSessions||[], childAutoByTrainer };
+        ptSubstitutions: b.ptSubstitutions||[], trialSessions: b.trialSessions||[], childAutoByTrainer, recalcByTrainer };
     }
     const from    = new Date(year,month-1,1).toISOString();
     const to      = new Date(year,month,  1).toISOString();
@@ -396,6 +398,9 @@ Object.assign(DB, {
       });
     });
 
+    // Разница от пересчёта (сверка с 1С) — отдельная статья ЗП
+    const recalcByTrainer = await DB.getRecalcByTrainer(year, month, branch||null);
+
     return {
       workouts:            w.data      ||[],
       duties:              d.data      ||[],
@@ -408,6 +413,7 @@ Object.assign(DB, {
       ptSubstitutions:     ptsubR.data ||[],
       trialSessions:       trialR.data ||[],
       childAutoByTrainer,
+      recalcByTrainer,
     };
   },
 
@@ -537,9 +543,10 @@ Object.assign(DB, {
   async getTrainerDetail(trainerId, year, month) {
     if (useApi('analytics')) {
       const fromDay = `${year}-${String(month).padStart(2,'0')}-01`;
-      const [b, childAuto] = await Promise.all([
+      const [b, childAuto, recalc] = await Promise.all([
         api('/analytics/trainer-detail', { query: { trainer_id: trainerId, year, month } }),
         DB.getChildGroupsAutoSalary(trainerId, fromDay),
+        DB.getRecalcAdjustments(trainerId, year, month),
       ]);
       return {
         workouts:      (b.workouts||[]).map(w => ({ ...w, clients: { fio: w.client_fio, age: w.client_age }, sub_profile: { fio: w.sub_fio } })),
@@ -554,13 +561,15 @@ Object.assign(DB, {
         trialSessions: b.trialSessions||[],
         childAutoSum:  childAuto.total,
         childAutoRows: childAuto.rows,
+        recalcSum:     recalc.sum,
+        recalcRows:    recalc.rows,
       };
     }
     const from    = new Date(year,month-1,1).toISOString();
     const to      = new Date(year,month,  1).toISOString();
     const fromDay = `${year}-${String(month).padStart(2,'0')}-01`;
     const toDay   = monthFirstDayStr(year, month+1);
-    const [w,d,tg,gs,adj,gp,gsub,notes,trials,childAuto] = await Promise.all([
+    const [w,d,tg,gs,adj,gp,gsub,notes,trials,childAuto,recalc] = await Promise.all([
       sb().from('workouts').select('*, clients(fio,age), sub_profile:profiles!substitute_for(fio)')
         .eq('trainer_id',trainerId).gte('workout_date',from).lt('workout_date',to)
         .eq('pending_confirmation',false)
@@ -589,6 +598,7 @@ Object.assign(DB, {
         .gte('session_date',from).lt('session_date',to)
         .order('session_date',{ascending:false}),
       DB.getChildGroupsAutoSalary(trainerId, fromDay),
+      DB.getRecalcAdjustments(trainerId, year, month),
     ]);
     return {
       workouts:           w.data      ||[],
@@ -604,6 +614,8 @@ Object.assign(DB, {
       trialSessions:      trials.data ||[],
       childAutoSum:       childAuto.total,
       childAutoRows:      childAuto.rows,
+      recalcSum:          recalc.sum,
+      recalcRows:         recalc.rows,
     };
   },
 

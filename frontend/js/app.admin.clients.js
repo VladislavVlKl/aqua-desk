@@ -133,7 +133,7 @@ async function loadAdminSummary(year,month,branch) {
     const expiredClients = filteredClients.filter(c=>c.subscription_end && new Date(c.subscription_end)<new Date()).length;
     const totalSalary    = data.profiles?.length
       ? (() => {
-          const {groupSubstitutions=[],ptSubstitutions=[],childAutoByTrainer={}} = data;
+          const {groupSubstitutions=[],ptSubstitutions=[],childAutoByTrainer={},recalcByTrainer={}} = data;
           const adjMap = aggAdjustments(data.adjustments);
           return (data.profiles||[]).reduce((s,p)=>{
             const sal = calcSalary({
@@ -145,6 +145,7 @@ async function loadAdminSummary(year,month,branch) {
               trialSessions:(data.trialSessions||[]).filter(t=>t.trainer_id===p.id),
               adjustment:adjMap[p.id]||null,
               childAutoSum:childAutoByTrainer[p.id]||0,
+              recalcSum:recalcByTrainer[p.id]?.sum||0,
               groupSubstitutions, trainerId:p.id,
             });
             return s+sal.total;
@@ -169,7 +170,7 @@ function renderSummaryTable(data,year,month,isAdmin) {
   const {workouts,duties,trainerGroups,groupSessions,profiles,adjustments=[]}=data;
   if (!profiles.length) return '<p class="hint">Нет тренеров</p>';
   const adjMap=aggAdjustments(adjustments);
-  const {groupSubstitutions=[],ptSubstitutions=[],childAutoByTrainer={}}=data;
+  const {groupSubstitutions=[],ptSubstitutions=[],childAutoByTrainer={},recalcByTrainer={}}=data;
   const rows=profiles.map(p=>{
     const sal=calcSalary({
       workouts:[...workouts.filter(w=>w.trainer_id===p.id),
@@ -224,6 +225,7 @@ async function adminDetail(trainerId,fioEnc,year,month) {
     const sal=calcSalary({...d,trainerId});
     $('#tab-content').innerHTML=`<div class="tab-pad">
       <div class="section-header">
+      recalcSum:recalcByTrainer[p.id]?.sum||0,
         <div><h3>${fio}</h3><p class="hint">${fmtMY(year,month)}</p></div>
         <button class="btn btn-sm" onclick="doExportTrainer(${trainerId},'${encodeURIComponent(fio)}',${year},${month})">⬇️ Excel</button>
       </div>
@@ -283,6 +285,9 @@ async function adminDetail(trainerId,fioEnc,year,month) {
         ${d.trialSessions.map(t=>`<div class="history-item">
           <div class="hi-main">
             <span class="hi-client">${t.first_name}${t.last_name?' '+t.last_name:''}</span>
+      ${(d.recalcSum||d.recalcRows?.length)?`<div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px">
+        ${recalcArticleHtml({sum:d.recalcSum,rows:d.recalcRows})}
+      </div>`:''}
             <span class="hi-cat cat-${t.category}">Кат.${t.category}</span>
             <span style="font-size:11px;background:rgba(139,92,246,.15);color:#7c3aed;padding:2px 6px;border-radius:6px">${fmt(RATES.pt[t.category])} сум</span>
           </div>

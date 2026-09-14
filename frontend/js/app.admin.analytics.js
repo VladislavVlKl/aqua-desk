@@ -38,9 +38,10 @@ function _pkgMatch(child, balance, cat) {
 // DB.getSummary + calcSalary (логику ЗП НЕ дублируем).
 async function calcMonthPayroll(branch, year, month) {
   const data = await DB.getSummary(year, month, branch||null);
-  const { groupSubstitutions=[], ptSubstitutions=[], childAutoByTrainer={} } = data;
+  const { groupSubstitutions=[], ptSubstitutions=[], childAutoByTrainer={}, recalcByTrainer={} } = data;
   const adjMap = aggAdjustments(data.adjustments);
   const rows = (data.profiles||[]).map(p=>{
+    const rec = recalcByTrainer[p.id] || { sum:0, rows:[] };
     const sal = calcSalary({
       workouts:[...(data.workouts||[]).filter(w=>w.trainer_id===p.id),
                 ...(ptSubstitutions||[]).filter(w=>w.trainer_id===p.id)],
@@ -50,6 +51,7 @@ async function calcMonthPayroll(branch, year, month) {
       trialSessions:(data.trialSessions||[]).filter(t=>t.trainer_id===p.id),
       adjustment:adjMap[p.id]||null,
       childAutoSum:childAutoByTrainer[p.id]||0,
+      recalcSum:rec.sum,
       groupSubstitutions, trainerId:p.id,
     });
     return {
@@ -57,6 +59,7 @@ async function calcMonthPayroll(branch, year, month) {
       pt:    sal.ptSum+sal.dropInSum+sal.trialSum+sal.ptSubSum,
       duty:  sal.dutySum,
       group: sal.childSum+sal.adultSum+sal.groupSubSum,
+      recalc: sal.recalcSum, recalcRows: rec.rows,
       total: sal.total,
     };
   }).filter(r=>r.total>0).sort((a,b)=>b.total-a.total);

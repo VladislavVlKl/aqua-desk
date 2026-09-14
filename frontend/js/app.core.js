@@ -150,6 +150,40 @@ function el(tag,cls,html) {
   return e;
 }
 function fmt(n)     { return Number(n).toLocaleString('ru-RU'); }
+
+// Статья ЗП «Разница от пересчёта» (сверка с 1С) для «Детализации ЗП».
+// Раскрывается по клику → разбивка по клиентам: кому и на сколько доначислено/снято.
+// recalc = { sum, rows:[{clientFio, delta, category}] }. Пусто → ''.
+// Кол-во ПТ выводим из самой дельты (delta / ставка кат.) — всегда сходится с деньгами
+// (в отличие от остатка на момент флага, который мог устареть к моменту перерасчёта).
+function recalcArticleHtml(recalc) {
+  const sum  = Number(recalc?.sum) || 0;
+  const rows = recalc?.rows || [];
+  if (!sum && !rows.length) return '';
+  const money = v => fmt(Math.abs(v));
+  const sign  = v => v >= 0 ? '+' : '−';
+  const col   = v => v >= 0 ? '#10b981' : '#ef4444';
+  const units = r => {
+    const rate = (typeof RATES!=='undefined' && RATES.pt && RATES.pt[r.category]) || 0;
+    if (!rate) return '';
+    const n = Math.abs(r.delta) / rate;
+    return Number.isInteger(n) ? ` · ${n} ПТ${r.category?` кат.${r.category}`:''}` : '';
+  };
+  return `
+    <div style="font-size:12px;color:var(--hint);font-weight:600;margin-top:8px;margin-bottom:4px">РАЗНИЦА ОТ ПЕРЕСЧЁТА</div>
+    <div style="cursor:pointer" onclick="const d=this.nextElementSibling;d.hidden=!d.hidden;this.querySelector('.rc-arw').textContent=d.hidden?'▸':'▾';">
+      <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);font-size:13px">
+        <span>Сверка с 1С (${rows.length}) <span class="rc-arw">▸</span></span>
+        <span style="font-weight:600;color:${col(sum)}">${sign(sum)}${money(sum)} сум</span>
+      </div>
+    </div>
+    <div hidden>
+      ${rows.map(r=>`<div style="display:flex;justify-content:space-between;padding:3px 0 3px 12px;font-size:12px;color:var(--hint)">
+        <span>${r.clientFio||'—'}${units(r)}</span>
+        <span style="color:${col(r.delta)}">${sign(r.delta)}${money(r.delta)} сум</span>
+      </div>`).join('')}
+    </div>`;
+}
 function levenshtein(a, b) {
   const m=a.length, n=b.length;
   const dp=Array.from({length:m+1},(_,i)=>Array.from({length:n+1},(_,j)=>i===0?j:j===0?i:0));
@@ -439,6 +473,12 @@ async function init() {
     const p=await DB.getProfileByTgId(STATE.tgId);
     if (!p) { renderRegister(); return; }
     STATE.profile=p;
+    // Временная блокировка доступа: заглушка «в разработке» до ввода PIN.
+    // Списки в CONFIG (ACCESS_LOCKED_ROLES / ACCESS_LOCKED_IDS). БД не трогается.
+    if ((CONFIG.ACCESS_LOCKED_ROLES||[]).includes(p.role)
+        || (CONFIG.ACCESS_LOCKED_IDS||[]).includes(p.id)) {
+      renderAccessLocked(); return;
+    }
     // api-режим, браузерный dev-вход (?tgid=, без подписи Telegram): dev-login уже выдал
     // access-токен → PIN-гейт не нужен, входим сразу. Боевой Telegram-поток сюда не попадает
     // (там 'ok'+токен приходит только для профилей без PIN и идёт штатной веткой ниже).

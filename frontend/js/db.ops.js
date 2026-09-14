@@ -142,26 +142,58 @@ Object.assign(DB, {
     const { data, error } = await q;
     if (error) throw error; return data || [];
   },
-  // Перерасчёт: ставим остаток из 1С + (опц.) корректировка ФОТ строкой month_adjustments.
-  // fotDelta > 0 — доначислить (bonus), < 0 — снять (penalty). Всё в audit_log (pt_recalc).
+  // ── Статья ЗП «Разница от пересчёта» (сверка с 1С) ──
+  // Резолвнутые флаги с ненулевой ФОТ-дельтой за месяц РЕШЕНИЯ (resolved_at) — так же,
+  // как раньше корректировка падала в month_adjustments по now при перерасчёте.
+  // Возвращает { [trainerId]: { sum, rows:[{clientFio, delta, before, after, date, branch, category}] } }.
+  // delta>0 — доначислено, <0 — снято. Supabase-only (у таблицы нет API-эндпоинта).
+  async getRecalcByTrainer(year, month, branch = null, trainerId = null) {
+    const from = new Date(year, month - 1, 1).toISOString();
+    const to   = new Date(year, month,     1).toISOString();
+    let q = sb().from('pt_mismatch_flags')
+      .select('trainer_id, branch, fot_delta, corrected_balance, system_balance_at_flag, resolved_at, clients(fio,category)')
+      .eq('status', 'resolved').not('fot_delta', 'is', null).neq('fot_delta', 0)
+      .gte('resolved_at', from).lt('resolved_at', to);
+    if (trainerId != null) q = q.eq('trainer_id', trainerId);
+    if (branch) q = q.eq('branch', branch);
+    const { data, error } = await q;
+    if (error) { console.warn('[getRecalcByTrainer]', error.message || error); return {}; }
+    const map = {};
+    (data || []).forEach(r => {
+      const m = map[r.trainer_id] || (map[r.trainer_id] = { sum: 0, rows: [] });
+      const delta = Number(r.fot_delta) || 0;
+      m.sum += delta;
+      m.rows.push({ clientFio: r.clients?.fio || '—', delta,
+        before: r.system_balance_at_flag, after: r.corrected_balance,
+        date: r.resolved_at, branch: r.branch || '', category: r.clients?.category });
+    });
+    return map;
+  },
+  // Один тренер за месяц → { sum, rows }. Для отчёта тренера и деталей координатора.
+  async getRecalcAdjustments(trainerId, year, month) {
+    const map = await DB.getRecalcByTrainer(year, month, null, trainerId);
+    return map[trainerId] || { sum: 0, rows: [] };
+  },
+  // Перерасчёт: ставим остаток из 1С + (опц.) корректировка ФОТ.
+  // fotDelta > 0 — доначислить, < 0 — снять. Дельта хранится в самом флаге
+  // (pt_mismatch_flags.fot_delta) и попадает в ЗП отдельной статьёй «Разница от пересчёта»
+  // (см. getRecalcByTrainer). В month_adjustments БОЛЬШЕ НЕ пишем — иначе:
+  //   • дубль (та же сумма и во флаге, и в корректировке),
+  //   • коллизия UNIQUE(trainer_id,year,month,branch) при втором перерасчёте
+  //     в том же филиале/месяце или поверх ручной премии.
+  // Всё в audit_log (pt_recalc).
   async resolvePtMismatch({ flagId, clientId, trainerId, beforeBalance, correctedBalance, category, applyFot, branch, resolvedBy }) {
     const now = new Date();
     // 1) остаток
     const { error: e1 } = await sb().from('clients').update({ balance: correctedBalance }).eq('id', clientId);
     if (e1) throw e1;
-    // 2) ФОТ (опционально): остаток ↑ → система переплатила → снять; остаток ↓ → доначислить
+    // 2) ФОТ (опционально): остаток ↑ → система переплатила → снять; остаток ↓ → доначислить.
+    // Сумма пишется только во флаг (шаг 3) — статья «Разница от пересчёта» читает её оттуда.
     let fotDelta = null;
     if (applyFot) {
       const rate = (typeof RATES !== 'undefined' && RATES.pt && RATES.pt[category]) || 0;
       const diff = (correctedBalance || 0) - (beforeBalance || 0);   // +N остаток вырос
       fotDelta = -diff * rate;                                       // + доначислить / − снять
-      if (fotDelta !== 0) {
-        const row = { trainer_id: trainerId, year: now.getFullYear(), month: now.getMonth() + 1,
-          bonus: fotDelta > 0 ? fotDelta : 0, penalty: fotDelta < 0 ? -fotDelta : 0,
-          notes: 'Перерасчёт ПТ (сверка с 1С): остаток ' + beforeBalance + '→' + correctedBalance, branch: branch || null };
-        const { error: e2 } = await sb().from('month_adjustments').insert(row);
-        if (e2) throw e2;
-      }
     }
     // 3) закрыть флаг
     const { error: e3 } = await sb().from('pt_mismatch_flags')

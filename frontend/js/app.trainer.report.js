@@ -29,7 +29,7 @@ async function loadTrainerReport(year,month) {
   try {
     const fromDay = `${year}-${String(month).padStart(2,'0')}-01`;
     // Все запросы независимы — грузим одним батчем (1 round-trip вместо 6 последовательных)
-    const [workouts,duties,trainerGroups,groupSessions,childAuto,groupSubstitutions,trialSessions,adjustment,unpaidGroups,pending,transfers,lateRequests]=await Promise.all([
+    const [workouts,duties,trainerGroups,groupSessions,childAuto,groupSubstitutions,trialSessions,adjustment,unpaidGroups,pending,transfers,lateRequests,recalc]=await Promise.all([
       DB.getWorkouts(STATE.profile.id,year,month),
       DB.getDuties(STATE.profile.id,year,month),
       DB.getTrainerGroups(STATE.profile.id),
@@ -42,6 +42,7 @@ async function loadTrainerReport(year,month) {
       DB.getPendingConfirmations(STATE.profile.id),
       DB.getIncomingTransfers(STATE.profile.id),
       DB.getMyLateRequests(STATE.profile.id).catch(()=>[]),
+      DB.getRecalcAdjustments(STATE.profile.id, year, month).catch(()=>({sum:0,rows:[]})),
     ]);
     // Ресепшн-статус: в ЗП идёт только confirmed; rejected исключается; pending — отдельной строкой.
     // Старые записи бэкфилнуты в confirmed → всё кроме 'pending'/'rejected' считаем confirmed.
@@ -49,7 +50,7 @@ async function loadTrainerReport(year,month) {
     const wPending   = workouts.filter(w=>w.reception_status==='pending');
     const tConfirmed = trialSessions.filter(t=>t.reception_status!=='pending'&&t.reception_status!=='rejected');
     const tPending   = trialSessions.filter(t=>t.reception_status==='pending');
-    const sal=calcSalary({workouts:wConfirmed,duties,trainerGroups,groupSessions,adjustment,groupSubstitutions,trialSessions:tConfirmed,trainerId:STATE.profile.id,childAutoSum:childAuto.total});
+    const sal=calcSalary({workouts:wConfirmed,duties,trainerGroups,groupSessions,adjustment,groupSubstitutions,trialSessions:tConfirmed,trainerId:STATE.profile.id,childAutoSum:childAuto.total,recalcSum:recalc?.sum||0});
     const salP=calcSalary({workouts:wPending,trialSessions:tPending,trainerId:STATE.profile.id});
     const pendingPtSum = salP.ptSum + salP.dropInSum + salP.trialSum + salP.ptSubSum;
     const pendingCnt = wPending.length + tPending.length;
@@ -166,6 +167,8 @@ async function loadTrainerReport(year,month) {
           </div>`).join('')}
           `;
         })()}
+
+        ${recalcArticleHtml(recalc)}
 
         ${sal.bonus||sal.penalty?`
         <div style="font-size:12px;color:var(--hint);font-weight:600;margin-top:8px;margin-bottom:4px">КОРРЕКТИРОВКИ</div>

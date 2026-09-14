@@ -39,7 +39,7 @@ function ceoTab(tab) {
 
 // ЗП всех тренеров за месяц из данных getSummary → [{p, sal}]
 function ceoFotRows(data) {
-  const {groupSubstitutions=[],ptSubstitutions=[],childAutoByTrainer={}} = data;
+  const {groupSubstitutions=[],ptSubstitutions=[],childAutoByTrainer={},recalcByTrainer={}} = data;
   const adjMap=aggAdjustments(data.adjustments);
   return (data.profiles||[]).map(p=>({p, sal: calcSalary({
     workouts:[...(data.workouts||[]).filter(w=>w.trainer_id===p.id),
@@ -50,6 +50,7 @@ function ceoFotRows(data) {
     trialSessions:(data.trialSessions||[]).filter(t=>t.trainer_id===p.id),
     adjustment:adjMap[p.id]||null,
     childAutoSum:childAutoByTrainer[p.id]||0,
+    recalcSum:recalcByTrainer[p.id]?.sum||0,
     groupSubstitutions, trainerId:p.id,
   })}));
 }
@@ -855,7 +856,7 @@ async function renderManagerStaff(year, month) {
 function renderManagerTrainerCard(id, fioEnc, year, month) {
   const fio = decodeURIComponent(fioEnc);
   const M = window._mgrStaff || {};
-  const m = (M.payMap||{})[id] || { pt:0, duty:0, group:0, total:0 };
+  const m = (M.payMap||{})[id] || { pt:0, duty:0, group:0, recalc:0, recalcRows:[], total:0 };
   const cnt = (M.wc||{})[id]||0, hrs = (M.dh||{})[id]||0;
   const back = ()=>renderManagerStaff(year,month);
   navPush(back); setupBack(back);
@@ -872,6 +873,7 @@ function renderManagerTrainerCard(id, fioEnc, year, month) {
       <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:13px"><span>Персональные тренировки</span><b>${fmt(m.pt||0)} сум</b></div>
       <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:13px"><span>Дежурства</span><b>${fmt(m.duty||0)} сум</b></div>
       <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:13px"><span>Группы</span><b>${fmt(m.group||0)} сум</b></div>
+      ${(m.recalc||m.recalcRows?.length)?recalcArticleHtml({sum:m.recalc,rows:m.recalcRows}):''}
       <div style="display:flex;justify-content:space-between;padding:8px 0 0;font-size:14px"><span><b>Итого</b></span><b>${fmt(m.total||0)} сум</b></div>
     </div>
     <p class="hint" style="text-align:center;margin-top:14px">👁 Только просмотр</p>
