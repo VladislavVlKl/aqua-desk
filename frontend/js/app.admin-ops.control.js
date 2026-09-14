@@ -478,6 +478,7 @@ function _mmCard(f) {
     <div class="ci-main"><b>${c.fio||'клиент'}</b> <span class="hint">${f.branch||''}</span></div>
     <div class="ci-sub">Отметил: ${tr.fio||'—'} · ${fmtDate(f.created_at)}</div>
     <div class="ci-sub">Остаток в системе: <b>${cur}</b> · Кат.${cat||'?'}${f.trainer_suggested!=null?` · тренер считает: <b>${f.trainer_suggested}</b>`:''}</div>
+    ${(f.system_balance_at_flag!=null && f.system_balance_at_flag!==cur)?`<div class="ci-sub" style="color:#f59e0b">⚠ Баланс изменился с момента флага (при флаге <b>${f.system_balance_at_flag}</b>, сейчас <b>${cur}</b>) — возможно, купили пакет или списали ПТ. Вводите остаток по 1С с учётом этого, чтобы не обнулить новый пакет.</div>`:''}
     ${f.trainer_note?`<div class="ci-sub" style="color:var(--hint)">💬 ${f.trainer_note}</div>`:''}
     <div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap">
       <input type="number" id="mm1c-${f.id}" value="${prefill}" min="0" placeholder="Остаток по 1С"
@@ -522,7 +523,11 @@ async function doResolveMismatch(flagId) {
   try {
     await DB.resolvePtMismatch({
       flagId, clientId: f.client_id, trainerId: f.trainer_id,
-      beforeBalance: (f.clients?.balance ?? 0), correctedBalance: v,
+      // ФОТ-разница = (остаток ПРИ ФЛАГЕ − остаток по 1С) × ставка. Берём снимок
+      // system_balance_at_flag, а НЕ текущий clients.balance: если между флагом и
+      // перерасчётом купили пакет/списали ПТ, текущий баланс уже другой и разница
+      // посчитается неверно (был баг: Кириллу заплатили 5 ПТ вместо 1).
+      beforeBalance: (f.system_balance_at_flag ?? f.clients?.balance ?? 0), correctedBalance: v,
       category: f.clients?.category, applyFot, branch: f.branch, resolvedBy: STATE.profile.id,
     });
     toast('Пересчитано ✓','success');
