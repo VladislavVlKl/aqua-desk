@@ -25,7 +25,9 @@ async function renderClientProfile(clientId, backTab='home') {
     // Флаг расхождения с 1С (для кнопки/бейджа). Только у своего неархивного клиента.
     const canFlagMismatch = typeof PT_MISMATCH !== 'undefined' && PT_MISMATCH.enabled && canEdit && !client.is_archived;
     const mismatchFlag = canFlagMismatch ? await DB.getMismatchFlag(clientId).catch(()=>null) : null;
-    window._mmClient = { id: clientId, fio: client.fio, balance: client.balance||0, branch: (client.profiles?.branches?.[0])||STATE.profile.branches?.[0] };
+    window._mmClient = { id: clientId, fio: client.fio, balance: client.balance||0, branch: (client.profiles?.branches?.[0])||STATE.profile.branches?.[0],
+      returnedNote: (mismatchFlag && mismatchFlag.status==='returned') ? (mismatchFlag.coordinator_note||'') : null,
+      prevSuggested: mismatchFlag?.trainer_suggested, prevNote: mismatchFlag?.trainer_note };
 
     $('#tab-content').innerHTML=`<div class="tab-pad">
       <div class="client-header">
@@ -51,7 +53,9 @@ async function renderClientProfile(clientId, backTab='home') {
               📊 Отчёт</button>
             ${canFlagMismatch && !mismatchFlag ? `<button class="btn btn-sm" style="background:rgba(245,158,11,.18);color:#fcd34d;border:1px solid rgba(245,158,11,.5);font-weight:700"
               onclick="renderMismatchModal('${clientId}')">⚠ Не совпадает с 1С</button>` : ''}
-            ${mismatchFlag ? `<span class="btn btn-sm" style="background:rgba(245,158,11,.12);color:#fcd34d;border:1px solid rgba(245,158,11,.4);cursor:default">⏳ На проверке (1С)</span>` : ''}
+            ${mismatchFlag && mismatchFlag.status==='returned' ? `<button class="btn btn-sm" style="background:rgba(96,165,250,.18);color:#93c5fd;border:1px solid rgba(96,165,250,.5);font-weight:700"
+              onclick="renderMismatchModal('${clientId}')">🔁 Уточнить заявку (1С)</button>` : ''}
+            ${mismatchFlag && mismatchFlag.status!=='returned' ? `<span class="btn btn-sm" style="background:rgba(245,158,11,.12);color:#fcd34d;border:1px solid rgba(245,158,11,.4);cursor:default">⏳ На проверке (1С)</span>` : ''}
             ${canEdit?`<button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
               onclick="renderTransferClientModal('${clientId}','${client.fio}',${STATE.profile.id})">
               🔄 Передать</button>`:''}
@@ -616,19 +620,21 @@ async function doExportSummary(year,month,branch) {
 function renderMismatchModal(clientId) {
   const c = window._mmClient || { id: clientId, fio: '', balance: 0 };
   const m = el('div','modal-overlay'); m.id='mismatch-modal';
+  const isReturn = c.returnedNote != null;
   m.innerHTML=`<div class="modal">
-    <div class="modal-header"><h3>⚠ Расходится с 1С</h3>
+    <div class="modal-header"><h3>${isReturn?'🔁 Уточнить заявку (1С)':'⚠ Расходится с 1С'}</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    ${isReturn?`<div class="ci-sub" style="background:rgba(96,165,250,.12);border:1px solid rgba(96,165,250,.3);border-radius:8px;padding:8px 10px;margin:0 0 12px;color:#93c5fd">Координатор вернул заявку на уточнение${c.returnedNote?`:<br><b>${c.returnedNote}</b>`:'.'}</div>`:''}
     <p class="hint" style="margin:0 0 12px">${c.fio} · остаток в системе: <b>${c.balance}</b>. Отправим координатору и старшему на сверку с 1С.</p>
     <div class="form-group">
       <label>Сколько реально осталось (если знаешь, необязательно)</label>
-      <input type="number" id="mm-suggested" min="0" placeholder="напр. 6" style="width:120px">
+      <input type="number" id="mm-suggested" min="0" placeholder="напр. 6" value="${(isReturn&&c.prevSuggested!=null)?c.prevSuggested:''}" style="width:120px">
     </div>
     <div class="form-group">
       <label>Комментарий</label>
-      <textarea id="mm-note" rows="2" placeholder="напр. клиент говорит, что оплатил ещё 5, в 1С есть"></textarea>
+      <textarea id="mm-note" rows="2" placeholder="напр. клиент говорит, что оплатил ещё 5, в 1С есть">${(isReturn&&c.prevNote)?c.prevNote:''}</textarea>
     </div>
-    <button class="btn btn-primary btn-full" onclick="doFlagMismatch('${clientId}')">Отправить на проверку</button>
+    <button class="btn btn-primary btn-full" onclick="doFlagMismatch('${clientId}')">${isReturn?'Отправить повторно':'Отправить на проверку'}</button>
   </div>`;
   document.body.appendChild(m);
 }

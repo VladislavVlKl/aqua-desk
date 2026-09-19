@@ -471,24 +471,46 @@ async function renderAdminMonitoring(force=false) {
 // Карточка одного флага. c = f.clients, tr = f.profiles.
 function _mmCard(f) {
   const c = f.clients || {}; const tr = f.profiles || {};
-  const cur = c.balance ?? 0;
-  const prefill = (f.trainer_suggested != null) ? f.trainer_suggested : cur;
+  const cur = c.balance ?? 0;                 // текущий остаток в системе (сегодня)
+  const prefill = cur;                        // безопасно: по умолчанию = текущий остаток → без правок ничего не меняется
   const cat = c.category;
+  const changed = (f.system_balance_at_flag != null && f.system_balance_at_flag !== cur);
+  // Человеческое пояснение, что изменилось после заявки.
+  let changesLine = '';
+  if (changed) {
+    const ch = f._changes;
+    const parts = [];
+    if (ch && ch.pkgCount) parts.push(`куплен ${ch.pkgCount>1?ch.pkgCount+' пакета':'новый пакет'} (+${ch.pkgAdded} ПТ)`);
+    if (ch && ch.workoutsSince) parts.push(`списано ${ch.workoutsSince} ПТ`);
+    const detail = parts.length ? parts.join(', ') : 'остаток изменился';
+    changesLine = `<div class="ci-sub" style="color:#f59e0b">⚠ После заявки: ${detail}.
+      На момент заявки было <b>${f.system_balance_at_flag}</b>, сейчас <b>${cur}</b>. Текущий остаток это уже учитывает —
+      вводите остаток <b>по 1С на сегодня</b>, чтобы не обнулить новый пакет.</div>`;
+  }
   return `<div class="control-item" id="mm-item-${f.id}">
     <div class="ci-main"><b>${c.fio||'клиент'}</b> <span class="hint">${f.branch||''}</span></div>
-    <div class="ci-sub">Отметил: ${tr.fio||'—'} · ${fmtDate(f.created_at)}</div>
-    <div class="ci-sub">Остаток в системе: <b>${cur}</b> · Кат.${cat||'?'}${f.trainer_suggested!=null?` · тренер считает: <b>${f.trainer_suggested}</b>`:''}</div>
-    ${(f.system_balance_at_flag!=null && f.system_balance_at_flag!==cur)?`<div class="ci-sub" style="color:#f59e0b">⚠ Баланс изменился с момента флага (при флаге <b>${f.system_balance_at_flag}</b>, сейчас <b>${cur}</b>) — возможно, купили пакет или списали ПТ. Вводите остаток по 1С с учётом этого, чтобы не обнулить новый пакет.</div>`:''}
+    <div class="ci-sub">Заявку подал: ${tr.fio||'—'} · ${fmtDate(f.created_at)}</div>
+    <div class="ci-sub">Сейчас в приложении: <b>${cur}</b> ПТ · Кат.${cat||'?'}${f.trainer_suggested!=null?` · тренер написал (на дату заявки): <b>${f.trainer_suggested}</b>`:''}</div>
+    ${changesLine}
     ${f.trainer_note?`<div class="ci-sub" style="color:var(--hint)">💬 ${f.trainer_note}</div>`:''}
     <div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap">
-      <input type="number" id="mm1c-${f.id}" value="${prefill}" min="0" placeholder="Остаток по 1С"
-        style="width:110px;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:6px;color:var(--text);font-size:13px">
+      <input type="number" id="mm1c-${f.id}" value="${prefill}" min="0" placeholder="Остаток по 1С (сегодня)"
+        style="width:150px;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:6px;color:var(--text);font-size:13px">
       <label style="font-size:12px;color:var(--hint);display:flex;align-items:center;gap:5px">
         <input type="checkbox" id="mmfot-${f.id}" checked> корректировать ФОТ</label>
     </div>
-    <div style="display:flex;gap:6px;margin-top:8px">
+    <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
       <button class="btn btn-sm btn-primary" onclick="doResolveMismatch('${f.id}')">Пересчитать</button>
+      <button class="btn btn-sm" style="background:rgba(96,165,250,.12);color:#93c5fd;border:1px solid rgba(96,165,250,.3)" onclick="doReturnMismatch('${f.id}')">↩︎ Вернуть тренеру</button>
       <button class="btn btn-sm" style="background:rgba(239,68,68,.12);color:#fca5a5;border:1px solid rgba(239,68,68,.25)" onclick="doRejectMismatch('${f.id}')">Отклонить</button>
+    </div>
+    <div id="mmret-wrap-${f.id}" style="display:none;margin-top:8px">
+      <textarea id="mmret-${f.id}" rows="2" placeholder="Текст тренеру, напр.: уточните актуальность заявки — остаток изменился, повторите если расхождение осталось"
+        style="width:100%;box-sizing:border-box;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:6px;color:var(--text);font-size:13px"></textarea>
+      <div style="display:flex;gap:6px;margin-top:6px">
+        <button class="btn btn-sm btn-primary" onclick="doReturnMismatch('${f.id}',true)">Отправить тренеру</button>
+        <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)" onclick="document.getElementById('mmret-wrap-${f.id}').style.display='none'">Отмена</button>
+      </div>
     </div>
   </div>`;
 }
@@ -501,6 +523,15 @@ async function renderMismatchFlags(branches, backFn) {
   let flags = [];
   try { flags = await DB.getPtMismatchFlags(branches); }
   catch(e) { console.error('[mismatch] list', e); toast('Ошибка загрузки','error'); }
+  // Обогащаем каждый флаг тем, что изменилось у клиента после заявки (пакеты/списания).
+  try {
+    await Promise.all((flags||[]).map(async f => {
+      const cur = f.clients?.balance ?? 0;
+      if (f.system_balance_at_flag != null && f.system_balance_at_flag !== cur) {
+        f._changes = await DB.getMismatchChangesSince(f.client_id, f.created_at);
+      }
+    }));
+  } catch(e) { console.warn('[mismatch] changes', e); }
   window._mmFlags = Object.fromEntries((flags||[]).map(f=>[String(f.id),f]));
   setScreen(`<div class="tab-pad">
     <div class="section-header">${backBtn()}<h3>⚠ Расхождения с 1С</h3></div>
@@ -523,17 +554,37 @@ async function doResolveMismatch(flagId) {
   try {
     await DB.resolvePtMismatch({
       flagId, clientId: f.client_id, trainerId: f.trainer_id,
-      // ФОТ-разница = (остаток ПРИ ФЛАГЕ − остаток по 1С) × ставка. Берём снимок
-      // system_balance_at_flag, а НЕ текущий clients.balance: если между флагом и
-      // перерасчётом купили пакет/списали ПТ, текущий баланс уже другой и разница
-      // посчитается неверно (был баг: Кириллу заплатили 5 ПТ вместо 1).
-      beforeBalance: (f.system_balance_at_flag ?? f.clients?.balance ?? 0), correctedBalance: v,
+      // ФОТ-разница = (текущий остаток в системе − остаток по 1С на сегодня) × ставка.
+      // Берём ТЕКУЩИЙ clients.balance, а НЕ снимок при флаге: сравнение «сегодня vs сегодня».
+      // Купленные после заявки пакеты/списания уже сидят в текущем остатке и не создают
+      // мнимой переплаты (иначе новый пакет +10 дал бы −880к ФОТ на пустом месте).
+      beforeBalance: (f.clients?.balance ?? 0), correctedBalance: v,
       category: f.clients?.category, applyFot, branch: f.branch, resolvedBy: STATE.profile.id,
     });
     toast('Пересчитано ✓','success');
     _mmRefresh();
   } catch(e) { console.error('[mismatch] resolve', e); toast('Не удалось пересчитать','error'); }
   finally { _pending.delete('mmres-'+flagId); }
+}
+
+// Вернуть заявку тренеру на уточнение. Первый клик — раскрывает поле текста;
+// второй (send=true) — отправляет.
+async function doReturnMismatch(flagId, send) {
+  const f = (window._mmFlags||{})[String(flagId)]; if (!f) return;
+  const wrap = document.getElementById('mmret-wrap-'+flagId);
+  if (!send) { if (wrap) wrap.style.display = wrap.style.display==='none' ? 'block' : 'none'; return; }
+  const note = document.getElementById('mmret-'+flagId)?.value || '';
+  if (_pending.has('mmret-'+flagId)) return; _pending.add('mmret-'+flagId);
+  try {
+    await DB.returnMismatchToTrainer({
+      flagId, clientId: f.client_id, trainerId: f.trainer_id,
+      coordinatorNote: note, branch: f.branch, resolvedBy: STATE.profile.id,
+      clientFio: f.clients?.fio || '',
+    });
+    toast('Отправлено тренеру ↩︎','info');
+    _mmRefresh();
+  } catch(e) { console.error('[mismatch] return', e); toast('Не удалось отправить','error'); }
+  finally { _pending.delete('mmret-'+flagId); }
 }
 
 async function doRejectMismatch(flagId) {

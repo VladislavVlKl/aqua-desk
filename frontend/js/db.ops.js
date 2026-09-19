@@ -104,23 +104,37 @@ Object.assign(DB, {
   },
 
   // ─── РАСХОЖДЕНИЕ ОСТАТКА ПТ С 1С (Supabase-only) ───
-  // Открытый флаг по клиенту (для бейджа на карточке). null если нет.
+  // Активный запрос по клиенту (для бейджа/баннера на карточке): open или returned. null если нет.
   async getMismatchFlag(clientId) {
     const { data, error } = await sb().from('pt_mismatch_flags')
-      .select('*').eq('client_id', clientId).eq('status', 'open').maybeSingle();
+      .select('*').eq('client_id', clientId).in('status', ['open', 'returned']).maybeSingle();
     if (error) throw error; return data || null;
   },
-  // Тренер отмечает расхождение. Дедуп — частичный unique-индекс (один open на клиента).
-  // Шлёт пуш старшим+координаторам филиала.
+  // Тренер отмечает расхождение (или повторяет уточнённую заявку после возврата координатором).
+  // Дедуп — частичный unique-индекс (один активный на клиента). Если по клиенту висит
+  // возвращённый запрос (returned) — обновляем его обратно в open (это повторная заявка),
+  // сбрасывая ссылку на дату (created_at) — координатор оценивает заново.
   async flagPtMismatch({ clientId, trainerId, trainerFio, branch, systemBalance, note, suggested }) {
-    const { error } = await sb().from('pt_mismatch_flags').insert({
+    const payload = {
       client_id: clientId, trainer_id: trainerId, branch: branch || null,
       system_balance_at_flag: systemBalance ?? null,
       trainer_note: (note || '').trim() || null,
       trainer_suggested: (suggested === '' || suggested == null) ? null : Number(suggested),
       status: 'open',
-    });
-    if (error) { if (String(error.message || '').includes('duplicate') || error.code === '23505') throw new Error('already_open'); throw error; }
+    };
+    // Повторная заявка поверх возвращённой: обновляем ту же строку.
+    const existing = await sb().from('pt_mismatch_flags')
+      .select('id,status').eq('client_id', clientId).in('status', ['open', 'returned']).maybeSingle();
+    if (existing.data) {
+      if (existing.data.status === 'open') throw new Error('already_open');
+      const { error: eu } = await sb().from('pt_mismatch_flags')
+        .update({ ...payload, coordinator_note: null, returned_by: null, returned_at: null,
+          created_at: new Date().toISOString() }).eq('id', existing.data.id);
+      if (eu) throw eu;
+    } else {
+      const { error } = await sb().from('pt_mismatch_flags').insert(payload);
+      if (error) { if (String(error.message || '').includes('duplicate') || error.code === '23505') throw new Error('already_open'); throw error; }
+    }
     // уведомление старшим/координаторам филиала
     try {
       const { data: recips } = await sb().from('profiles').select('id,role,branches,tg_id')
@@ -151,7 +165,7 @@ Object.assign(DB, {
     const from = new Date(year, month - 1, 1).toISOString();
     const to   = new Date(year, month,     1).toISOString();
     let q = sb().from('pt_mismatch_flags')
-      .select('trainer_id, branch, fot_delta, corrected_balance, system_balance_at_flag, resolved_at, clients(fio,category)')
+      .select('trainer_id, branch, fot_delta, corrected_balance, system_balance_at_flag, balance_before_resolve, resolved_at, clients(fio,category)')
       .eq('status', 'resolved').not('fot_delta', 'is', null).neq('fot_delta', 0)
       .gte('resolved_at', from).lt('resolved_at', to);
     if (trainerId != null) q = q.eq('trainer_id', trainerId);
@@ -164,7 +178,8 @@ Object.assign(DB, {
       const delta = Number(r.fot_delta) || 0;
       m.sum += delta;
       m.rows.push({ clientFio: r.clients?.fio || '—', delta,
-        before: r.system_balance_at_flag, after: r.corrected_balance,
+        before: (r.balance_before_resolve != null ? r.balance_before_resolve : r.system_balance_at_flag),
+        after: r.corrected_balance,
         date: r.resolved_at, branch: r.branch || '', category: r.clients?.category });
     });
     return map;
@@ -182,22 +197,29 @@ Object.assign(DB, {
   //   • коллизия UNIQUE(trainer_id,year,month,branch) при втором перерасчёте
   //     в том же филиале/месяце или поверх ручной премии.
   // Всё в audit_log (pt_recalc).
+  //
+  // ⚠ beforeBalance = ТЕКУЩИЙ остаток в системе (clients.balance на момент перерасчёта),
+  //   а НЕ снимок system_balance_at_flag. Так «сегодня vs сегодня»: если между заявкой и
+  //   перерасчётом купили пакет/списали ПТ, это уже учтено в текущем остатке и не попадает
+  //   в ФОТ-разницу как мнимая переплата. Дрейф = (остаток по 1С − текущий остаток).
+  //   Текущий остаток фиксируем в balance_before_resolve для честного отчёта ЗП.
   async resolvePtMismatch({ flagId, clientId, trainerId, beforeBalance, correctedBalance, category, applyFot, branch, resolvedBy }) {
     const now = new Date();
     // 1) остаток
     const { error: e1 } = await sb().from('clients').update({ balance: correctedBalance }).eq('id', clientId);
     if (e1) throw e1;
-    // 2) ФОТ (опционально): остаток ↑ → система переплатила → снять; остаток ↓ → доначислить.
-    // Сумма пишется только во флаг (шаг 3) — статья «Разница от пересчёта» читает её оттуда.
+    // 2) ФОТ (опционально): остаток по 1С ↑ vs текущего → система переплатила → снять;
+    //    ↓ → доначислить. Сумма пишется только во флаг (шаг 3) — статья «Разница от пересчёта» читает её оттуда.
     let fotDelta = null;
     if (applyFot) {
       const rate = (typeof RATES !== 'undefined' && RATES.pt && RATES.pt[category]) || 0;
-      const diff = (correctedBalance || 0) - (beforeBalance || 0);   // +N остаток вырос
+      const diff = (correctedBalance || 0) - (beforeBalance || 0);   // +N остаток по 1С выше текущего
       fotDelta = -diff * rate;                                       // + доначислить / − снять
     }
     // 3) закрыть флаг
     const { error: e3 } = await sb().from('pt_mismatch_flags')
       .update({ status: 'resolved', corrected_balance: correctedBalance, fot_delta: fotDelta,
+        balance_before_resolve: beforeBalance ?? null,
         resolved_by: resolvedBy || null, resolved_at: now.toISOString() }).eq('id', flagId);
     if (e3) throw e3;
     // 4) аудит
@@ -205,6 +227,33 @@ Object.assign(DB, {
       action: 'pt_recalc', actor_fio: 'Перерасчёт (сверка 1С)', target_id: clientId, target_type: 'client',
       details: { flag_id: flagId, before: beforeBalance, after: correctedBalance, fot_delta: fotDelta }, branch: branch || null,
     }).select().maybeSingle().then(()=>{}).catch(()=>{});
+  },
+  // Координатор возвращает заявку тренеру на уточнение (со своим текстом). Флаг уходит из
+  // списка координатора (status=returned), тренеру — пуш + баннер на карточке клиента.
+  async returnMismatchToTrainer({ flagId, clientId, trainerId, coordinatorNote, branch, resolvedBy, clientFio }) {
+    const { error } = await sb().from('pt_mismatch_flags')
+      .update({ status: 'returned', coordinator_note: (coordinatorNote || '').trim() || null,
+        returned_by: resolvedBy || null, returned_at: new Date().toISOString() }).eq('id', flagId);
+    if (error) throw error;
+    try {
+      const msg = '🔁 <b>Уточните заявку о расхождении с 1С</b>\n\nКлиент: ' + (clientFio || '')
+        + (coordinatorNote ? ('\nКоординатор: ' + coordinatorNote) : '')
+        + '\n\nОткройте карточку клиента и повторите/уточните заявку.';
+      DB.enqueueTrainerNotification(trainerId, msg, 'pt_mismatch');
+    } catch (e) { console.error('[mismatch] return notify', e); }
+  },
+  // Что изменилось у клиента с момента заявки (created_at) — чтобы координатор понимал,
+  // почему остаток «уехал», и не ломал новый пакет. Считаем купленные пакеты и списания.
+  async getMismatchChangesSince(clientId, sinceIso) {
+    try {
+      const [w, s] = await Promise.all([
+        sb().from('workouts').select('id', { count: 'exact', head: true })
+          .eq('client_id', clientId).gt('created_at', sinceIso),
+        sb().from('subscriptions').select('initial_balance').eq('client_id', clientId).gt('created_at', sinceIso),
+      ]);
+      const pkgAdded = (s.data || []).reduce((a, r) => a + (r.initial_balance || 0), 0);
+      return { workoutsSince: w.count || 0, pkgAdded, pkgCount: (s.data || []).length };
+    } catch (e) { console.warn('[getMismatchChangesSince]', e?.message || e); return null; }
   },
   async rejectPtMismatch(flagId, reason, resolvedBy) {
     const { error } = await sb().from('pt_mismatch_flags')
