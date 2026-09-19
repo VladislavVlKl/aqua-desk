@@ -225,7 +225,6 @@ async function adminDetail(trainerId,fioEnc,year,month) {
     const sal=calcSalary({...d,trainerId});
     $('#tab-content').innerHTML=`<div class="tab-pad">
       <div class="section-header">
-      recalcSum:recalcByTrainer[p.id]?.sum||0,
         <div><h3>${fio}</h3><p class="hint">${fmtMY(year,month)}</p></div>
         <button class="btn btn-sm" onclick="doExportTrainer(${trainerId},'${encodeURIComponent(fio)}',${year},${month})">⬇️ Excel</button>
       </div>
@@ -241,6 +240,9 @@ async function adminDetail(trainerId,fioEnc,year,month) {
           <div class="s-val">${fmt(sal.total)}</div><div class="s-lbl">К выплате</div>
         </div>
       </div>
+      ${(d.recalcSum||d.recalcRows?.length)?`<div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px">
+        ${recalcArticleHtml({sum:d.recalcSum,rows:d.recalcRows})}
+      </div>`:''}
       ${renderAdjForm(trainerId, year, month, d.adjustments||[], trainerBranches)}
 
       <h4 style="margin-top:16px">Тренировки (${d.workouts.length})</h4>
@@ -285,9 +287,6 @@ async function adminDetail(trainerId,fioEnc,year,month) {
         ${d.trialSessions.map(t=>`<div class="history-item">
           <div class="hi-main">
             <span class="hi-client">${t.first_name}${t.last_name?' '+t.last_name:''}</span>
-      ${(d.recalcSum||d.recalcRows?.length)?`<div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px">
-        ${recalcArticleHtml({sum:d.recalcSum,rows:d.recalcRows})}
-      </div>`:''}
             <span class="hi-cat cat-${t.category}">Кат.${t.category}</span>
             <span style="font-size:11px;background:rgba(139,92,246,.15);color:#7c3aed;padding:2px 6px;border-radius:6px">${fmt(RATES.pt[t.category])} сум</span>
           </div>
