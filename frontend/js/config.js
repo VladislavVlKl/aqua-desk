@@ -223,6 +223,35 @@ const DUTY_SHIFTS = {
 const SHIFT_ORDER  = ['morning','day','lunch','evening'];
 const SHIFT_LABELS = { morning:'Утренняя', day:'Дневная', lunch:'Обеденная', evening:'Вечерняя' };
 
+// ─── ПЛАН ДЕЖУРСТВ (норма часов) ──────────────
+// Единый источник — DUTY_SHIFTS выше. Норма считается из длительностей смен,
+// отдельных констант не заводим, чтобы план и пикер смен не разъезжались.
+// Нормы (проверено): Light будни 16ч/вых 13ч, Sport 16/13, Moms 14/12 (утро вых 09–12).
+function _shiftHours([a,b]) {
+  const [ah,am]=a.split(':').map(Number), [bh,bm]=b.split(':').map(Number);
+  return ((bh*60+bm)-(ah*60+am))/60;
+}
+// Норма часов дежурства за один день: kind = 'weekday' | 'weekend'. null если филиала нет.
+function dutyNormHours(branch, kind) {
+  const def = DUTY_SHIFTS[branch]?.[kind];
+  if (!def) return null;
+  return Object.values(def).reduce((s,sh)=>s+_shiftHours(sh),0);
+}
+// Плановые дежурные часы за месяц (month 1-based). Выходные = сб/вс.
+// → {total, weekdayDays, weekendDays, wdT, weT} или null, если норма филиала не задана.
+function expectedDutyHours(branch, year, month) {
+  const wdT = dutyNormHours(branch,'weekday');
+  const weT = dutyNormHours(branch,'weekend');
+  if (wdT==null || weT==null) return null;
+  const days = new Date(year, month, 0).getDate();
+  let wd=0, we=0;
+  for (let d=1; d<=days; d++) {
+    const dow = new Date(year, month-1, d).getDay();
+    if (dow===0||dow===6) we++; else wd++;
+  }
+  return { total: wd*wdT + we*weT, weekdayDays:wd, weekendDays:we, wdT, weT };
+}
+
 const EVENT_TYPES = {
   competition:   '🏆 Соревнование',
   qualification: '📚 Квалификация',

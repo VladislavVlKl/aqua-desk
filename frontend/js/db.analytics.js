@@ -12,7 +12,7 @@ Object.assign(DB, {
       sb().from('workouts').select('trainer_id,workout_date,created_at,is_debt,debt_confirmed_at')
         .gte('workout_date', from).lt('workout_date', to),
       // Дежурства за месяц
-      sb().from('duties').select('trainer_id,start_time').gte('start_time',from).lt('start_time',to),
+      sb().from('duties').select('trainer_id,start_time').gte('start_time',from).lt('start_time',to).is('rejected_at',null),
       // Все тренировки старше 48ч без конспекта
       sb().from('workouts').select('id,trainer_id,workout_date')
         .eq('is_drop_in',false).eq('is_debt',false).lt('workout_date', cutoff48),
@@ -199,11 +199,11 @@ Object.assign(DB, {
     // Дежурства
     let currDutyQ = sb().from('duties')
       .select('trainer_id,start_time,end_time')
-      .gte('start_time',from).lt('start_time',to).not('end_time','is',null);
+      .gte('start_time',from).lt('start_time',to).not('end_time','is',null).is('rejected_at',null);
     if (branch) currDutyQ = currDutyQ.eq('branch',branch);
     let prevDutyQ = sb().from('duties')
       .select('start_time,end_time')
-      .gte('start_time',pfrom).lt('start_time',pto).not('end_time','is',null);
+      .gte('start_time',pfrom).lt('start_time',pto).not('end_time','is',null).is('rejected_at',null);
     if (branch) prevDutyQ = prevDutyQ.eq('branch',branch);
 
     const [cW,pW,cS,pS,cC,pC,aC,rQ,cD,pD] = await Promise.all([
@@ -321,7 +321,7 @@ Object.assign(DB, {
 
     let dq = sb().from('duties')
       .select('trainer_id,branch,start_time,end_time')
-      .gte('start_time',from).lt('start_time',to).not('end_time','is',null);
+      .gte('start_time',from).lt('start_time',to).not('end_time','is',null).is('rejected_at',null);
     if (branch) dq = dq.eq('branch',branch);
 
     let tgq = sb().from('trainer_groups')

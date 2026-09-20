@@ -171,7 +171,8 @@ balance_before / balance_after (снимок остатка ПТ на момен
 
 **schedule_confirmations** — подтверждение слота на дату: `slot_id, session_date, status, actual_headcount, workout_id, cancel_reason`
 
-**duties** — дежурства: `trainer_id, branch, start_time, end_time (NULL = активное)`
+**duties** — дежурства: `trainer_id, branch, start_time, end_time (NULL = активное), rejected_at, rejected_by, reject_reason`
+> «Мягкий» апрув (миграция `20260910130000_duties_soft_reject`): дежурство идёт в ЗП сразу, но координатор в детализации ЗП тренера может **отклонить** спорную смену — `rejected_at IS NOT NULL` исключает её из `calcSalary` (фильтр `!d.rejected_at`) и из агрегатов аналитики (`.is('rejected_at',null)`). Обратимо (`restoreDuty`). Действия в `audit_log` (`duty_reject`/`duty_restore`). `getTrainerDetail` отдаёт отклонённые (для показа/возврата), агрегатные запросы — нет.
 > Защита от дублей (миграция `20260906120000_duties_dedup_guards`): UNIQUE `duties_no_dup_completed` на `(trainer_id, branch, start_time, end_time) WHERE end_time IS NOT NULL` (повтор той же завершённой смены отвергается — INSERT кинет 23505, фронт `doLogDuty` ловит как «уже внесено»); UNIQUE `duties_one_active_per_trainer` на `(trainer_id) WHERE end_time IS NULL` (не более одного открытого дежурства на тренера).
 
 ### Группы

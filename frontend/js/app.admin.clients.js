@@ -160,12 +160,56 @@ async function loadAdminSummary(year,month,branch) {
         <div class="summary-card"><div class="s-val" style="color:var(--danger)">${expiredClients}</div><div class="s-lbl">Истёк абон.</div></div>
         <div class="summary-card accent"><div class="s-val">${fmt(totalSalary)}</div><div class="s-lbl">ФОТ (сум)</div></div>
       </div>
+      ${renderDutyPlanFact(data,year,month,branch)}
       ${renderSummaryTable(data,year,month,true)}
       <button class="btn btn-sm" style="margin-top:12px;width:100%"
         onclick="doExportSummary(${year},${month},'${branch||''}')">⬇️ Скачать Excel (сводный)</button>`;
   } catch(e) { body.innerHTML='<p class="hint">Ошибка</p>'; console.error(e); }
 }
 
+// План/факт дежурных часов по филиалам за месяц. План — из DUTY_SHIFTS
+// (expectedDutyHours), факт — сумма НЕотклонённых дежурств из data.duties
+// (getSummary уже фильтрует rejected_at и филиал). Помогает сверить заполнение таблицы.
+function renderDutyPlanFact(data, year, month, branch) {
+  const brs = branch ? [branch] : Object.keys(DUTY_SHIFTS);
+  const factBy = {};
+  (data.duties||[]).forEach(d=>{
+    if (!d.end_time) return;
+    factBy[d.branch] = (factBy[d.branch]||0) + (new Date(d.end_time)-new Date(d.start_time))/3600000;
+  });
+  const rows = brs.map(b=>({ b, exp: expectedDutyHours(b,year,month), fact: +(factBy[b]||0).toFixed(1) }));
+  if (!rows.length) return '';
+  const fmtH = h => (Math.round(h*10)/10).toFixed(1).replace('.0','');
+  let sumPlan=0, sumFact=0;
+  const body = rows.map(({b,exp,fact})=>{
+    sumFact += fact;
+    if (!exp) return `<tr><td>${b}</td><td colspan="3" class="hint">норма не задана</td><td>${fmtH(fact)}ч</td></tr>`;
+    sumPlan += exp.total;
+    const delta = +(fact-exp.total).toFixed(1);
+    const pct = exp.total ? Math.round(fact/exp.total*100) : 0;
+    const col = pct>=95?'var(--success)':(pct>=80?'#f59e0b':'var(--danger)');
+    return `<tr>
+      <td>${b}<div class="hint" style="font-size:10px">будни ${fmtH(exp.wdT)}ч×${exp.weekdayDays} · вых ${fmtH(exp.weT)}ч×${exp.weekendDays}</div></td>
+      <td>${fmtH(exp.total)}ч</td>
+      <td>${fmtH(fact)}ч</td>
+      <td style="color:${delta<0?'var(--danger)':'var(--success)'}">${delta>0?'+':''}${fmtH(delta)}ч</td>
+      <td style="color:${col};font-weight:600">${pct}%</td>
+    </tr>`;
+  }).join('');
+  const totDelta = +(sumFact-sumPlan).toFixed(1);
+  const totPct = sumPlan ? Math.round(sumFact/sumPlan*100) : 0;
+  return `<h4 style="margin:4px 0 8px">⏱ Дежурства: план / факт</h4>
+    <div class="admin-table-wrap"><table class="admin-table">
+      <thead><tr><th>Филиал</th><th>План</th><th>Факт</th><th>Δ</th><th>%</th></tr></thead>
+      <tbody>${body}</tbody>
+      ${brs.length>1?`<tfoot><tr>
+        <td><b>Итого</b></td><td><b>${fmtH(sumPlan)}ч</b></td><td><b>${fmtH(sumFact)}ч</b></td>
+        <td style="color:${totDelta<0?'var(--danger)':'var(--success)'}"><b>${totDelta>0?'+':''}${fmtH(totDelta)}ч</b></td>
+        <td><b>${totPct}%</b></td>
+      </tr></tfoot>`:''}
+    </table></div>
+    <p class="hint" style="margin:6px 0 16px;font-size:11px">Факт — внесённые смены без отклонённых. Норма из графика смен (DUTY_SHIFTS).</p>`;
+}
 function renderSummaryTable(data,year,month,isAdmin) {
   const {workouts,duties,trainerGroups,groupSessions,profiles,adjustments=[]}=data;
   if (!profiles.length) return '<p class="hint">Нет тренеров</p>';
@@ -181,6 +225,7 @@ function renderSummaryTable(data,year,month,isAdmin) {
       trialSessions:(data.trialSessions||[]).filter(t=>t.trainer_id===p.id),
       adjustment:adjMap[p.id]||null,
       childAutoSum:childAutoByTrainer[p.id]||0,
+      recalcSum:recalcByTrainer[p.id]?.sum||0,
       groupSubstitutions:groupSubstitutions,
       trainerId:p.id,
     });
@@ -274,11 +319,22 @@ async function adminDetail(trainerId,fioEnc,year,month) {
       <h4 style="margin-top:16px">Дежурства (${d.duties.length})</h4>
       ${!d.duties.length?'<p class="hint">Нет</p>':d.duties.map(duty=>{
         const h=hoursFromDuty(duty.start_time,duty.end_time);
-        return `<div class="history-item">
-          <div class="hi-main"><span class="hi-client">${duty.branch}</span>
-            <span class="hi-cat">${h.toFixed(2)}ч</span></div>
+        const rej=!!duty.rejected_at;
+        return `<div class="history-item" style="${rej?'opacity:.55':''}">
+          <div class="hi-main" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+            <div style="min-width:0">
+              <span class="hi-client" style="${rej?'text-decoration:line-through':''}">${duty.branch}</span>
+              <span class="hi-cat">${h.toFixed(2)}ч</span>
+              ${rej?'<span class="hi-cat" style="background:rgba(239,68,68,.15);color:#ef4444">отклонено</span>':''}
+            </div>
+            ${rej
+              ? `<button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border);flex-shrink:0"
+                   onclick="doRestoreDuty('${duty.id}',${trainerId},'${encodeURIComponent(fio)}',${year},${month})">↩︎ Вернуть</button>`
+              : `<button class="btn btn-sm btn-danger" style="flex-shrink:0"
+                   onclick="doRejectDuty('${duty.id}',${trainerId},'${encodeURIComponent(fio)}',${year},${month})">Отклонить</button>`}
+          </div>
           <div class="hi-sub">${fmtDT(duty.start_time)} → ${fmtDT(duty.end_time)}</div>
-          <div class="hi-sub">${fmt(Math.round(h*RATES.duty_per_hour))} сум</div>
+          <div class="hi-sub">${rej?'<s>':''}${fmt(Math.round(h*RATES.duty_per_hour))} сум${rej?'</s>':''}${rej&&duty.reject_reason?' · причина: '+duty.reject_reason:''}</div>
         </div>`;
       }).join('')}
 
@@ -306,6 +362,27 @@ async function adminDetail(trainerId,fioEnc,year,month) {
             ${n.next_task?`<div style="font-size:13px;color:var(--hint)"><b>Задача:</b> ${n.next_task}</div>`:''}
           </div>`).join('')}
     </div>`;
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+// «Мягкий» апрув дежурств: координатор отклоняет спорную смену — она выпадает из ЗП
+// (calcSalary фильтрует rejected_at). Обратимо кнопкой «Вернуть». Всё в audit_log.
+async function doRejectDuty(id, trainerId, fioEnc, year, month) {
+  const reason = prompt('Причина отклонения дежурства (необязательно):');
+  if (reason === null) return;                       // отмена в диалоге
+  try {
+    await DB.rejectDuty(id, STATE.profile.id, reason.trim()||null);
+    DB.auditLog('duty_reject', STATE.profile.id, STATE.profile.fio, id, 'duty',
+      { reason: reason.trim()||null, trainer_id: trainerId });
+    toast('Дежурство отклонено — не войдёт в ЗП','success');
+    adminDetail(trainerId, fioEnc, year, month);
+  } catch(e) { toast('Ошибка','error'); console.error(e); }
+}
+async function doRestoreDuty(id, trainerId, fioEnc, year, month) {
+  try {
+    await DB.restoreDuty(id);
+    DB.auditLog('duty_restore', STATE.profile.id, STATE.profile.fio, id, 'duty', { trainer_id: trainerId });
+    toast('Дежурство восстановлено','success');
+    adminDetail(trainerId, fioEnc, year, month);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 // Форма премии/штрафа — теперь ПО ФИЛИАЛАМ (строка month_adjustments на филиал).

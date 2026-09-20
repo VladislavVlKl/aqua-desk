@@ -632,6 +632,16 @@ async deleteClient(id) {
       .not('end_time','is',null).order('start_time',{ascending:false});
     if (error) throw error; return data||[];
   },
+  // Дежурства тренера за конкретный день (для сверки плановых слотов расписания
+  // с уже подтверждёнными — вкладка «Списание»). Границы дня в TZ Ташкента (+05:00).
+  async getDutiesForDay(trainerId, dateStr) {
+    if (useApi('schedule')) return await api('/duties/day', { query: { trainer_id: trainerId, date: dateStr } });
+    const from = `${dateStr}T00:00:00+05:00`;
+    const to   = `${dateStr}T23:59:59+05:00`;
+    const {data,error} = await sb().from('duties').select('*')
+      .eq('trainer_id',trainerId).gte('start_time',from).lte('start_time',to);
+    if (error) throw error; return data||[];
+  },
   async deleteDuty(id) {
     if (useApi('schedule')) { await api('/duties/'+id+'/delete', { method:'POST' }); return; }
     const {error} = await sb().from('duties').delete().eq('id',id);
@@ -647,6 +657,20 @@ async deleteClient(id) {
   async updateDuty(id, startIso, endIso) {
     if (useApi('schedule')) return await api('/duties/'+id+'/update', { method:'POST', body:{ start: startIso, end: endIso } });
     const {error} = await sb().from('duties').update({ start_time: startIso, end_time: endIso }).eq('id',id);
+    if (error) throw error;
+  },
+  // «Мягкий» апрув: координатор отклоняет спорную смену постфактум — она перестаёт
+  // считаться в ЗП (calcSalary фильтрует rejected_at). Обратимо через restoreDuty.
+  async rejectDuty(id, byId, reason) {
+    if (useApi('schedule')) return await api('/duties/'+id+'/reject', { method:'POST', body:{ reason } });
+    const {error} = await sb().from('duties')
+      .update({ rejected_at:new Date().toISOString(), rejected_by:byId, reject_reason:reason||null }).eq('id',id);
+    if (error) throw error;
+  },
+  async restoreDuty(id) {
+    if (useApi('schedule')) return await api('/duties/'+id+'/restore', { method:'POST' });
+    const {error} = await sb().from('duties')
+      .update({ rejected_at:null, rejected_by:null, reject_reason:null }).eq('id',id);
     if (error) throw error;
   },
 });

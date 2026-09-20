@@ -360,11 +360,12 @@ async function renderTodayTab() {
   const yesterdayStr=yesterday.toISOString().slice(0,10);
   const dayName=DAYS_FULL[(new Date().getDay()+6)%7];
   try {
-    const [slots, yesterdaySlots, events, todayWorkouts] = await Promise.all([
+    const [slots, yesterdaySlots, events, todayWorkouts, todayDuties] = await Promise.all([
       DB.getTodaySlots(STATE.profile.id, date),
       DB.getTodaySlots(STATE.profile.id, yesterdayStr),
       DB.getUpcomingEvents(STATE.profile.branches?.[0]||null),
       DB.getTodayWorkouts(STATE.profile.id, date),
+      DB.getDutiesForDay(STATE.profile.id, date).catch(()=>[]),
     ]);
 
     // Вчерашние незакрытые (только PT и группы, без дежурств)
@@ -404,11 +405,26 @@ async function renderTodayTab() {
         ${ev.blocks_pool?'<span class="overdue-badge">Бассейн закрыт</span>':''}
       </div>`).join('')}
       ${dutySlots.length?`<h4>Дежурство</h4>
-        ${dutySlots.map(s=>`<div class="today-card duty-card">
-          <div class="today-card-row">
-            <span class="today-time">⏱ ${s.start_time.slice(0,5)}–${s.end_time.slice(0,5)}</span>
-            <span class="today-label">Дежурство · ${s.branch}</span>
-          </div></div>`).join('')}`:''}
+        ${dutySlots.map(s=>{
+          const sIso=new Date(`${date}T${s.start_time.slice(0,5)}:00+05:00`).getTime();
+          const eIso=new Date(`${date}T${s.end_time.slice(0,5)}:00+05:00`).getTime();
+          // Сопоставляем плановый слот с уже внесённым дежурством (по моменту начала/конца и филиалу).
+          const match=(todayDuties||[]).find(d=>d.end_time
+            && new Date(d.start_time).getTime()===sIso
+            && new Date(d.end_time).getTime()===eIso
+            && d.branch===s.branch);
+          const confirmed=match && !match.rejected_at;
+          const rejected =match && !!match.rejected_at;
+          return `<div class="today-card duty-card">
+            <div class="today-card-row">
+              <span class="today-time">⏱ ${s.start_time.slice(0,5)}–${s.end_time.slice(0,5)}</span>
+              <span class="today-label">Дежурство · ${s.branch}</span>
+              ${confirmed?'<span class="status-badge confirmed">✓ Подтверждено</span>'
+                :rejected?'<span class="status-badge cancelled">✗ Отклонено</span>'
+                :`<button class="btn btn-sm btn-primary"
+                    onclick="doConfirmDutySlot('${date}','${s.start_time.slice(0,5)}','${s.end_time.slice(0,5)}','${encodeURIComponent(s.branch)}')">Подтвердить</button>`}
+            </div></div>`;
+        }).join('')}`:''}
       ${ptSlots.length?`<h4>Персональные тренировки</h4>${ptSlots.map(s=>renderTodaySlot(s,date)).join('')}`:''}
       ${grpSlots.length?`<h4>Групповые занятия</h4>${grpSlots.map(s=>renderTodaySlot(s,date)).join('')}`:''}
       ${!ptSlots.length&&!grpSlots.length&&!dutySlots.length&&!todayEvents.length&&!missedSlots.length?'<div class="empty-state">📭<p>На сегодня ничего нет</p></div>':''}
@@ -550,20 +566,23 @@ async function renderDutyModal() {
       const h=hoursFromDuty(d.start_time,d.end_time);
       const startLocal=new Date(d.start_time).toISOString().slice(0,16);
       const endLocal  =new Date(d.end_time).toISOString().slice(0,16);
-      return `<div class="history-item">
+      const rej=!!d.rejected_at;
+      return `<div class="history-item" style="${rej?'opacity:.55':''}">
         <div class="hi-main" style="display:flex;justify-content:space-between;align-items:center">
           <div>
-            <span class="hi-client">${d.branch}</span>
+            <span class="hi-client" style="${rej?'text-decoration:line-through':''}">${d.branch}</span>
             <span class="hi-cat">${h.toFixed(2)}ч = ${fmt(Math.round(h*RATES.duty_per_hour))} сум</span>
+            ${rej?'<span class="hi-cat" style="background:rgba(239,68,68,.15);color:#ef4444">отклонено координатором</span>':''}
           </div>
-          <div style="display:flex;gap:4px">
+          ${rej?'':`<div style="display:flex;gap:4px">
             <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
               onclick="renderEditDutyModal('${d.id}','${startLocal}','${endLocal}','${d.branch}')">✏️</button>
             <button class="btn btn-sm btn-danger"
               onclick="doDeleteDuty('${d.id}')">🗑</button>
-          </div>
+          </div>`}
         </div>
         <div class="hi-sub">${fmtDT(d.start_time)} → ${fmtDT(d.end_time)}</div>
+        ${rej&&d.reject_reason?`<div class="hi-sub" style="color:#ef4444">Причина: ${d.reject_reason}</div>`:''}
       </div>`;
     }).join('')}
   </div>`;
@@ -576,6 +595,29 @@ function _refreshDutyModal() {
   if (!m) return;
   m.remove();
   renderDutyModal();
+}
+// Трансляция планового дежурного слота из расписания в факт (таблицу duties) одним
+// тапом во вкладке «Списание». Времена берём из слота; дальше подхватывают дедуп-индекс,
+// мягкий апрув координатора и план/факт. Повторный тап отсекается кулдауном/индексом.
+async function doConfirmDutySlot(date, startHM, endHM, branchEnc) {
+  if (_pending.has('confirmDutySlot')) return;
+  const branch=decodeURIComponent(branchEnc);
+  const startIso=new Date(`${date}T${startHM}:00+05:00`).toISOString();
+  const endIso  =new Date(`${date}T${endHM}:00+05:00`).toISOString();
+  const ck=`duty_${branch}_${startIso}_${endIso}`;
+  if (cooldownActive(ck)) return toast('Уже подтверждено','info');
+  _pending.add('confirmDutySlot');
+  try {
+    await DB.addDuty(STATE.profile.id, branch, startIso, endIso);
+    cooldownMark(ck);
+    const h=hoursFromDuty(new Date(startIso), new Date(endIso));
+    toast(`✅ Дежурство ${h.toFixed(1)}ч подтверждено`,'success');
+    renderTodayTab();
+  } catch(e) {
+    const dup=String(e?.code)==='23505' || /duplicate|unique/i.test(String(e?.message||''));
+    if (dup) { cooldownMark(ck); toast('Уже подтверждено','info'); renderTodayTab(); }
+    else { toast('Ошибка','error'); console.error(e); }
+  } finally { _pending.delete('confirmDutySlot'); }
 }
 async function doLogDuty() {
   // Гвард от двойного тапа: без него быстрый двойной клик успевал вставить дежурство
