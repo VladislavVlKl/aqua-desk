@@ -293,6 +293,124 @@ async function ruleReceptionBacklog(today: string, hour: number) {
   }
 }
 
+// ── Координаторские правила (data-driven: active + branches + schedule{windows,dow,link} + recipients) ──
+const NL = String.fromCharCode(10);
+// Гейт по окну часов И (если задан) дню недели. utcDay = getUTCDay (0=Вс..6=Сб).
+function firesToday(schedule: { windows?: number[][]; dow?: number[] } | null, hour: number, utcDay: number): boolean {
+  const wins = schedule?.windows;
+  if (!Array.isArray(wins) || !wins.some((w) => hour >= w[0] && hour < w[1])) return false;
+  const dows = schedule?.dow;
+  if (Array.isArray(dows) && dows.length && !dows.includes(utcDay)) return false;
+  return true;
+}
+async function coordinatorRecipients(rule: { recipients?: number[] }) {
+  const ids = rule.recipients || [];
+  if (!ids.length) return [] as { id: number; fio: string; tg_id: number }[];
+  const { data } = await sb.from("profiles").select("id,fio,tg_id").in("id", ids).not("tg_id", "is", null);
+  return (data || []) as { id: number; fio: string; tg_id: number }[];
+}
+async function enqueueCoordinator(ruleKey: string, recipients: { id: number; fio: string; tg_id: number }[], msg: string, today: string) {
+  for (const r of recipients) {
+    const { error } = await sb.from("notif_dedup").insert({ rule_key: `${ruleKey}:${today}:${r.id}` });
+    if (error) continue; // уже слали сегодня
+    await sb.from("notifications_queue").insert({
+      recipient_tg_id: r.tg_id, recipient_name: r.fio, message: msg,
+      scheduled_for: new Date().toISOString(), status: "pending", rule_key: `${ruleKey}:${today}`,
+    });
+    console.log(`[${ruleKey}] queued for`, r.fio);
+  }
+}
+
+// Считает 6 очередей на решении по филиалам: {total, stale(>24ч)} на каждую.
+async function decisionCounts(branches: string[]) {
+  const staleIso = new Date(Date.now() - 86400000).toISOString();
+  const cnt = async (tbl: string, statusVal: string, useBranch: boolean) => {
+    let a = sb.from(tbl).select("id", { count: "exact", head: true }).eq("status", statusVal);
+    let s = sb.from(tbl).select("id", { count: "exact", head: true }).eq("status", statusVal).lt("created_at", staleIso);
+    if (useBranch) { a = a.in("branch", branches); s = s.in("branch", branches); }
+    const [ar, sr] = await Promise.all([a, s]);
+    return { total: ar.count || 0, stale: sr.count || 0 };
+  };
+  const [del, wdel, late, recalc, mism, subs] = await Promise.all([
+    cnt("delete_requests", "pending", true),
+    cnt("workout_delete_requests", "pending", true),
+    cnt("late_workout_requests", "pending", true),
+    cnt("category_recalc_requests", "pending", true),
+    cnt("pt_mismatch_flags", "open", true),
+    cnt("group_substitutions", "pending", false), // без колонки branch — считаем глобально
+  ]);
+  return { del, wdel, late, recalc, mism, subs };
+}
+
+async function ruleCoordinatorDecisions(today: string, hour: number, utcDay: number) {
+  const { data: rule } = await sb.from("notification_rules")
+    .select("active,branches,schedule,recipients").eq("rule_key", "coordinator_decisions").maybeSingle();
+  if (!rule?.active || !firesToday(rule.schedule, hour, utcDay)) return;
+  const recipients = await coordinatorRecipients(rule);
+  if (!recipients.length) return;
+  const c = await decisionCounts(rule.branches || []);
+  const total = c.del.total + c.wdel.total + c.late.total + c.recalc.total + c.mism.total + c.subs.total;
+  if (total === 0) return;
+  const stale = c.del.stale + c.wdel.stale + c.late.stale + c.recalc.stale + c.mism.stale + c.subs.stale;
+  const parts: string[] = [];
+  if (c.del.total) parts.push(`удаление клиента — ${c.del.total}`);
+  if (c.wdel.total) parts.push(`удаление ПТ — ${c.wdel.total}`);
+  if (c.late.total) parts.push(`поздняя ПТ — ${c.late.total}`);
+  if (c.recalc.total) parts.push(`пересчёт категории — ${c.recalc.total}`);
+  if (c.mism.total) parts.push(`расхождение 1С — ${c.mism.total}`);
+  if (c.subs.total) parts.push(`замены — ${c.subs.total}`);
+  let msg = `📌 На решение (${total}): ` + parts.join(", ") + ".";
+  if (stale > 0) msg += ` ⏳ Висит >24ч: ${stale}.`;
+  msg += ` Откройте «Контроль».`;
+  await enqueueCoordinator("coordinator_decisions", recipients, msg, today);
+}
+
+async function ruleCoordinatorAnalytics(today: string, hour: number, utcDay: number) {
+  const { data: rule } = await sb.from("notification_rules")
+    .select("active,branches,schedule,recipients").eq("rule_key", "coordinator_analytics").maybeSingle();
+  if (!rule?.active || !firesToday(rule.schedule, hour, utcDay)) return;
+  const recipients = await coordinatorRecipients(rule);
+  if (!recipients.length) return;
+  const branches = rule.branches || [];
+  const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString();
+  const threeAgo = new Date(Date.now() - 3 * 86400000).toISOString();
+  const fiveAgo = new Date(Date.now() - 5 * 86400000).toISOString();
+  const in7 = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+  const { data: trs } = await sb.from("profiles").select("id,branches").in("role", ["trainer", "senior_trainer"]);
+  const activeTr = (trs || []).filter((t) => Array.isArray(t.branches) && t.branches.some((b: string) => branches.includes(b))).map((t) => t.id);
+  const [ptWeek, debts, newCli] = await Promise.all([
+    sb.from("workouts").select("id", { count: "exact", head: true }).in("branch", branches).gte("workout_date", weekAgo),
+    sb.from("workouts").select("id", { count: "exact", head: true }).in("branch", branches).eq("is_debt", true).is("debt_confirmed_at", null).lt("created_at", threeAgo),
+    activeTr.length ? sb.from("clients").select("id", { count: "exact", head: true }).in("trainer_id", activeTr).gte("created_at", weekAgo) : Promise.resolve({ count: 0 }),
+  ]);
+  const { data: expiring } = activeTr.length
+    ? await sb.from("clients").select("id").in("trainer_id", activeTr).eq("is_archived", false).not("subscription_end", "is", null).gte("subscription_end", today).lte("subscription_end", in7)
+    : { data: [] };
+  let inactive = 0;
+  for (const id of activeTr) {
+    const { data: ws } = await sb.from("workouts").select("id").eq("trainer_id", id).gte("workout_date", fiveAgo).limit(1);
+    if (!ws?.length) inactive++;
+  }
+  const msg = "📊 Недельная сводка (Sport/Light/Moms):" + NL
+    + `• ПТ за 7 дней: ${ptWeek.count || 0}` + NL
+    + `• Новые клиенты: ${newCli.count || 0}` + NL
+    + `• Истекают ≤7 дн: ${(expiring || []).length}` + NL
+    + `• Долги 3+ дн: ${debts.count || 0}` + NL
+    + `• Неактивные тренеры (5+ дн): ${inactive}`;
+  await enqueueCoordinator("coordinator_analytics", recipients, msg, today);
+}
+
+async function ruleCoordinatorAgents(today: string, hour: number, utcDay: number) {
+  const { data: rule } = await sb.from("notification_rules")
+    .select("active,schedule,recipients").eq("rule_key", "coordinator_agents").maybeSingle();
+  if (!rule?.active || !firesToday(rule.schedule, hour, utcDay)) return;
+  const recipients = await coordinatorRecipients(rule);
+  if (!recipients.length) return;
+  const link = (rule.schedule as { link?: string })?.link || "";
+  const msg = `🤖 Отчёты агентов — загляни, что происходит: ${link}`;
+  await enqueueCoordinator("coordinator_agents", recipients, msg, today);
+}
+
 Deno.serve(async () => {
   if (!BOT) {
     return new Response(JSON.stringify({ error: "BOT_TOKEN not set" }), {
@@ -302,6 +420,7 @@ Deno.serve(async () => {
   const now = new Date();
   const hourTashkent = (now.getUTCHours() + 5) % 24;
   const dow = (now.getUTCDay() + 6) % 7;
+  const utcDay = now.getUTCDay();
   const today = now.toISOString().slice(0, 10);
 
   console.log("=== AquaDesk Reminder ===", now.toISOString(), "| Tashkent hour:", hourTashkent);
@@ -311,6 +430,9 @@ Deno.serve(async () => {
   await ruleSeqSurvey(today, hourTashkent);
   await ruleReceptionEod(today, hourTashkent);        // самогейтится по окну из notification_rules
   await ruleReceptionBacklog(today, hourTashkent);    // самогейтится по окну из notification_rules
+  await ruleCoordinatorDecisions(today, hourTashkent, utcDay);   // самогейтится (окно/дни)
+  await ruleCoordinatorAnalytics(today, hourTashkent, utcDay);   // самогейтится (окно/дни)
+  await ruleCoordinatorAgents(today, hourTashkent, utcDay);      // самогейтится (окно/дни)
 
   console.log("=== Done ===");
   return new Response(JSON.stringify({ ok: true, hourTashkent, today }), {

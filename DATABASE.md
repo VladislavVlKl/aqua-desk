@@ -243,8 +243,8 @@ leader_name + leader_fee_percent · group_instance_id uuid · days_of_week text[
 ### Уведомления
 
 **notifications_queue**: `recipient_tg_id, recipient_name, message, scheduled_for, sent_at, error_text, status, created_by, rule_key, read_at, attempts`
-**notification_rules**: `name, rule_key, description, active, branches text[], schedule jsonb`
-> `branches`/`schedule` (миграция 20260914120000) — data-driven гейты (Вариант B): филиалы и окна времени правила меняются UPDATE'ом в БД без деплоя. `schedule` = `{"windows":[[начало,конец]]}` по Ташкенту. Сейчас так работают ресепшн-правила `reception_eod` (окно 21–23) и `reception_backlog` (окно 9–11).
+**notification_rules**: `name, rule_key, description, active, branches text[], schedule jsonb, recipients integer[]`
+> `branches`/`schedule`/`recipients` — data-driven гейты (Вариант B): филиалы, время и получатели правила меняются UPDATE'ом в БД без деплоя. `schedule` = `{"windows":[[начало,конец]]}` по Ташкенту, опц. `"dow":[…]` (дни по JS getUTCDay 0=Вс..6=Сб; для окон 9–11 день по UTC совпадает с ташкентским), опц. `"link"`. `recipients` (миграция 20260920120000) — id профилей-получателей (пуш на их tg_id). Гейты: ресепшн `reception_eod`(21–23)/`reception_backlog`(9–11); координатор `coordinator_*` (см. ниже).
 
 > **Доставка пушей в чат:** `pg_cron` job `process-notif-queue` (раз в минуту) → `pg_net` → Edge Function `process-queue`. Матч по «семье» rule_key (часть до первого `:`). В чат идут: `substitution`, `substitution_approve`, `client_transfer`, `cat_recalc_approved`, `cat_recalc_rejected`, `reception_reject`, `reception_eod` (динамический ключ `reception_eod:<филиал>:<дата>`). Прочее (`sub_expiring`, `system`) → `status='skipped'` = только колокольчик. Ретраи до 5 (`attempts`), реальный текст ошибки Telegram в `error_text`. GitHub Actions крон (`process-queue.yml`) отключён (ручной аварийный канал). Колокольчик (`getMyNotifications`) читает таблицу напрямую, от статуса не зависит. Вайтлист держать синхронно в Edge Function и `backend/jobs/process-queue.js`.
 >
@@ -256,6 +256,12 @@ leader_name + leader_fee_percent · group_instance_id uuid · days_of_week text[
 > - `reception_eod` — вечер (окно 21–23): неотмеченные `reception_status='pending'` за сегодня + за прошлые дни (если есть). Молчит, если по нулям.
 > - `reception_backlog` — утро (окно 9–11): только неотмеченные за прошлые дни.
 > Дедуп на филиал+день+профиль в `notif_dedup`, доставка через `process-queue` (rule_key в вайтлисте). Считает ПТ (`workouts`, `pending_confirmation=false`) + пробные (`trial_sessions`). Старый фронт-триггер `maybeQueueReceptionEod` (app.exec.js) отключён — вечерний пуш теперь ставит pg_cron.
+>
+> **Координатор-пуши** (data-driven, `recipients` = id профилей; сейчас только Владислав id3; охват 3 филиала Sport/Light/Moms, миграция 20260920120000):
+> - `coordinator_decisions` — вечер (окно 18–20, ежедневно): сводка нерешённых заявок (6 очередей: `delete_requests`/`workout_delete_requests`/`late_workout_requests`/`category_recalc_requests` pending, `pt_mismatch_flags` open, `group_substitutions` pending — последняя без branch, считается глобально) + акцент на висящих >24ч. Молчит, если пусто.
+> - `coordinator_analytics` — вторник (окно 9–11, `dow:[2]`): недельная сводка (ПТ 7дн, новые клиенты, зона риска ≤7дн, долги 3+дн, неактивные тренеры 5+дн).
+> - `coordinator_agents` — пн/ср/пт (окно 9–11, `dow:[1,3,5]`): дублирует ссылку на Claude Routine из `schedule.link` (обновлять при смене роутины). Путь A.
+> Дедуп на день+получатель в `notif_dedup`. Логика в `daily-reminder` + `remind.js` (синхронно).
 
 ---
 

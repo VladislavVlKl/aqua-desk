@@ -24,6 +24,9 @@ const WHITELIST = new Set([
   "reception_eod",        // «конец дня» ресепшену (ключ reception_eod:<филиал>:<дата>)
   "reception_backlog",    // утро: старые несписанные ресепшену (reception_backlog:<филиал>:<дата>)
   "pt_mismatch",          // расхождение остатка ПТ с 1С → тренеру
+  "coordinator_decisions", // координатору: сводка нерешённого
+  "coordinator_analytics", // координатору: недельная аналитика
+  "coordinator_agents",    // координатору: ссылка на отчёты агентов
 ]);
 const family = (rk: string | null) => (rk || "").split(":")[0];
 const MAX_ATTEMPTS = 5;
