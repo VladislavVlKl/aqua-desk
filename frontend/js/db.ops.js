@@ -244,15 +244,20 @@ Object.assign(DB, {
   },
   // Что изменилось у клиента с момента заявки (created_at) — чтобы координатор понимал,
   // почему остаток «уехал», и не ломал новый пакет. Считаем купленные пакеты и списания.
+  // Пакеты берём из audit_log (action='sub_buy'), а НЕ из subscriptions: у взрослых пакет
+  // добавляется через UPDATE initial_balance существующей строки (created_at не меняется) —
+  // по subscriptions.created_at пополнение не найдётся. audit_log логирует покупку всегда.
   async getMismatchChangesSince(clientId, sinceIso) {
     try {
       const [w, s] = await Promise.all([
         sb().from('workouts').select('id', { count: 'exact', head: true })
           .eq('client_id', clientId).gt('created_at', sinceIso),
-        sb().from('subscriptions').select('initial_balance').eq('client_id', clientId).gt('created_at', sinceIso),
+        sb().from('audit_log').select('details')
+          .eq('action', 'sub_buy').eq('target_id', clientId).gt('created_at', sinceIso),
       ]);
-      const pkgAdded = (s.data || []).reduce((a, r) => a + (r.initial_balance || 0), 0);
-      return { workoutsSince: w.count || 0, pkgAdded, pkgCount: (s.data || []).length };
+      const rows = s.data || [];
+      const pkgAdded = rows.reduce((a, r) => a + (Number(r.details?.qty) || 0), 0);
+      return { workoutsSince: w.count || 0, pkgAdded, pkgCount: rows.length };
     } catch (e) { console.warn('[getMismatchChangesSince]', e?.message || e); return null; }
   },
   async rejectPtMismatch(flagId, reason, resolvedBy) {
