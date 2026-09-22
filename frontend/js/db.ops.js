@@ -281,7 +281,7 @@ Object.assign(DB, {
   async queueBroadcast(profiles, message, scheduledFor, createdBy) {
     if (useApi('notifications')) {
       const r = await api('/notifications/broadcast', { method:'POST', body:{
-        profiles: profiles.map(p=>({ tg_id: p.tg_id, fio: p.fio })), message, scheduled_for: scheduledFor||null, created_by: createdBy } });
+        profiles: profiles.map(p=>({ tg_id: p.tg_id, fio: p.fio })), message, scheduled_for: scheduledFor||null, created_by: createdBy, rule_key: 'on_request' } });
       return r.queued;
     }
     const rows = profiles.map(p=>({
@@ -291,6 +291,7 @@ Object.assign(DB, {
       scheduled_for:   scheduledFor||new Date().toISOString(),
       created_by:      createdBy,
       status:          'pending',
+      rule_key:        'on_request',   // семья разовых рассылок → в вайтлисте чата
     }));
     const {error} = await sb().from('notifications_queue').insert(rows);
     if (error) throw error; return rows.length;

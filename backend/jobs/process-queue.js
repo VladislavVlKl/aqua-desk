@@ -14,6 +14,7 @@ const WHITELIST = new Set([
   'client_transfer', 'cat_recalc_approved', 'cat_recalc_rejected',
   'reception_reject', 'reception_eod', 'reception_backlog', 'pt_mismatch',
   'coordinator_decisions', 'coordinator_analytics', 'coordinator_agents',
+  'on_request',   // разовые ручные рассылки (queueBroadcast)
 ]);
 const family = (rk) => (rk || '').split(':')[0];
 const MAX_ATTEMPTS = 5;

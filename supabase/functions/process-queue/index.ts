@@ -27,6 +27,7 @@ const WHITELIST = new Set([
   "coordinator_decisions", // координатору: сводка нерешённого
   "coordinator_analytics", // координатору: недельная аналитика
   "coordinator_agents",    // координатору: ссылка на отчёты агентов
+  "on_request",            // разовые ручные рассылки (queueBroadcast)
 ]);
 const family = (rk: string | null) => (rk || "").split(":")[0];
 const MAX_ATTEMPTS = 5;
