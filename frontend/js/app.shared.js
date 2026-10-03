@@ -160,10 +160,6 @@ async function doRejectDelete(reqId) {
   finally { _pending.delete('reject_'+reqId); }
 }
 
-// ── ЦВЕТА КЛИЕНТОВ ────────────────────────────────────────────────────────────
-
-// setClientColor moved to module
-
 // ── РЕДАКТИРОВАНИЕ ПРОФИЛЯ ТРЕНЕРОМ ──────────────────────────────────────────
 
 // ============================================================
@@ -221,7 +217,7 @@ async function doSaveTrainerProfile() {
 // ── УВЕДОМЛЕНИЯ ВНУТРИ ПРИЛОЖЕНИЯ ────────────────────────────────────────────
 
 // ============================================================
-// SECTION: SHARED:NOTIFICATIONS — checkInAppNotifications, renderAdminNotifications
+// SECTION: SHARED:NOTIFICATIONS — checkInAppNotifications (вкладка координатора — notifications-ui.js)
 // ============================================================
 async function checkInAppNotifications() {
   try {
@@ -280,78 +276,6 @@ function renderMissedSlotsPanel() {
   document.body.appendChild(m);
 }
 
-async function renderAdminNotifications() {
-  $('#tab-content').innerHTML=`<div class="center-screen"><div class="spinner"></div></div>`;
-  try {
-    const [recent, profiles] = await Promise.all([
-      DB.getRecentNotifications(50),
-      DB.getAllProfiles(),
-    ]);
-
-    $('#tab-content').innerHTML=`<div class="tab-pad">
-      <div class="section-header"><h3>Уведомления</h3></div>
-
-      <!-- Отправить сообщение -->
-      <div class="staff-card" style="flex-direction:column;gap:10px;margin-bottom:20px">
-        <div style="font-weight:600;font-size:14px">📤 Отправить уведомление</div>
-        <div class="form-group" style="margin-bottom:0">
-          <label>Кому</label>
-          <select id="notif-target">
-            <option value="all">Всем сотрудникам</option>
-            <option value="trainers">Всем тренерам</option>
-            ${profiles.filter(p=>p.tg_id).map(p=>`<option value="${p.tg_id}">${p.fio}</option>`).join('')}
-          </select>
-        </div>
-        <div class="form-group" style="margin-bottom:0">
-          <label>Сообщение</label>
-          <textarea id="notif-msg" rows="3" placeholder="Текст уведомления..."></textarea>
-        </div>
-        <button class="btn btn-primary btn-full" onclick="doSendAdminNotification()">Отправить</button>
-      </div>
-
-      <!-- История -->
-      <h4 style="margin-bottom:12px">История (последние 50)</h4>
-      ${!recent.length?'<p class="hint">Нет уведомлений</p>':
-        recent.map(n=>`<div style="padding:10px 0;border-bottom:1px solid var(--border)">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start">
-            <div style="flex:1">
-              <div style="font-size:13px">${n.message}</div>
-              <div style="font-size:11px;color:var(--hint);margin-top:3px">
-                → ${n.recipient_name||n.recipient_tg_id} · ${fmtDT(n.created_at)}
-                ${n.read_at?`<span style="color:#10b981;margin-left:6px">✓ прочитано</span>`:'<span style="color:var(--accent);margin-left:6px">● не прочитано</span>'}
-              </div>
-            </div>
-          </div>
-        </div>`).join('')}
-    </div>`;
-  } catch(e) { $('#tab-content').innerHTML='<p class="hint">Ошибка</p>'; console.error(e); }
-}
-
-async function doSendAdminNotification() {
-  const target  = document.getElementById('notif-target')?.value;
-  const message = document.getElementById('notif-msg')?.value.trim();
-  if (!message) return toast('Введите текст','error');
-  try {
-    const allProfiles = await DB.getAllProfiles();
-    let recipients = [];
-    if (target==='all') {
-      recipients = allProfiles.filter(p=>p.tg_id);
-    } else if (target==='trainers') {
-      recipients = allProfiles.filter(p=>p.tg_id && ['trainer','senior_trainer'].includes(p.role));
-    } else {
-      const tgId = parseInt(target);
-      recipients = allProfiles.filter(p=>p.tg_id===tgId);
-    }
-    if (!recipients.length) return toast('Нет получателей с привязанным аккаунтом','error');
-    const count = await DB.queueBroadcast(recipients, message, null, STATE.profile.id);
-    toast(`✅ Отправлено ${count} получател${count===1?'ю':'ям'}`, 'success');
-    document.getElementById('notif-msg').value='';
-    renderAdminNotifications();
-  } catch(e) { toast('Ошибка: '+(e?.message||String(e)),'error'); console.error(e); }
-}
-
-// ── ЗАМЕНА В ГРУППАХ ──────────────────────────────────────────────────────────
-
 // ── РАСПИСАНИЕ ГРУППЫ (дни/время) ────────────────────────────────────────────
 async function resolveGroupDuplicate(flagId, status, groupId, monthStr) {
   try {
@@ -399,55 +323,6 @@ async function doSaveGroupSchedule(groupId) {
     // Из списка групп — перерисовать список; из хаба группы — перерисовать хаб
     if (document.getElementById('groups-list')) loadSeniorGroupsList();
     else if (window._gd?.groupId) renderGroupDetail(window._gd.groupId);
-  } catch(e) { toast('Ошибка','error'); console.error(e); }
-}
-
-// ── СВЯЗАТЬ ТРЕНЕРОВ В ОДИН INSTANCE (Арт-свим) ──────────────────────────────
-async function renderLinkGroupInstanceModal(groupId) {
-  // Ищем все группы того же типа и филиала с разными instance
-  const thisGroup = await DB.getTrainerGroupById(groupId);
-  if (!thisGroup) return toast('Ошибка','error');
-
-  const candidates = (await DB.getActiveGroupsByBranch(thisGroup.branch)).filter(c =>
-    c.group_type_id === thisGroup.group_type_id &&
-    c.id !== groupId &&
-    c.group_instance_id !== thisGroup.group_instance_id);
-
-  const groups = [];
-  const seen = new Set();
-  (candidates||[]).forEach(c=>{
-    if (!seen.has(c.group_instance_id)) {
-      seen.add(c.group_instance_id);
-      const days = c.days_of_week?.join('/')|| 'без расписания';
-      const t = c.session_time||'';
-      groups.push({instance_id: c.group_instance_id, label: `${days}${t?' '+t:''}`});
-    }
-  });
-
-  const m = el('div','modal-overlay');
-  m.innerHTML=`<div class="modal">
-    <div class="modal-header"><h3>Связать с группой</h3>
-      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
-    <p class="hint" style="margin-bottom:12px">Выберите существующую группу ${thisGroup.group_types?.name||''} в ${thisGroup.branch}, к которой относится этот тренер. Они будут делить общий список детей и баланс.</p>
-    ${!groups.length
-      ? '<p class="hint">Других групп этого типа в этом филиале нет. Сначала задайте расписание каждой группе.</p>'
-      : groups.map(g=>`
-        <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);margin-bottom:8px;text-align:left;padding:12px"
-          onclick="doLinkGroupInstance('${groupId}','${g.instance_id}')">
-          <div style="font-weight:600">${g.label}</div>
-          <div style="font-size:12px;color:var(--hint)">instance: ${g.instance_id.slice(0,8)}...</div>
-        </button>`).join('')}
-    <button class="btn btn-full" style="margin-top:8px;background:rgba(239,68,68,.1);color:#ef4444"
-      onclick="this.closest('.modal-overlay').remove()">Отмена</button>
-  </div>`;
-  document.body.appendChild(m);
-}
-async function doLinkGroupInstance(groupId, newInstanceId) {
-  try {
-    await DB.linkTrainerGroupInstance(groupId, newInstanceId);
-    document.querySelector('.modal-overlay')?.remove();
-    toast('Связано ✅','success');
-    loadSeniorGroupsList();
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 
@@ -991,9 +866,6 @@ function archiveAdultClientConfirm(id, nameEnc, groupId) {
   </div>`;
   document.body.appendChild(m);
 }
-async function archiveAdultClient(id, groupId) {
-  archiveAdultClientConfirm(id, encodeURIComponent('участник'), groupId);
-}
 async function doArchiveAdultClient(id, groupId) {
   document.querySelector('.modal-overlay')?.remove();
   try {
@@ -1146,55 +1018,4 @@ async function renderCoordinatorSchedule() {
   await load();
 }
 
-
-function renderEditGroupTypeModal(id, nameEnc, type, price, pct) {
-  const name = decodeURIComponent(nameEnc);
-  const m = el('div','modal-overlay');
-  m.innerHTML=`<div class="modal">
-    <div class="modal-header"><h3>Редактировать тип</h3>
-      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
-    <div class="form-group"><label>Название</label>
-      <input id="egt-name" value="${name}"></div>
-    <div class="form-group"><label>Тип</label>
-      <select id="egt-type" onchange="onGtTypeChange(this.value)" disabled>
-        <option value="children" ${type==='children'?'selected':''}>👶 Детская</option>
-        <option value="adult" ${type==='adult'?'selected':''}>🏊 Взрослая</option>
-      </select></div>
-    ${type==='children'?`
-    <div class="form-group"><label>Стоимость (сум/мес)</label>
-      <input id="egt-price" type="number" value="${price}"></div>
-    <div class="form-group"><label>% тренеру</label>
-      <input id="egt-pct" type="number" value="${pct}"></div>`:
-    `<div style="background:rgba(16,185,129,.1);border-radius:8px;padding:10px;font-size:12px;color:var(--hint)">
-      Ставки: 1-3 чел = 110к · 4-6 = 120к · 7+ = 130к</div>`}
-    <button class="btn btn-primary btn-full" style="margin-top:16px"
-      onclick="doEditGroupType(${id},'${type}')">Сохранить</button>
-  </div>`;
-  document.body.appendChild(m);
-}
-async function doEditGroupType(id, type) {
-  const name  = document.getElementById('egt-name')?.value.trim();
-  const price = parseInt(document.getElementById('egt-price')?.value||0);
-  const pct   = parseInt(document.getElementById('egt-pct')?.value||40);
-  if (!name) return toast('Введите название','error');
-  try {
-    await DB.updateGroupType(id, {
-      name,
-      price_per_month: type==='children' ? price : 0,
-      trainer_percentage: type==='children' ? pct : 0
-    });
-    document.querySelector('.modal-overlay')?.remove();
-    toast('Обновлено ✅','success');
-    loadGroupsList();
-  } catch(e) { toast('Ошибка','error'); console.error(e); }
-}
-async function doDeleteGroupType(id, nameEnc) {
-  const name = decodeURIComponent(nameEnc);
-  if (!confirm(`Удалить тип группы «${name}»?\nВсе назначения тренеров будут откреплены.`)) return;
-  try {
-    await DB.deleteGroupType(id);
-    toast('Удалено','success');
-    loadGroupsList();
-  } catch(e) { toast('Ошибка — возможно есть назначенные тренеры','error'); console.error(e); }
-}
 window.addEventListener('DOMContentLoaded', init);

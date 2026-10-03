@@ -1,12 +1,7 @@
 // ── ТАБ: СПИСАНИЕ ─────────────────────────────
 // ============================================================
-// SECTION: TRAINER:WORKOUTS — renderWorkoutsTab, doLogWorkout
+// SECTION: TRAINER:WORKOUTS — doLogWorkout, doConfirmLogWorkout
 // ============================================================
-async function renderWorkoutsTab() {
-  // Алиас — обновляет текущий экран (после списания из модалки)
-  refreshTrainerScreen();
-}
-
 function onWkTypeChange(sel) {
   const reg=document.getElementById('wk-regular-opts');
   const isDropIn=sel.value.startsWith('dropin');

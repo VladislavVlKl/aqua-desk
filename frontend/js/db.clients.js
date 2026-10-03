@@ -503,16 +503,6 @@ Object.assign(DB, {
     const {data,error} = await q;
     if (error) throw error; return data||[];
   },
-  async getMyCategoryRecalcRequests(trainerId) {
-    if (useApi('requests')) {
-      const rows = await api('/requests/category-recalc', { query: { trainer_id: trainerId } });
-      return (rows || []).slice(0, 20).map(r => ({ ...r, clients: { fio: r.client_fio } }));
-    }
-    const {data,error} = await sb().from('category_recalc_requests')
-      .select('*, clients(fio)')
-      .eq('trainer_id',trainerId).order('created_at',{ascending:false}).limit(20);
-    if (error) throw error; return data||[];
-  },
   async approveCategoryRecalcRequest(requestId, reviewerId) {
     if (useApi('requests')) {
       const data = await api('/requests/category-recalc/'+requestId+'/approve', { method:'POST' });
@@ -600,24 +590,6 @@ async deleteClient(id) {
     if (error) throw error;
   },
   // ─── DUTIES ──────────────────────────────────
-  async getActiveDuty(trainerId) {
-    if (useApi('schedule')) return await api('/duties/active', { query: { trainer_id: trainerId } });
-    const {data,error} = await sb().from('duties').select('*')
-      .eq('trainer_id',trainerId).is('end_time',null).maybeSingle();
-    if (error) throw error; return data;
-  },
-  async startDuty(trainerId, branch) {
-    if (useApi('schedule')) return await api('/duties/start', { method:'POST', body:{ trainer_id: trainerId, branch } });
-    const {data,error} = await sb().from('duties')
-      .insert({trainer_id:trainerId,branch}).select().single();
-    if (error) throw error; return data;
-  },
-  async endDuty(dutyId) {
-    if (useApi('schedule')) return await api('/duties/'+dutyId+'/stop', { method:'POST' });
-    const {data,error} = await sb().from('duties')
-      .update({end_time:new Date().toISOString()}).eq('id',dutyId).select().single();
-    if (error) throw error; return data;
-  },
   async getDuties(trainerId, year, month) {
     if (useApi('schedule')) {
       // Бэкенд отдаёт дежурства за месяц (вкл. незакрытые); фронт показывает только

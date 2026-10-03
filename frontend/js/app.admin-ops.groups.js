@@ -432,17 +432,6 @@ async function renderAddSecondTrainerModal(groupTypeId, groupNameEnc, branch, gr
     document.body.appendChild(m);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
-function onSt2RateTypeChange(sel) {
-  const label = document.getElementById('st2-rate-label');
-  const inp   = document.getElementById('st2-rate');
-  if (sel.value==='flat') {
-    if (label) label.textContent='Сумма (сум)';
-    if (inp)   { inp.value=500000; inp.placeholder='500000'; }
-  } else {
-    if (label) label.textContent='Процент (%)';
-    if (inp)   { inp.value=20; inp.placeholder='20'; }
-  }
-}
 async function doAddSecondTrainer(groupTypeId, branch, groupType) {
   const trainerId  = parseInt(document.getElementById('st2-trainer')?.value);
   const role       = document.getElementById('st2-role')?.value||null;

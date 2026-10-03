@@ -1,28 +1,5 @@
 // ─── ТЕХНИЧКА ────────────────────────────────
 Object.assign(DB, {
-  async getTechEquipment(branch) {
-    if (useApi('tech')) return await api('/ops/tech-equipment', { query: { branch: branch || undefined } });
-    let q = sb().from('tech_equipment').select('*').order('category').order('name');
-    if (branch) q = q.eq('branch',branch);
-    const {data,error} = await q;
-    if (error) throw error; return data||[];
-  },
-  async addTechEquipment(fields) {
-    if (useApi('tech')) return await api('/ops/tech-equipment', { method:'POST', body: fields });
-    const {data,error} = await sb().from('tech_equipment')
-      .insert(fields).select().single();
-    if (error) throw error; return data;
-  },
-  async updateTechEquipment(id, fields) {
-    if (useApi('tech')) { await api('/ops/tech-equipment/'+id+'/update', { method:'POST', body: fields }); return; }
-    const {error} = await sb().from('tech_equipment').update(fields).eq('id',id);
-    if (error) throw error;
-  },
-  async deleteTechEquipment(id) {
-    if (useApi('tech')) { await api('/ops/tech-equipment/'+id+'/delete', { method:'POST' }); return; }
-    const {error} = await sb().from('tech_equipment').delete().eq('id',id);
-    if (error) throw error;
-  },
   async getTechIssues(branch) {
     if (useApi('tech')) {
       // Бэкенд: только открытые + плоское equipment_name → эмбед tech_equipment{name}.
@@ -43,24 +20,6 @@ Object.assign(DB, {
   async updateTechIssue(id, fields) {
     if (useApi('tech')) { await api('/ops/tech-issues/'+id+'/update', { method:'POST', body: fields }); return; }
     const {error} = await sb().from('tech_issues').update(fields).eq('id',id);
-    if (error) throw error;
-  },
-  async getTechShopping(branch) {
-    if (useApi('tech')) return await api('/ops/tech-shopping', { query: { branch: branch || undefined } });
-    let q = sb().from('tech_shopping').select('*').neq('status','received').order('priority').order('created_at',{ascending:false});
-    if (branch) q = q.eq('branch',branch);
-    const {data,error} = await q;
-    if (error) throw error; return data||[];
-  },
-  async addTechShopping(fields) {
-    if (useApi('tech')) return await api('/ops/tech-shopping', { method:'POST', body: fields });
-    const {data,error} = await sb().from('tech_shopping')
-      .insert(fields).select().single();
-    if (error) throw error; return data;
-  },
-  async updateTechShopping(id, fields) {
-    if (useApi('tech')) { await api('/ops/tech-shopping/'+id+'/update', { method:'POST', body: fields }); return; }
-    const {error} = await sb().from('tech_shopping').update(fields).eq('id',id);
     if (error) throw error;
   },
   // general:true → только «общие» счета (is_general), branch игнорируется.
@@ -124,13 +83,6 @@ Object.assign(DB, {
       .order('start_time',{ascending:true});
     if (error) throw error; return data||[];
   },
-  // ─── ЦВЕТА КЛИЕНТОВ ──────────────────────────
-  async updateClientColor(clientId, color) {
-    if (useApi('clients')) { await api('/clients/'+clientId, { method:'PATCH', body:{ color: color || null } }); return; }
-    const {error} = await sb().from('clients')
-      .update({color: color || null}).eq('id', clientId);
-    if (error) throw error;
-  },
 
   // ─── УВЕДОМЛЕНИЯ ВНУТРИ ПРИЛОЖЕНИЯ ───────────
   async getMyNotifications(tgId) {
@@ -161,18 +113,6 @@ Object.assign(DB, {
                requested_by:requestedBy, branch, status:'pending'})
       .select().single();
     if (error) throw error; return data;
-  },
-  async getDeleteRequests(branch) {
-    if (useApi('requests')) {
-      const rows = await api('/requests/delete', { query: { status: 'pending', branch } });
-      return (rows || []).map(r => ({ ...r, profiles: { fio: r.requester_fio } }));
-    }
-    const {data,error} = await sb().from('delete_requests')
-      .select('*, profiles!requested_by(fio)')
-      .eq('status','pending')
-      .eq('branch', branch)
-      .order('created_at',{ascending:false});
-    if (error) throw error; return data||[];
   },
   async getAllDeleteRequests() {
     if (useApi('requests')) {
@@ -236,17 +176,6 @@ Object.assign(DB, {
       .insert({workout_id:workoutId, trainer_id:trainerId, client_name:clientName,
                workout_date:workoutDate, branch, status:'pending'});
     if (error) throw error;
-  },
-  async getWorkoutDeleteRequests(branch) {
-    if (useApi('requests')) {
-      const rows = await api('/requests/workout-delete', { query: { status: 'pending', branch } });
-      return (rows || []).map(r => ({ ...r, profiles: { fio: r.trainer_fio } }));
-    }
-    const {data,error} = await sb().from('workout_delete_requests')
-      .select('*, profiles!trainer_id(fio)')
-      .eq('status','pending').eq('branch',branch)
-      .order('created_at',{ascending:false});
-    if (error) throw error; return data||[];
   },
   async getAllWorkoutDeleteRequests() {
     if (useApi('requests')) {

@@ -55,17 +55,6 @@ Object.assign(DB, {
     if (error) throw error; return data||[];
   },
 
-  /** Все активные слоты — для обратной совместимости */
-  async getSlots(trainerId) {
-    if (useApi('schedule')) return (await api('/slots', { query: { trainer_id: trainerId, recurring: 'true' } })).map(_apiSlot);
-    const {data,error} = await sb().from('schedule_slots')
-      .select('*, clients(fio,category,balance), group_types(name,type)')
-      .eq('trainer_id',trainerId).eq('active',true)
-      .is('specific_date',null)
-      .order('day_of_week').order('start_time');
-    if (error) throw error; return data||[];
-  },
-
   async getAllActiveSlots() {
     if (useApi('schedule')) {
       const rows = await api('/slots/all');
@@ -110,14 +99,6 @@ Object.assign(DB, {
     const {error} = await sb().from('schedule_cancellations')
       .upsert({slot_id:slotId, cancel_date:date, reason:reason||null},
               {onConflict:'slot_id,cancel_date'});
-    if (error) throw error;
-  },
-
-  /** Восстановить отменённый слот */
-  async restoreSlotDate(slotId, date) {
-    if (useApi('schedule')) { await api('/slots/'+slotId+'/restore', { method:'POST', body:{ date } }); return; }
-    const {error} = await sb().from('schedule_cancellations')
-      .delete().eq('slot_id',slotId).eq('cancel_date',date);
     if (error) throw error;
   },
 
@@ -339,31 +320,6 @@ Object.assign(DB, {
           .eq('id',subs[0].id);
       }
       return {balance:newBal};
-    }
-  },
-  async closeSubscription(subId, closingNote, endDate) {
-    if (useApi('clients')) {
-      return await api('/subscriptions/'+subId+'/close', { method:'POST', body:{ closing_note: closingNote||'', end_date: endDate } });
-    }
-    const {data,error} = await sb().from('subscriptions')
-      .update({is_active:false,end_date:endDate,closing_note:closingNote||null})
-      .eq('id',subId).select().single();
-    if (error) throw error; return data;
-  },
-  async closeSubEarly(subId, clientId, isChild, closingNote, today) {
-    if (useApi('clients')) {
-      // isChild определяется на бэкенде по возрасту; обнуление баланса ребёнка — там же.
-      await api('/subscriptions/'+subId+'/close-early', { method:'POST', body:{ client_id: clientId, closing_note: closingNote||'', today } });
-      return;
-    }
-    const note = closingNote || (isChild ? 'Досрочное закрытие. Остаток сгорел.' : 'Досрочное закрытие. Остаток сохранён.');
-    const {error} = await sb().from('subscriptions')
-      .update({is_active:false, end_date:today, closing_note:note})
-      .eq('id',subId);
-    if (error) throw error;
-    if (isChild) {
-      const {error:be} = await sb().from('clients').update({balance:0}).eq('id',clientId);
-      if (be) throw be;
     }
   },
 

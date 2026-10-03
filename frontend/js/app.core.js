@@ -1,23 +1,25 @@
 // =============================================
-// TWA «Лист тренера» v4 — Полный файл
+// AquaDesk — ядро фронта: состояние, утилиты, UI, init.
 // =============================================
 //
-// SECTIONS:
+// КАРТА СЕКЦИЙ всех app*.js (найти: grep -rn "// SECTION: <ИМЯ>" frontend/js/):
 //   CORE:STATE          — глобальное состояние (STATE)
 //   CORE:UTILS          — утилиты (fmt, levenshtein, cached, once, ...)
 //   CORE:UI             — setScreen, toast, setupBack, navPush
 //   CORE:INIT           — init(), enterApp()
+//   DEV                 — дев-переключатель ролей (только координатор-владелец)
 //   AUTH                — регистрация, PIN-вход, привязка профиля
 //   TRAINER:SHELL       — renderTrainerApp, renderTrainerShell, switchTab
 //   TRAINER:HOME        — Главная = отчёт (renderReportTab); checkNoteBadge, renderLogWorkoutModal
 //   TRAINER:CLIENTS     — _findDuplicates, renderClientsTab, renderOverdueNotesModal
 //   TRAINER:CLIENTS:ADD — renderAddClientModal, doAddClient
-//   TRAINER:WORKOUTS    — renderWorkoutsTab, doLogWorkout
+//   TRAINER:WORKOUTS    — doLogWorkout, doConfirmLogWorkout
 //   TRAINER:SCHEDULE    — renderScheduleTab, loadScheduleWeek, renderAddSlotModal
 //   TRAINER:TODAY       — renderTodayTab, doConfirm
 //   TRAINER:DUTIES      — renderDutyModal, doLogDuty, renderLateRequestModal
 //   TRAINER:EVENTS      — renderEventsTab
 //   TRAINER:REPORT      — loadTrainerReport
+//   TRAINER:SEQ_SURVEY  — опросник «Сверка порядковых списаний»
 //   CLIENT:PROFILE      — renderClientProfile, подписки, заморозка, цели
 //   CLIENT:EXPORT       — doExportTrainer, doExportBranchChildGroups
 //   SENIOR              — renderSeniorApp, renderSeniorAnalytics
@@ -32,10 +34,12 @@
 //   ADMIN:BRANCHES      — renderAdminBranches
 //   ADMIN:GROUPS        — renderAdminGroups, renderGroupsStructure, renderGroupMonthReport
 //   ADMIN:TECH          — renderAdminTech/Ceo/Manager: счета, техничка (поломки), хлор
-//   CEO                 — renderCeoApp, renderCeoDashboard, renderCeoAnalytics, renderCeoSalary
+//   CEO                 — renderCeoApp, renderCeoFinance, renderCeoStats, renderCeoTrainers
+//   RECEPTION           — renderReceptionApp, receptionTab (подтверждение списаний → 1С)
+//   MANAGER             — renderManagerApp (read-only, один филиал)
 //   SHARED:DELETE       — doDeleteClientCheck, doApproveDelete, doApproveWorkoutDelete
 //   SHARED:PROFILE      — renderTrainerEditProfile
-//   SHARED:NOTIFICATIONS — checkInAppNotifications, renderAdminNotifications
+//   SHARED:NOTIFICATIONS — checkInAppNotifications (вкладка координатора — notifications-ui.js)
 //   SHARED:GROUP_MODALS — расписание группы, замены, взрослые группы
 //
 // =============================================
@@ -195,10 +199,6 @@ function fmtDate(d) { return new Date(d).toLocaleDateString('ru-RU',{day:'2-digi
 function fmtTime(d) { return new Date(d).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'}); }
 function fmtDT(d)   { return `${fmtDate(d)} ${fmtTime(d)}`; }
 function fmtMY(y,m) { return new Date(y,m-1).toLocaleDateString('ru-RU',{month:'long',year:'numeric'}); }
-function localDT(daysOffset=0) {
-  const d=new Date(); d.setDate(d.getDate()+daysOffset);
-  return d.toISOString().slice(0,16);
-}
 function hoursFromDuty(s,e) { return (new Date(e)-new Date(s))/3600000; }
 function canEdit(createdAt)  { return (Date.now()-new Date(createdAt)) < EDIT_WINDOW_MIN*60000; }
 function isValidWorkoutDate(v) {

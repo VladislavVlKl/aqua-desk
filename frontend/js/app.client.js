@@ -391,40 +391,6 @@ async function doUnfreezeEarly(subId, clientId, freezeEnd, subEnd) {
     renderClientProfile(clientId, STATE.currentTab||'clients');
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
-function renderCloseSubEarlyModal(subId, clientId, isChild) {
-  const m=el('div','modal-overlay');
-  const balanceInfo = isChild
-    ? `<div class="warn-banner" style="background:rgba(239,68,68,.08);border-color:rgba(239,68,68,.3);margin-bottom:12px">
-        ⚠️ Ребёнок: остаток тренировок <strong>сгорит</strong> при досрочном закрытии.
-       </div>`
-    : `<div class="warn-banner" style="background:rgba(16,185,129,.08);border-color:rgba(16,185,129,.3);margin-bottom:12px">
-        ✅ Взрослый: остаток тренировок <strong>сохранится</strong>. При покупке нового пакета восстановится автоматически.
-       </div>`;
-  m.innerHTML=`<div class="modal">
-    <div class="modal-header"><h3>Закрыть абонемент досрочно</h3>
-      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
-    ${balanceInfo}
-    <div class="form-group"><label>Причина (необязательно)</label>
-      <textarea id="sub-closing" rows="2" placeholder="Клиент уехал, перешёл в другую группу..."></textarea></div>
-    <button class="btn btn-danger btn-full" onclick="doCloseSubEarly(${subId},'${clientId}',${isChild})">❄️ Закрыть досрочно</button>
-  </div>`;
-  document.body.appendChild(m);
-}
-async function doCloseSubEarly(subId, clientId, isChild) {
-  const note=document.getElementById('sub-closing')?.value.trim()||'';
-  const btn=document.querySelector('.modal .btn-danger');
-  if (btn) { btn.disabled=true; btn.textContent='Закрываем...'; }
-  try {
-    await DB.closeSubEarly(subId, clientId, isChild, note, todayStr());
-    DB.auditLog('sub_close_early', STATE.profile.id, STATE.profile.fio, subId, 'subscription',
-      { client_id: clientId, is_child: isChild, note }, STATE.profile.branches?.[0]);
-    document.querySelector('.modal-overlay')?.remove();
-    toast(isChild?'✅ Абонемент закрыт, остаток сгорел':'✅ Абонемент закрыт, остаток сохранён','success');
-    renderClientProfile(clientId, STATE.currentTab||'clients');
-  } catch(e) { toast('Ошибка','error'); console.error(e);
-    if (btn) { btn.disabled=false; btn.textContent='❄️ Закрыть досрочно'; }
-  }
-}
 
 // Модал: конспект занятия
 async function renderSessionNoteModal(workoutId,clientId) {

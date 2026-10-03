@@ -222,10 +222,6 @@ async function doDeleteSlot(slotId, type, isOneTime) {
   catch(e) { console.error(e); toast('Ошибка','error'); }
 }
 
-async function confirmDeleteSlot(id,type) {
-  await doDeleteSlot(id,type,false);
-}
-
 async function renderAddSlotModal() {
   const branches=STATE.profile.branches||[];
   const clients=await DB.getClients(STATE.profile.id);

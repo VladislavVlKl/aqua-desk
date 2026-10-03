@@ -380,11 +380,6 @@ async function renderCeoTrainers() {
   await load();
 }
 
-
-// setClientColor moved to module
-
-// renderTrainerEditProfile moved to module
-
 // ============================================================
 // SECTION: RECEPTION — панель ресепшена: подтверждение списаний (Шаг 1 → 1С)
 // ============================================================

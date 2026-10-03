@@ -262,18 +262,6 @@ async function doSaveGroupNote(groupId, clientId, month) {
     refreshGroupScreen(groupId);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
-function renderGroupDebtorsModal(names) {
-  const m = el('div','modal-overlay');
-  m.innerHTML=`<div class="modal">
-    <div class="modal-header"><h3>⚠️ Должники (${names.length})</h3>
-      <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
-    <p class="hint" style="margin-bottom:12px">Абонемент не оплачен за текущий месяц:</p>
-    <div style="display:flex;flex-direction:column;gap:6px">
-      ${names.map(n=>`<div style="padding:10px 12px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);border-radius:10px;font-weight:500">${n}</div>`).join('')}
-    </div>
-  </div>`;
-  document.body.appendChild(m);
-}
 
 async function renderGroupArchiveModal(groupId, instanceId) {
   const m = el('div','modal-overlay');
@@ -431,10 +419,6 @@ async function doArchiveClientConfirmed(clientId) {
     invalidateCache('clients');
     switchTab(STATE.currentTab||'clients');
   } catch(e) { toast('Ошибка','error'); console.error(e); }
-}
-async function doArchiveClient(id, fioEnc) {
-  // Устаревший алиас — на случай если где-то осталась ссылка
-  renderArchiveClientModal(id, fioEnc);
 }
 function renderRestoreClientModal(clientId, fioEnc, backTab='home') {
   const fio = decodeURIComponent(fioEnc);

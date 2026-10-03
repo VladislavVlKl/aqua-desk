@@ -46,23 +46,6 @@ Object.assign(DB, {
     if (error) throw error; return data||[];
   },
 
-  async updateGroupType(id, fields) {
-    invalidateCachePrefix('grp:');
-    if (useApi('groups')) { await api('/group-types/'+id+'/update', { method:'POST', body: fields }); return; }
-    const {error} = await sb().from('group_types').update(fields).eq('id',id);
-    if (error) throw error;
-  },
-  async deleteGroupType(id) {
-    invalidateCachePrefix('grp:');
-    // Бэкенд сам снимает всех тренеров (subscription_end) перед удалением типа.
-    if (useApi('groups')) { await api('/group-types/'+id+'/delete', { method:'POST' }); return; }
-    // Unassign all trainers first
-    await sb().from('trainer_groups')
-      .update({subscription_end: new Date().toISOString().slice(0,10)})
-      .eq('group_type_id',id).is('subscription_end',null);
-    const {error} = await sb().from('group_types').delete().eq('id',id);
-    if (error) throw error;
-  },
   async addGroupType(fields) {
     invalidateCachePrefix('grp:');
     if (useApi('groups')) return await api('/group-types', { method:'POST', body: fields });
@@ -144,11 +127,6 @@ async getAssignedTrainers(groupTypeId) {
     if (useApi('groups')) { await api('/trainer-groups/'+id+'/leader', { method:'POST', body:{ leader_name: leaderName||null, leader_fee_pct: leaderFeePct||0 } }); return; }
     const {error} = await sb().from('trainer_groups')
       .update({leader_name: leaderName||null, leader_fee_percent: leaderFeePct||0}).eq('id',id);
-    if (error) throw error;
-  },
-  async linkTrainerGroupInstance(id, groupInstanceId) {
-    const {error} = await sb().from('trainer_groups')
-      .update({group_instance_id: groupInstanceId}).eq('id',id);
     if (error) throw error;
   },
   async getGroupInstanceMembers(groupInstanceId) {
@@ -336,28 +314,6 @@ async unassignTrainerGroup(id) {
     if (error) throw error;
   },
 
-  // Уникальные даты занятий с явкой (по instance_id если есть, иначе по group_id)
-  async getGroupSessionHistory(groupId) {
-    if (useApi('groups')) return await api('/group-session-history', { query: { group_id: groupId } });
-    // Сначала получаем instance_id
-    const {data:tg} = await sb().from('trainer_groups')
-      .select('group_instance_id').eq('id',groupId).single();
-    const instanceId = tg?.group_instance_id;
-    let q = sb().from('group_attendance').select('session_date, attended').limit(500).order('session_date',{ascending:false});
-    if (instanceId) q = q.eq('group_instance_id', instanceId);
-    else q = q.eq('group_id', groupId);
-    const {data} = await q;
-    const map = {};
-    (data||[]).forEach(r=>{
-      if (!map[r.session_date]) map[r.session_date] = {total:0, attended:0};
-      map[r.session_date].total++;
-      if (r.attended) map[r.session_date].attended++;
-    });
-    return Object.entries(map)
-      .sort((a,b)=>b[0].localeCompare(a[0]))
-      .map(([date,v])=>({date,...v}));
-  },
-
   // История посещений конкретного ребёнка (последние записи)
   async getGroupClientAttendanceHistory(groupClientId) {
     if (useApi('groups')) return await api('/group-client-attendance-history', { query: { group_client_id: groupClientId } });
@@ -518,12 +474,6 @@ async unassignTrainerGroup(id) {
     if (error) throw error;
   },
   // ─── GROUP TRAINER PAYOUTS ───────────────────
-  async getGroupTrainerPayout(groupId, trainerId, month) {
-    if (useApi('groups')) return await api('/group-payouts', { query: { group_id: groupId, trainer_id: trainerId, month } });
-    const {data,error} = await sb().from('group_trainer_payouts')
-      .select('*').eq('group_id',groupId).eq('trainer_id',trainerId).eq('month',month).maybeSingle();
-    if (error) throw error; return data;
-  },
   async setGroupTrainerPayout(groupId, trainerId, month, payoutType, payoutValue, approvedBy, note='', bonus=0, penalty=0) {
     invalidateCachePrefix('grp:');
     if (useApi('groups')) {
@@ -540,18 +490,6 @@ async unassignTrainerGroup(id) {
                bonus: bonus||0, penalty: penalty||0},
               {onConflict:'group_id,trainer_id,month'});
     if (error) throw error;
-  },
-  async getGroupPayoutsForMonth(month) {
-    if (useApi('groups')) {
-      const rows = await api('/group-payouts/month', { query: { month } });
-      return (rows || []).map(r => ({ ...r,
-        profiles: { fio: r.trainer_fio },
-        trainer_groups: { group_types: { name: r.tg_group_name, type: r.tg_group_type } } }));
-    }
-    const {data,error} = await sb().from('group_trainer_payouts')
-      .select('*, trainer_groups(*, group_types(name,type)), profiles!trainer_id(fio)')
-      .eq('month', month);
-    if (error) throw error; return data||[];
   },
   // Премия/штраф к авто-расчёту детской группы. payout_value пишем = итог для аудита,
   // но в расчётах он больше НЕ читается (ЗП считается авто через calcChildGroupPayroll).
@@ -578,15 +516,6 @@ async unassignTrainerGroup(id) {
       if (error) throw error; return data||[];
     } catch(e) { console.warn('[getRateHistory]', e?.message||e); return []; }
     });
-  },
-  async getRateHistoryByTg(tgId, limit=5) {
-    try {
-      if (useApi('groups')) return await api('/trainer-groups/'+tgId+'/rate-history', { query: { limit } });
-      const {data,error} = await sb().from('trainer_group_rate_history')
-        .select('*').eq('trainer_group_id', tgId)
-        .order('effective_from',{ascending:false}).limit(limit);
-      if (error) throw error; return data||[];
-    } catch(e) { console.warn('[getRateHistoryByTg]', e?.message||e); return []; }
   },
   async addRateHistory(trainerGroupId, rateType, rateValue, effectiveFrom, createdBy) {
     invalidateCachePrefix('grp:');
@@ -831,14 +760,6 @@ async unassignTrainerGroup(id) {
     const {error} = await sb().from('group_subgroups')
       .insert({group_instance_id: groupInstanceId||null, group_id: groupInstanceId?null:groupId, name, created_by: createdBy});
     if (error && error.code!=='23505') throw error; // 23505 = уже есть, не ошибка
-  },
-  async removeGroupSubgroup(groupInstanceId, groupId, name) {
-    invalidateCachePrefix('grp:subg:');
-    if (useApi('groups')) { await api('/group-subgroups/remove', { method:'POST', body:{ group_instance_id: groupInstanceId||null, group_id: groupInstanceId?null:groupId, name } }); return; }
-    let q = sb().from('group_subgroups').delete().eq('name', name).eq('is_main', false);
-    q = groupInstanceId ? q.eq('group_instance_id', groupInstanceId) : q.eq('group_id', groupId).is('group_instance_id', null);
-    const {error} = await q;
-    if (error) throw error;
   },
   // Метка главной ('') подгруппы. label='' → вернуть к «Основная» (удалить метку).
   async setMainSubgroupLabel(groupInstanceId, groupId, label) {

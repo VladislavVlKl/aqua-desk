@@ -14,12 +14,14 @@ frontend/          ← публикуется на GitHub Pages (корень с
 ├── js/              браузерные скрипты (подключаются в index.html)
 └── css/             стили
 backend/
-└── jobs/            node-джобы для GitHub Actions
-    ├── remind.js        напоминания тренерам (ежечасно)
-    └── process-queue.js разбор очереди уведомлений (каждые 5 мин)
+└── jobs/            node-джобы — РУЧНОЙ аварийный канал (workflow_dispatch)
+    ├── remind.js        напоминания (копия логики Edge Function daily-reminder)
+    └── process-queue.js доставка очереди уведомлений (копия Edge Function process-queue)
 supabase/          ← БД-слой: миграции (источник правды) + Edge Functions.
                      Остаётся в корне — стандартный путь Supabase CLI / branching.
-.github/workflows/ ← CI/CD (deploy, daily-reminder, process-queue)
+                     Регулярные запуски ведёт pg_cron → pg_net → Edge Functions
+                     (daily-reminder ежечасно, process-queue раз в минуту).
+.github/workflows/ ← CI/CD: deploy (автоматически), daily-reminder / process-queue (только вручную)
 docs/              ← паспорта, отчёты, выгрузки
 ```
 
@@ -30,16 +32,25 @@ docs/              ← паспорта, отчёты, выгрузки
 >
 > Воркфлоу `daily-reminder` / `process-queue` запускают `node backend/jobs/*.js`
 > (npm-зависимости ставятся в корень, node резолвит их вверх по дереву).
+> Расписания в них отключены — это ручной канал на случай сбоя pg_cron.
+> Правишь логику Edge Function — синхронно правь копию в `backend/jobs/`.
 
 ### frontend/js
 
-UI/бизнес-логика (бывший монолит `app.js` ~10 600 строк) разбита на 6 модулей
-по ролям. Все — классические `<script>` в общем global scope; **порядок подключения
-в `index.html` критичен** (top-level код и bootstrap зависят от него):
+UI/бизнес-логика (бывший монолит `app.js` ~10 600 строк) разбита на 19 модулей
+`app*.js` по ролям/доменам. Все — классические `<script>` в общем global scope;
+**порядок подключения в `index.html` критичен** (top-level код и bootstrap зависят от него):
 
 ```
-app.js → app.trainer.js → app.admin.js → app.admin-ops.js → app.exec.js → app.shared.js
+config → db.core → db.clients → db.groups → db.schedule → db.analytics → db.ops
+→ db.salary → db.misc → export → app.core → app.auth → app.client → app.senior*
+→ app.trainer.* → app.admin.* → app.admin-ops.* → app.exec → app.shared
+→ tutorial → notifications-ui
 ```
+
+> Глобальный скоуп общий: функция, объявленная в двух файлах, молча перекрывается
+> той, что подключена позже. Перед добавлением функции проверь, что имя свободно:
+> `grep -rn "function <имя>" frontend/js/`.
 
 | Файл | Назначение |
 |---|---|
@@ -110,9 +121,9 @@ index.html → Telegram.WebApp.ready() → init()
 
 ---
 
-## Карта секций app.js
+## Карта секций
 
-Поиск по `// SECTION:` в файле.
+Поиск по `// SECTION:` в `frontend/js/` (оглавление — в шапке `app.core.js`).
 
 ```
 CORE:STATE / CORE:UTILS / CORE:UI / CORE:INIT — состояние, утилиты, навигация, init
@@ -128,6 +139,7 @@ TRAINER:SCHEDULE    — недельное расписание, слоты
 TRAINER:TODAY       — слоты на сегодня, подтверждение
 TRAINER:DUTIES      — дежурства старт/стоп, поздние запросы
 TRAINER:EVENTS / TRAINER:REPORT — мероприятия, отчёт+ЗП
+TRAINER:SEQ_SURVEY  — опросник «Сверка порядковых списаний»
 CLIENT:PROFILE      — карточка клиента: абонементы, заморозка, цели, конспекты
 CLIENT:EXPORT       — Excel-экспорты
 SENIOR / SENIOR:GROUPS / SENIOR:REPORT — панель старшего тренера
@@ -169,7 +181,7 @@ try { ... } finally { _pending.delete(key); }
 ### Флоу запросов на одобрение
 Тренер создаёт `pending`-запрос → координатор/старший одобряет или отклоняет.
 Три вида: удаление клиента, удаление ПТ, позднее внесение ПТ.
-Дубли pending-запросов блокируются в db.js (`already_pending`).
+Дубли pending-запросов блокируются в db.*.js (`already_pending`).
 
 ---
 
@@ -188,9 +200,10 @@ try { ... } finally { _pending.delete(key); }
 | Отчёт | ПТ+дежурства за месяц, ЗП, Excel |
 
 ### Карточка клиента
-Баланс, абонементы (пакеты/dropin, история), заморозка (`calcFreezeResult`),
-досрочное закрытие (дети — сгорает, взрослые — сохраняется), цели,
-отчёт по абонементу, перевод к другому тренеру, архив, конспекты.
+Баланс, абонементы (пакеты/dropin, история), заморозка (`calcFreezeResult`), цели,
+отчёт по абонементу, перевод к другому тренеру, архив, конспекты,
+«⚠ Не совпадает с 1С» (флаг расхождения остатка).
+(Досрочное закрытие абонемента убрано из UI 2026-06-09 в пользу заморозки; код удалён.)
 
 ### Старший тренер (renderSeniorApp)
 Аналитика филиала, отчёты, группы (назначение/снятие тренера, карточки),
@@ -214,8 +227,9 @@ try { ... } finally { _pending.delete(key); }
 Списание тренера создаётся `reception_status='pending'` (DEFAULT в БД). Ресепшн `confirm` → в ЗП;
 `reject` → откат баланса (`increment_balance +1` для обычных ПТ; сброс `drop_in_used` для разовых детей)
 + уведомление тренеру. Замена попадает в очередь только после подтверждения тренером Б
-(`pending_confirmation=false`). Напоминания: бейдж / конец дня 21:00 (`RECEPTION_EOD_HOUR`) →
-`notifications_queue` / эскалация >24ч (`RECEPTION_ESCALATE_HRS`) в «Контроле» координатора.
+(`pending_confirmation=false`). Напоминания: бейдж в панели / вечерний пуш «конец дня» ставит
+pg_cron (правило `reception_eod` в Edge Function daily-reminder) / эскалация >24ч
+(`RECEPTION_ESCALATE_HRS`) в «Контроле» координатора.
 ЗП тренера (TRAINER:REPORT) делит ПТ на «Подтверждено» (confirmed) и «В ожидании» (pending, серым);
 rejected исключён. ⚠️ по группам «ходит, но не платит» (`getGroupUnpaidAttendees`).
 
