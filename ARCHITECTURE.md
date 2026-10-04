@@ -163,6 +163,22 @@ try { ... } finally { _pending.delete(key); }
 ```
 Плюс `once(key, fn)` и `rateLimit(key, ms)`.
 
+### Экранирование (XSS) — обязательно
+HTML собирается строками, поэтому **любой текст, введённый людьми** (ФИО, названия групп/филиалов,
+конспекты, причины, комментарии) вставляется только через хелперы из `app.core.js`:
+
+| Где в шаблоне | Хелпер | Пример |
+|---|---|---|
+| текст / значение атрибута | `esc(x)` | `<b>${esc(c.fio)}</b>`, `value="${esc(c.fio)}"` |
+| строка в `on*`-обработчике, приходит как есть | `jsq(x)` | `onclick="fn('${jsq(c.fio)}')"` |
+| то же, закодированно (на той стороне `decodeURIComponent`) | `encArg(x)` | `onclick="fn('${encArg(c.fio)}')"` |
+
+`encodeURIComponent` для аргументов обработчиков не использовать: он не кодирует апостроф,
+и имя «G'ulomov» рвёт JS-строку. `toast()` выводит только текст (`textContent`).
+Тексты уведомлений (`notifications_queue.message`) — HTML (Telegram `parse_mode=HTML`,
+колокольчик рендерит как есть): пользовательские вставки при сборке — тоже через `esc()`,
+на сервере (Edge Function `daily-reminder`) — через `escHtml()`.
+
 ### Кеш
 `cached(key, fn, ttl=300000)` — 5 минут в памяти.
 Сбрасывать после записи: `invalidateCache('profiles')`, `invalidateCache('branches')`.

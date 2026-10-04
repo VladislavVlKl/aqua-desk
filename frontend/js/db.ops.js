@@ -139,8 +139,8 @@ Object.assign(DB, {
     try {
       const { data: recips } = await sb().from('profiles').select('id,role,branches,tg_id')
         .in('role', ['senior_trainer', 'admin']).not('tg_id', 'is', null);
-      const msg = '⚠️ <b>Расхождение с 1С</b>\n\nТренер ' + (trainerFio || '') + ' отметил, что остаток ПТ не сходится с 1С'
-        + (note ? ('\nКомментарий: ' + note) : '') + '.\n\nПроверьте в разделе «Расхождения с 1С».';
+      const msg = '⚠️ <b>Расхождение с 1С</b>\n\nТренер ' + esc(trainerFio || '') + ' отметил, что остаток ПТ не сходится с 1С'
+        + (note ? ('\nКомментарий: ' + esc(note)) : '') + '.\n\nПроверьте в разделе «Расхождения с 1С».';
       for (const r of (recips || [])) {
         if (branch && Array.isArray(r.branches) && !r.branches.includes(branch)) continue;
         DB.enqueueTrainerNotification(r.id, msg, 'pt_mismatch');
@@ -236,8 +236,8 @@ Object.assign(DB, {
         returned_by: resolvedBy || null, returned_at: new Date().toISOString() }).eq('id', flagId);
     if (error) throw error;
     try {
-      const msg = '🔁 <b>Уточните заявку о расхождении с 1С</b>\n\nКлиент: ' + (clientFio || '')
-        + (coordinatorNote ? ('\nКоординатор: ' + coordinatorNote) : '')
+      const msg = '🔁 <b>Уточните заявку о расхождении с 1С</b>\n\nКлиент: ' + esc(clientFio || '')
+        + (coordinatorNote ? ('\nКоординатор: ' + esc(coordinatorNote)) : '')
         + '\n\nОткройте карточку клиента и повторите/уточните заявку.';
       DB.enqueueTrainerNotification(trainerId, msg, 'pt_mismatch');
     } catch (e) { console.error('[mismatch] return notify', e); }
@@ -332,7 +332,7 @@ Object.assign(DB, {
     const aFio = w0?.a?.fio || 'Тренер';
     const n = data?.length || 1;
     DB.enqueueTrainerNotification(toBTrainerId,
-      `⚡ ${aFio} записал(а) на вас замену${n>1?` (${n} тренировок)`:''}: ${cFio}. Подтвердите во вкладке «Отчёт».`,
+      `⚡ ${esc(aFio)} записал(а) на вас замену${n>1?` (${n} тренировок)`:''}: ${esc(cFio)}. Подтвердите во вкладке «Отчёт».`,
       'substitution');
     return data;
   },
@@ -393,7 +393,7 @@ Object.assign(DB, {
     const cFio = data?.clients?.fio || 'клиента';
     const fromFio = data?.from?.fio || 'тренер';
     DB.enqueueTrainerNotification(toId,
-      `👤 ${fromFio} передаёт вам клиента: ${cFio}.${note?` Комментарий: ${note}.`:''} Подтвердите во вкладке «Отчёт».`,
+      `👤 ${esc(fromFio)} передаёт вам клиента: ${esc(cFio)}.${note?` Комментарий: ${esc(note)}.`:''} Подтвердите во вкладке «Отчёт».`,
       'client_transfer');
     return data;
   },
@@ -811,7 +811,7 @@ Object.assign(DB, {
     const rows = recs.filter(r=>r.tg_id).map(r=>({
       recipient_tg_id: r.tg_id,
       recipient_name:  r.fio,
-      message: `🔔 Осталось ${count} неподтверждённых списаний за сегодня (${branch}).`,
+      message: `🔔 Осталось ${count} неподтверждённых списаний за сегодня (${esc(branch)}).`,
       scheduled_for: new Date().toISOString(),
       created_by: createdBy||null,
       status: 'pending',
@@ -825,11 +825,13 @@ Object.assign(DB, {
   /** Уведомление тренеру об отклонении его списания */
   async notifyTrainerRejected(trainerId, clientName, dateStr, reasonLabel) {
     return DB.enqueueTrainerNotification(trainerId,
-      `❌ Ресепшн отклонил списание: ${clientName} · ${dateStr}. Причина: ${reasonLabel}. Баланс возвращён.`,
+      `❌ Ресепшн отклонил списание: ${esc(clientName)} · ${dateStr}. Причина: ${esc(reasonLabel)}. Баланс возвращён.`,
       'reception_reject');
   },
-  // Положить уведомление тренеру в очередь → бейдж колокольчика + Telegram-пуш (воркер каждые 5 мин).
+  // Положить уведомление тренеру в очередь → бейдж колокольчика + Telegram-пуш (pg_cron → process-queue).
   // Fire-and-forget: ошибка не должна валить основную операцию.
+  // message — HTML (Telegram parse_mode=HTML, колокольчик рендерит как есть): любые
+  // пользовательские вставки (ФИО, комментарии) собирать через esc() из app.core.js.
   async enqueueTrainerNotification(trainerId, message, ruleKey) {
     try {
       if (useApi('notifications')) {

@@ -518,7 +518,7 @@ Object.assign(DB, {
       .eq('id',requestId);
     if (ue) throw ue;
     DB.enqueueTrainerNotification(req.trainer_id,
-      `✅ Пересчёт категории одобрен: ${req.client_fio||'клиент'} → Кат.${req.new_category} (${req.scope==='all'?'все ПТ':'текущий месяц'}). Затронуто тренировок: ${n}.`,
+      `✅ Пересчёт категории одобрен: ${esc(req.client_fio||'клиент')} → Кат.${req.new_category} (${req.scope==='all'?'все ПТ':'текущий месяц'}). Затронуто тренировок: ${n}.`,
       'cat_recalc_approved');
     return n;
   },
@@ -532,7 +532,7 @@ Object.assign(DB, {
       .eq('id',requestId);
     if (error) throw error;
     if (req) DB.enqueueTrainerNotification(req.trainer_id,
-      `❌ Пересчёт категории отклонён: ${req.client_fio||'клиент'} → Кат.${req.new_category}.${note?` Причина: ${note}.`:''}`,
+      `❌ Пересчёт категории отклонён: ${esc(req.client_fio||'клиент')} → Кат.${req.new_category}.${note?` Причина: ${esc(note)}.`:''}`,
       'cat_recalc_rejected');
   },
   async deleteWorkout(id) {

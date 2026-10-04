@@ -292,7 +292,7 @@ async function renderAdminAnalytics(year, month, branch) {
     </div>
     <select id="an-branch" style="margin-bottom:14px">
       <option value="">Все филиалы</option>
-      ${branches.map(b=>`<option ${b.name===branch?'selected':''}>${b.name}</option>`).join('')}
+      ${branches.map(b=>`<option ${b.name===branch?'selected':''}>${esc(b.name)}</option>`).join('')}
     </select>
     <div class="aov-grid">
       <div class="aov-card" id="aov-money"   onclick="openAnHub('money')">${_anSkel(4)}</div>
@@ -381,7 +381,7 @@ async function renderAnalyticsMoneyHub(year, month, branch) {
   setupBack(()=>renderAdminAnalytics(year,month,branch));
   $('#tab-content').innerHTML=`<div class="tab-pad">
     <div class="ah-head">${backBtn()}<h3>💰 Деньги и ФОТ</h3></div>
-    <p class="hint">${fmtMY(year,month)}${branch?' · '+branch:' · все филиалы'}</p>
+    <p class="hint">${fmtMY(year,month)}${esc(branch?' · '+branch:' · все филиалы')}</p>
     <div id="ah-body"><div class="center-screen"><div class="spinner"></div></div></div>
   </div>`;
   try {
@@ -410,7 +410,7 @@ async function renderAnalyticsMoneyHub(year, month, branch) {
         ${d.fotRows.length?`<div class="ah-table-wrap"><table class="ah-table">
           <thead><tr><th>Тренер</th><th>ПТ</th><th>Деж.</th><th>Группы</th><th>Итого</th></tr></thead>
           <tbody>${d.fotRows.map(r=>`<tr>
-            <td>${r.fio}</td><td>${fmt(r.pt)}</td><td>${fmt(r.duty)}</td>
+            <td>${esc(r.fio)}</td><td>${fmt(r.pt)}</td><td>${fmt(r.duty)}</td>
             <td>${r.group?fmt(r.group):'—'}</td><td class="ah-total">${fmt(r.total)}</td></tr>`).join('')}</tbody>
           <tfoot><tr><td colspan="4"><b>Итого ФОТ</b></td><td class="ah-total"><b>${fmt(d.fot)}</b></td></tr></tfoot>
         </table></div>`:'<p class="hint">Нет данных за этот период</p>'}
@@ -430,7 +430,7 @@ async function renderAnalyticsMoneyHub(year, month, branch) {
       ${d.topTrainers.length?`<div class="ah-section"><div class="ah-h">Топ-3 тренера по выручке</div>
         <div class="ah-top3">${d.topTrainers.map((t,i)=>`<div class="ah-top-card">
           <div class="ah-top-rank">${['🥇','🥈','🥉'][i]}</div>
-          <div class="ah-top-fio">${t.fio}</div>
+          <div class="ah-top-fio">${esc(t.fio)}</div>
           <div class="ah-top-sum">${fmt(t.sum)}</div></div>`).join('')}</div>
       </div>`:''}`;
   } catch(e){ console.error(e); document.getElementById('ah-body').innerHTML='<p class="hint">⚠️ Ошибка загрузки</p>'; }
@@ -443,7 +443,7 @@ async function renderAnalyticsClientsHub(year, month, branch) {
   setupBack(()=>renderAdminAnalytics(year,month,branch));
   $('#tab-content').innerHTML=`<div class="tab-pad">
     <div class="ah-head">${backBtn()}<h3>👥 Клиентская база</h3></div>
-    <p class="hint">${fmtMY(year,month)}${branch?' · '+branch:' · все филиалы'}</p>
+    <p class="hint">${fmtMY(year,month)}${esc(branch?' · '+branch:' · все филиалы')}</p>
     <div id="ah-body"><div class="center-screen"><div class="spinner"></div></div></div>
   </div>`;
   try {
@@ -462,16 +462,16 @@ async function renderAnalyticsClientsHub(year, month, branch) {
       </div>
 
       <div class="ah-section"><div class="ah-h">Новые клиенты</div>
-        ${list(d.newClients, c=>`<div class="ah-li"><div><b>${c.fio}</b><div class="hint">${c.trainer} · ${c.pkg}</div></div><span class="hint">${_d(c.date)}</span></div>`, 'Нет новых')}
+        ${list(d.newClients, c=>`<div class="ah-li"><div><b>${esc(c.fio)}</b><div class="hint">${esc(c.trainer)} · ${c.pkg}</div></div><span class="hint">${_d(c.date)}</span></div>`, 'Нет новых')}
       </div>
       <div class="ah-section"><div class="ah-h">Отток</div>
-        ${list(d.churn, c=>`<div class="ah-li"><div><b>${c.fio}</b><div class="hint">${c.trainer}${c.note?' · '+c.note:''}</div></div><span class="hint">${_d(c.date)}</span></div>`, 'Нет оттока')}
+        ${list(d.churn, c=>`<div class="ah-li"><div><b>${esc(c.fio)}</b><div class="hint">${esc(c.trainer)}${esc(c.note?' · '+c.note:'')}</div></div><span class="hint">${_d(c.date)}</span></div>`, 'Нет оттока')}
       </div>
       <div class="ah-section"><div class="ah-h">Зона риска (≤3 занятий)</div>
-        ${list(d.risk, c=>`<div class="ah-li"><div><b>${c.fio}</b><div class="hint">${c.trainer}${c.end?' · до '+_d(c.end):''}</div></div><span class="ah-badge r-yellow">${c.balance} ПТ</span></div>`, 'Никого в зоне риска')}
+        ${list(d.risk, c=>`<div class="ah-li"><div><b>${esc(c.fio)}</b><div class="hint">${esc(c.trainer)}${c.end?' · до '+_d(c.end):''}</div></div><span class="ah-badge r-yellow">${c.balance} ПТ</span></div>`, 'Никого в зоне риска')}
       </div>
       <div class="ah-section"><div class="ah-h">На заморозке</div>
-        ${list(d.frozen, c=>`<div class="ah-li"><div><b>${c.fio}</b><div class="hint">${c.trainer}</div></div><span class="hint">${_d(c.start)} → ${_d(c.end)}</span></div>`, 'Нет на заморозке')}
+        ${list(d.frozen, c=>`<div class="ah-li"><div><b>${esc(c.fio)}</b><div class="hint">${esc(c.trainer)}</div></div><span class="hint">${_d(c.start)} → ${_d(c.end)}</span></div>`, 'Нет на заморозке')}
       </div>`;
   } catch(e){ console.error(e); document.getElementById('ah-body').innerHTML='<p class="hint">⚠️ Ошибка загрузки</p>'; }
 }
@@ -483,7 +483,7 @@ async function renderAnalyticsLoadHub(year, month, branch) {
   setupBack(()=>renderAdminAnalytics(year,month,branch));
   $('#tab-content').innerHTML=`<div class="tab-pad">
     <div class="ah-head">${backBtn()}<h3>🗓 Загрузка</h3></div>
-    <p class="hint">${fmtMY(year,month)}${branch?' · '+branch:' · все филиалы'}</p>
+    <p class="hint">${fmtMY(year,month)}${esc(branch?' · '+branch:' · все филиалы')}</p>
     <div id="ah-body"><div class="center-screen"><div class="spinner"></div></div></div>
   </div>`;
   try {
@@ -514,7 +514,7 @@ async function renderAnalyticsLoadHub(year, month, branch) {
       <div class="ah-section"><div class="ah-h">По тренерам</div>
         ${d.trainers.length?`<div class="ah-table-wrap"><table class="ah-table">
           <thead><tr><th>Тренер</th><th>ПТ</th><th>Доля</th></tr></thead>
-          <tbody>${d.trainers.map(t=>`<tr><td>${t.fio}</td><td>${t.count}</td>
+          <tbody>${d.trainers.map(t=>`<tr><td>${esc(t.fio)}</td><td>${t.count}</td>
             <td>${d.total?Math.round(t.count/d.total*100):0}%</td></tr>`).join('')}</tbody>
         </table></div>`:'<p class="hint">Нет данных</p>'}
       </div>
@@ -537,7 +537,7 @@ async function renderAnalyticsControlHub(year, month, branch) {
   setupBack(()=>renderAdminAnalytics(year,month,branch));
   $('#tab-content').innerHTML=`<div class="tab-pad">
     <div class="ah-head">${backBtn()}<h3>🔍 Контроль</h3></div>
-    <p class="hint">${fmtMY(year,month)}${branch?' · '+branch:' · все филиалы'}</p>
+    <p class="hint">${fmtMY(year,month)}${esc(branch?' · '+branch:' · все филиалы')}</p>
     <div id="ah-body"><div class="center-screen"><div class="spinner"></div></div></div>
   </div>`;
   try {
@@ -550,20 +550,20 @@ async function renderAnalyticsControlHub(year, month, branch) {
         ${d.byTrainer.length?`<div class="ah-table-wrap"><table class="ah-table">
           <thead><tr><th>Тренер</th><th>ПТ</th><th>Консп.</th><th>%</th><th>Проср.</th></tr></thead>
           <tbody>${d.byTrainer.map(t=>{const p=t.pt?Math.round(t.notes/t.pt*100):0;return `<tr class="${rowCls(t)}">
-            <td>${t.fio}</td><td>${t.pt}</td><td>${t.notes}</td><td>${p}%</td>
+            <td>${esc(t.fio)}</td><td>${t.pt}</td><td>${esc(t.notes)}</td><td>${p}%</td>
             <td>${t.overdue?`<span class="r-red">${t.overdue}</span>`:'—'}</td></tr>`;}).join('')}</tbody>
         </table></div>`:'<p class="hint">Нет данных</p>'}
       </div>
 
       <div class="ah-section"><div class="ah-h">Поздние внесения ПТ (${d.lateCount})</div>
         ${d.late.length?d.late.map(r=>`<div class="ah-li">
-          <div><b>${r.profiles?.fio||'—'}</b><div class="hint">${r.clients?.fio||'—'} · ПТ ${_d(r.workout_date)}</div></div>
+          <div><b>${esc(r.profiles?.fio||'—')}</b><div class="hint">${esc(r.clients?.fio||'—')} · ПТ ${_d(r.workout_date)}</div></div>
           <div style="text-align:right"><div class="hint">${_d(r.created_at)}</div>${_statusBadge(r.status)}</div></div>`).join(''):'<p class="hint">Нет</p>'}
       </div>
 
       <div class="ah-section"><div class="ah-h">Запросы на удаление ПТ (${d.delsCount})</div>
         ${d.dels.length?d.dels.map(r=>`<div class="ah-li">
-          <div><b>${r.profiles?.fio||'—'}</b><div class="hint">${r.client_name||'—'} · ПТ ${_d(r.workout_date)}</div></div>
+          <div><b>${esc(r.profiles?.fio||'—')}</b><div class="hint">${esc(r.client_name||'—')} · ПТ ${_d(r.workout_date)}</div></div>
           <div style="text-align:right"><div class="hint">${_d(r.created_at)}</div>${_statusBadge(r.status)}</div></div>`).join(''):'<p class="hint">Нет</p>'}
       </div>
 

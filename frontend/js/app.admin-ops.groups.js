@@ -104,17 +104,17 @@ async function renderGroupsStructure() {
             const roleBadge = t.role
               ? `<span style="font-size:10px;background:${roleColor}22;color:${roleColor};padding:1px 6px;border-radius:6px;font-weight:600;margin-left:4px">${t.role}</span>`
               : '';
-            return `<div style="font-size:13px;padding:2px 0;display:flex;align-items:center">👤 ${t.fio}${roleBadge}</div>`;
+            return `<div style="font-size:13px;padding:2px 0;display:flex;align-items:center">👤 ${esc(t.fio)}${roleBadge}</div>`;
           }).join('');
           return `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
-            <div style="font-weight:600;font-size:14px">${g.name}</div>
+            <div style="font-weight:600;font-size:14px">${esc(g.name)}</div>
             ${timesHtml}
             <div>${trainersHtml}</div>
           </div>`;
         }).join('');
       return `<div style="margin-bottom:24px">
         <div style="font-weight:700;font-size:15px;padding:8px 12px;background:rgba(124,58,237,.1);border-radius:10px;margin-bottom:4px">
-          📍 ${branchName}
+          📍 ${esc(branchName)}
         </div>
         ${groupsHtml}
       </div>`;
@@ -191,7 +191,7 @@ async function loadGroupsList(monthStr) {
 
         return `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-top:1px solid var(--border)">
           <div style="flex:1;min-width:0">
-            <div style="font-size:14px;font-weight:600">${gt.name}</div>
+            <div style="font-size:14px;font-weight:600">${esc(gt.name)}</div>
             <div style="margin-top:2px">${schedLabel}</div>
           </div>
           <div style="display:flex;gap:6px;margin-left:8px">
@@ -204,7 +204,7 @@ async function loadGroupsList(monthStr) {
       }).join('');
 
       return `<div class="staff-card" style="flex-direction:column;align-items:flex-start;gap:0;padding-bottom:4px">
-        <div style="font-weight:700;font-size:15px;margin-bottom:4px">📍 ${branch}</div>
+        <div style="font-weight:700;font-size:15px;margin-bottom:4px">📍 ${esc(branch)}</div>
         ${rowsHtml}
       </div>`;
     }).join('');
@@ -274,13 +274,13 @@ function renderGroupPersonnelModal(groupTypeId, groupNameRaw, branch, groupType,
     return `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
       <div style="display:flex;justify-content:space-between;align-items:flex-start">
         <div style="flex:1">
-          <div style="font-size:14px;font-weight:500">${t.fio}${roleBadge}</div>
+          <div style="font-size:14px;font-weight:500">${esc(t.fio)}${roleBadge}</div>
           ${schedLabel?`<div style="margin-top:2px">${schedLabel}</div>`:''}
           ${rateHtml}
         </div>
         <div style="display:flex;gap:5px;margin-left:8px;flex-shrink:0">
           <button class="btn btn-sm" style="font-size:11px;background:var(--card);border:1px solid var(--border)"
-            onclick="document.querySelector('.modal-overlay').remove();renderGroupScheduleModal('${t.id}','${encodeURIComponent(JSON.stringify(t.days))}','${t.time}')">🗓️</button>
+            onclick="document.querySelector('.modal-overlay').remove();renderGroupScheduleModal('${t.id}','${encArg(JSON.stringify(t.days))}','${t.time}')">🗓️</button>
           <button class="btn btn-sm" style="background:rgba(239,68,68,.15);color:#ef4444;font-size:11px"
             onclick="document.querySelector('.modal-overlay').remove();doUnassignGroup(${t.id})">Откр.</button>
         </div>
@@ -294,7 +294,7 @@ function renderGroupPersonnelModal(groupTypeId, groupNameRaw, branch, groupType,
       <div style="font-size:13px;font-weight:600;margin-bottom:8px;color:#f59e0b">👑 Руководитель группы</div>
       <div style="font-size:12px;color:var(--hint);margin-bottom:8px">% от суммы оплат за месяц. Видно координатору и старшим тренерам.</div>
       <div class="form-group" style="margin-bottom:8px"><label style="font-size:12px">Имя</label>
-        <input id="leader-name-inp" type="text" placeholder="Иванов Иван" value="${withLeader?.leaderName||''}"
+        <input id="leader-name-inp" type="text" placeholder="Иванов Иван" value="${esc(withLeader?.leaderName||'')}"
           style="font-size:13px"></div>
       <div class="form-group" style="margin-bottom:8px"><label style="font-size:12px">Процент (%)</label>
         <input id="leader-pct-inp" type="number" min="0" max="100" value="${withLeader?.leaderPct||0}"
@@ -304,13 +304,13 @@ function renderGroupPersonnelModal(groupTypeId, groupNameRaw, branch, groupType,
     </div>` : '';
 
   m.innerHTML=`<div class="modal">
-    <div class="modal-header"><h3>Персонал — ${groupName}</h3>
+    <div class="modal-header"><h3>Персонал — ${esc(groupName)}</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
-    <p class="hint" style="margin-bottom:8px">${branch}</p>
+    <p class="hint" style="margin-bottom:8px">${esc(branch)}</p>
     ${trainersHtml}
     ${leaderHtml}
     <button class="btn btn-primary btn-full" style="margin-top:14px"
-      onclick="this.closest('.modal-overlay').remove();renderAddSecondTrainerModal(${groupTypeId},'${encodeURIComponent(groupName)}','${branch}','${groupType}','${trainers[0]?.id||''}')">+ 2й тренер</button>
+      onclick="this.closest('.modal-overlay').remove();renderAddSecondTrainerModal(${groupTypeId},'${encArg(groupName)}','${jsq(branch)}','${groupType}','${trainers[0]?.id||''}')">+ 2й тренер</button>
   </div>`;
   document.body.appendChild(m);
 }
@@ -406,9 +406,9 @@ async function renderAddSecondTrainerModal(groupTypeId, groupNameEnc, branch, gr
     const allT = [...trainers, ...seniors].filter(t=>!t.is_archived);
     const m = el('div','modal-overlay');
     m.innerHTML=`<div class="modal">
-      <div class="modal-header"><h3>Второй тренер — ${groupName}</h3>
+      <div class="modal-header"><h3>Второй тренер — ${esc(groupName)}</h3>
         <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
-      <p class="hint" style="margin-bottom:12px">${branch}</p>
+      <p class="hint" style="margin-bottom:12px">${esc(branch)}</p>
       <div class="form-group"><label>Тренер</label>
         <select id="st2-trainer">
           <option value="">— выберите —</option>
@@ -427,7 +427,7 @@ async function renderAddSecondTrainerModal(groupTypeId, groupNameEnc, branch, gr
       <div class="form-group"><label>Ставка за занятие (сум)</label>
         <input id="st2-rate" type="number" value="75000" min="0" placeholder="75000"></div>`}
       <input type="hidden" id="st2-instance-id" value="${existingInstanceId||''}">
-      <button class="btn btn-primary btn-full" onclick="doAddSecondTrainer(${groupTypeId},'${branch}','${groupType}')">Добавить</button>
+      <button class="btn btn-primary btn-full" onclick="doAddSecondTrainer(${groupTypeId},'${jsq(branch)}','${groupType}')">Добавить</button>
     </div>`;
     document.body.appendChild(m);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
@@ -467,11 +467,11 @@ async function renderAssignGroupForm() {
         </select></div>
       <div class="form-group"><label>Тип группы</label>
         <select id="ag-type" onchange="onAgTypeChange(this)">
-          ${gts.map(g=>`<option value="${g.id}" data-type="${g.type}" data-name="${g.name}">${g.name}</option>`).join('')}
+          ${gts.map(g=>`<option value="${g.id}" data-type="${g.type}" data-name="${esc(g.name)}">${esc(g.name)}</option>`).join('')}
         </select></div>
       <div class="form-group"><label>Филиал</label>
         <select id="ag-branch">
-          ${branches.map(b=>`<option>${b.name}</option>`).join('')}
+          ${branches.map(b=>`<option>${esc(b.name)}</option>`).join('')}
         </select></div>
       <div id="ag-date-wrap" class="form-group"><label>Начало</label>
         <input type="date" id="ag-start" value="${todayStr()}"></div>
@@ -668,7 +668,7 @@ async function renderGroupMonthReport(groupId, monthStr, view='full') {
         <div style="font-weight:600;margin-bottom:8px">⚠️ Возможные дубли имён (${dupFlags.length})</div>
         ${dupFlags.map(f=>`<div style="padding:8px 0;border-top:1px solid rgba(245,158,11,.2)">
           <div style="font-size:13px;margin-bottom:6px">
-            <b>${f.c1?.name||'?'}</b> и <b>${f.c2?.name||'?'}</b> — один ребёнок?
+            <b>${esc(f.c1?.name||'?')}</b> и <b>${esc(f.c2?.name||'?')}</b> — один ребёнок?
           </div>
           <div style="display:flex;gap:8px">
             <button class="btn btn-sm" style="background:rgba(239,68,68,.15);color:#ef4444"
@@ -688,7 +688,7 @@ async function renderGroupMonthReport(groupId, monthStr, view='full') {
         return `<div class="warn-banner" style="background:rgba(239,68,68,.08);border-color:rgba(239,68,68,.35);margin-bottom:16px">
           <div style="font-weight:600;margin-bottom:6px">⚠️ Без оплаты, но ходят больше 2 занятий (${debtKids.length})</div>
           ${debtKids.map(c=>`<div style="font-size:13px;padding:4px 0;border-top:1px solid rgba(239,68,68,.15)">
-            ${c.name}${c.age?`, ${c.age}л`:''} — <b>${attByClient[c.id]||0} занятий</b>
+            ${esc(c.name)}${c.age?`, ${c.age}л`:''} — <b>${attByClient[c.id]||0} занятий</b>
           </div>`).join('')}
         </div>`;
       })()}
@@ -724,13 +724,13 @@ async function renderGroupMonthReport(groupId, monthStr, view='full') {
                 return `<tr class="${st!=='debt'?'gmr-row-paid':'gmr-row-debtor'}"${debtAlert?' style="background:rgba(239,68,68,.06)"':''}>
                   <td style="font-weight:500">
                     ${debtAlert?'<span title="Ходит без оплаты" style="color:#ef4444;margin-right:4px">⚠️</span>':''}
-                    ${c.name}${c.age?`, ${c.age}л`:''}
+                    ${esc(c.name)}${c.age?`, ${c.age}л`:''}
                   </td>
                   <td><span style="font-size:11px;color:${stColor}">${stLabel}</span></td>
                   <td style="color:${paidThisMonth?'#10b981':'#ef4444'}">${paidThisMonth?fmt(pay?.amount||0)+' ✓':'—'}</td>
                   <td style="font-size:11px;color:var(--hint)">${pay?.sub_start?fmtDate(pay.sub_start)+(pay.sub_end?' – '+fmtDate(pay.sub_end):''):'—'}</td>
                   <td style="color:${debtAlert?'#ef4444':''};font-weight:${debtAlert?'600':''}">${att}/${totalSessions}</td>
-                  <td style="font-size:11px;color:var(--hint);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${note?.note||'—'}</td>
+                  <td style="font-size:11px;color:var(--hint);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(note?.note||'—')}</td>
                 </tr>`;
               };
               // Подгруппы: если их больше одной — строки группируем с подзаголовками
@@ -755,8 +755,8 @@ async function renderGroupMonthReport(groupId, monthStr, view='full') {
         ${notes.map(n=>{
           const clientName = (clients.find(c=>c.id===n.group_client_id)?.name)||'—';
           return `<div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:10px">
-            <div style="font-size:12px;color:var(--hint);margin-bottom:4px">${clientName}</div>
-            <div style="font-size:13px">${n.note||'—'}</div>
+            <div style="font-size:12px;color:var(--hint);margin-bottom:4px">${esc(clientName)}</div>
+            <div style="font-size:13px">${esc(n.note||'—')}</div>
           </div>`;
         }).join('')}
       </div>` : ''}
@@ -799,7 +799,7 @@ async function renderGroupMonthReport(groupId, monthStr, view='full') {
           ${pendingSubs.length ? `<div class="warn-banner" style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.4);border-radius:10px;padding:12px;margin-bottom:12px">
             <div style="font-weight:600;margin-bottom:6px">⏳ Неутверждённые замены (${pendingSubs.length}) — в расчёте не участвуют</div>
             ${pendingSubs.map(s=>`<div style="font-size:12px;padding:4px 0;border-top:1px solid rgba(245,158,11,.2)">
-              ${s.substitute?.fio||'?'} вместо ${s.original?.fio||'?'} · ${fmtDate(s.session_date)}
+              ${esc(s.substitute?.fio||'?')} вместо ${esc(s.original?.fio||'?')} · ${fmtDate(s.session_date)}
               <span style="font-size:11px;color:#f59e0b;font-weight:600;margin-left:4px">⏳ не утверждена</span>
             </div>`).join('')}
             <div style="font-size:11px;color:var(--hint);margin-top:6px">Утвердите замены до расчёта ЗП — после утверждения они вычтутся у заменённого и уйдут заменяющему отдельной строкой.</div>
@@ -820,7 +820,7 @@ async function renderGroupMonthReport(groupId, monthStr, view='full') {
               <span style="font-weight:600;font-size:14px">${fmt(pool)} сум</span>
             </div>
             ${leaderName ? `<div style="display:flex;justify-content:space-between;margin-bottom:4px">
-              <span style="font-size:12px;color:var(--hint)">Руководитель${allFlat ? ` (${leaderPct}% пула + остаток)` : ` (${leaderPct}% пула)`}: ${leaderName}</span>
+              <span style="font-size:12px;color:var(--hint)">Руководитель${allFlat ? ` (${leaderPct}% пула + остаток)` : ` (${leaderPct}% пула)`}: ${esc(leaderName)}</span>
               <span style="font-size:13px;color:#f59e0b;font-weight:600">−${fmt(leaderFee)} сум</span>
             </div>` : ''}
             <div style="display:flex;justify-content:space-between;padding-top:8px;border-top:1px solid rgba(124,58,237,.2)">
@@ -833,7 +833,7 @@ async function renderGroupMonthReport(groupId, monthStr, view='full') {
           <div class="staff-card" style="flex-direction:column;gap:8px;margin-bottom:10px">
             <div style="display:flex;justify-content:space-between;align-items:center">
               <div>
-                <div class="staff-fio">${r.fio}</div>
+                <div class="staff-fio">${esc(r.fio)}</div>
                 <div class="staff-meta">${r.role} · ${r.rateLabel}</div>
               </div>
               <span style="font-size:13px;color:#10b981;font-weight:700">${fmt(r.final)} сум · авто</span>
@@ -848,7 +848,7 @@ async function renderGroupMonthReport(groupId, monthStr, view='full') {
                 <span style="color:#10b981;font-weight:600">+${fmt(r.subsICoveredCost)} сум</span>
               </div>` : ''}
               ${r.mySubs.length ? `<div style="margin-top:6px;font-size:12px;color:#ef4444">
-                Заменили (${r.mySubs.length} зан): ${r.mySubs.map(s=>`${s.substitute?.fio||'?'} ${fmtDate(s.session_date)} ${canSee?`<button onclick="editSubRate('${s.id}',${s.rate||75000},'${groupId}','${monthStr}')" style="background:none;border:none;cursor:pointer;color:var(--hint);font-size:11px">✏️ ${fmt(s.rate||75000)}</button>`:fmt(s.rate||75000)+' сум'}`).join(', ')}
+                Заменили (${r.mySubs.length} зан): ${r.mySubs.map(s=>`${esc(s.substitute?.fio||'?')} ${fmtDate(s.session_date)} ${canSee?`<button onclick="editSubRate('${s.id}',${s.rate||75000},'${groupId}','${monthStr}')" style="background:none;border:none;cursor:pointer;color:var(--hint);font-size:11px">✏️ ${fmt(s.rate||75000)}</button>`:fmt(s.rate||75000)+' сум'}`).join(', ')}
               </div>` : ''}
               <div style="display:flex;gap:8px;margin-top:8px">
                 <div style="flex:1">
@@ -878,8 +878,8 @@ async function renderGroupMonthReport(groupId, monthStr, view='full') {
             <div style="font-weight:600;margin-bottom:8px">Замены (внешние тренеры)</div>
             ${externalSubs.map(s=>`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
               <div>
-                <div style="font-size:13px;font-weight:500">${s.substitute?.fio||'?'}</div>
-                <div style="font-size:11px;color:var(--hint)">${fmtDate(s.session_date)} · вместо ${s.original?.fio||'?'}</div>
+                <div style="font-size:13px;font-weight:500">${esc(s.substitute?.fio||'?')}</div>
+                <div style="font-size:11px;color:var(--hint)">${fmtDate(s.session_date)} · вместо ${esc(s.original?.fio||'?')}</div>
               </div>
               <div style="display:flex;align-items:center;gap:6px">
                 <span style="font-weight:600;color:var(--accent)">${fmt(s.rate||75000)} сум</span>
@@ -891,13 +891,13 @@ async function renderGroupMonthReport(groupId, monthStr, view='full') {
           ${leaderName ? `<div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;margin-top:8px">
             <div style="display:flex;justify-content:space-between;align-items:center">
               <div>
-                <div style="font-weight:600;font-size:14px">Руководитель: ${leaderName}</div>
+                <div style="font-weight:600;font-size:14px">Руководитель: ${esc(leaderName)}</div>
                 <div style="font-size:12px;color:var(--hint)">${isArtSwim ? (allFlat ? `${leaderPct}% пула + остаток пула` : `${leaderPct}% пула ${fmt(pool)} сум`) : leaderPct+'% от вала '+fmt(totalRevenue)+' сум'}</div>
               </div>
               <div style="display:flex;align-items:center;gap:8px">
                 <span style="font-size:18px;font-weight:700;color:var(--accent)">${fmt(leaderFee)} сум</span>
                 ${isAdmin ? `<button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
-                  onclick="renderLeaderFeeModal('${groupId}','${encodeURIComponent(leaderName)}',${leaderPct})">✏️</button>` : ''}
+                  onclick="renderLeaderFeeModal('${groupId}','${encArg(leaderName)}',${leaderPct})">✏️</button>` : ''}
               </div>
             </div>
           </div>` : `
@@ -921,7 +921,7 @@ function renderLeaderFeeModal(groupId, nameEnc, pct) {
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <p class="hint" style="margin-bottom:12px">Имя и % отчислений от суммы оплат за месяц. Видно только координатору и старшим.</p>
     <div class="form-group"><label>Имя руководителя</label>
-      <input id="lf-name" type="text" placeholder="Иванов Иван" value="${name}"></div>
+      <input id="lf-name" type="text" placeholder="Иванов Иван" value="${esc(name)}"></div>
     <div class="form-group"><label>Процент (%)</label>
       <input id="lf-pct" type="number" min="0" max="100" value="${pct||10}"></div>
     <button class="btn btn-primary btn-full" onclick="doSaveLeaderFee('${groupId}')">Сохранить</button>
@@ -1079,8 +1079,8 @@ async function renderSubstitutionsApproval() {
           const sugg = (s.trainer_groups?.group_types?.billing_model==='headcount' && s.headcount) ? getAdultGroupRate(s.headcount) : '';
           return `<div class="staff-card" style="flex-direction:column;gap:8px">
           <div>
-            <div class="staff-fio">${s.substitute?.fio||'?'} <span class="hint" style="font-weight:400">вместо ${s.original?.fio||'?'}</span></div>
-            <div class="staff-meta">${s.trainer_groups?.group_types?.name||'Группа'} · ${fmtDate(s.session_date)}${s.headcount?` · 👥 ${s.headcount} чел.`:''}</div>
+            <div class="staff-fio">${esc(s.substitute?.fio||'?')} <span class="hint" style="font-weight:400">вместо ${esc(s.original?.fio||'?')}</span></div>
+            <div class="staff-meta">${esc(s.trainer_groups?.group_types?.name||'Группа')} · ${fmtDate(s.session_date)}${s.headcount?` · 👥 ${s.headcount} чел.`:''}</div>
           </div>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             <input id="gsub-rate-${s.id}" type="number" value="${s.rate||sugg||''}" placeholder="Ставка (сум)"
@@ -1098,8 +1098,8 @@ async function renderSubstitutionsApproval() {
       ${!ptSubs.length?'<p class="hint">Нет ПТ-замен за период</p>':
         ptSubs.map(s=>`<div class="staff-card" style="flex-direction:column;gap:8px">
           <div>
-            <div class="staff-fio">${s.profiles?.fio||'?'} <span class="hint" style="font-weight:400">вместо ${s.sub_profile?.fio||'?'}</span></div>
-            <div class="staff-meta">${s.clients?.fio||'?'} · ${fmtDT(s.workout_date)}</div>
+            <div class="staff-fio">${esc(s.profiles?.fio||'?')} <span class="hint" style="font-weight:400">вместо ${esc(s.sub_profile?.fio||'?')}</span></div>
+            <div class="staff-meta">${esc(s.clients?.fio||'?')} · ${fmtDT(s.workout_date)}</div>
           </div>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             <input id="ptsub-rate-${s.id}" type="number" value="${s.substitute_rate||''}" placeholder="Ставка (сум)"

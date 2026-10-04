@@ -6,7 +6,7 @@ async function renderSeniorApp(initialTab='home') {
   setupBack(null);
   setScreen(`<div class="app-header">
     <div><div class="app-title">⭐ AquaDesk</div>
-      <div class="app-sub">${STATE.profile.fio}</div></div>
+      <div class="app-sub">${esc(STATE.profile.fio)}</div></div>
     <div style="display:flex;gap:6px;align-items:center">
       <button class="btn-icon" onclick="openSchedule()">📅</button>
       <button class="btn-icon" onclick="renderHelpModal()">?</button>
@@ -52,13 +52,13 @@ async function renderSeniorAnalytics() {
       + reqs.map(r=>`<div class="staff-card" style="flex-direction:column;gap:8px">
       <div style="display:flex;justify-content:space-between;align-items:flex-start">
         <div>
-          <div class="staff-fio">${r.clients?.fio||'?'} · кат.${r.category}</div>
-          <div class="staff-meta">${r.profiles?.fio||'?'} · ${r.branch}</div>
+          <div class="staff-fio">${esc(r.clients?.fio||'?')} · кат.${r.category}</div>
+          <div class="staff-meta">${esc(r.profiles?.fio||'?')} · ${esc(r.branch)}</div>
           <div class="staff-meta">📅 ${fmtDT(r.workout_date)}</div>
         </div>
       </div>
       <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:13px">
-        💬 ${r.reason}
+        💬 ${esc(r.reason)}
       </div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-sm btn-primary" style="flex:1" onclick="doApproveLateRequestSenior(${r.id})">✓ Одобрить</button>

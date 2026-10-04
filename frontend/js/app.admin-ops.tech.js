@@ -104,7 +104,7 @@ function techSwitchCeo(s){ _techSection=s; renderCeoTech(); }
 async function renderManagerTech() {
   const branch = (typeof _mgrBranch==='function') ? _mgrBranch() : (STATE.profile.branches?.[0]||'');
   $('#tab-content').innerHTML=`<div class="tab-pad">
-    <div class="section-header"><h3>⚙️ Техчасть</h3><span class="hint">${branch||'—'} · 👁 Просмотр</span></div>
+    <div class="section-header"><h3>⚙️ Техчасть</h3><span class="hint">${esc(branch||'—')} · 👁 Просмотр</span></div>
     ${techTabBar('techSwitchMgr')}
     <div id="tech-body"><div class="center-screen"><div class="spinner"></div></div></div>
   </div>`;
@@ -131,13 +131,13 @@ async function techRenderBills(body, branch, editable) {
         <div class="s-lbl">оплачено</div></div>
     </div>
     ${editable?`<button class="btn btn-primary btn-full" style="margin-bottom:14px"
-      onclick="renderAddBillModal('${branch}')">+ Добавить счёт</button>`:''}
+      onclick="renderAddBillModal('${jsq(branch)}')">+ Добавить счёт</button>`:''}
     ${!bills.length?'<div class="tech-empty"><span class="ic">💳</span>Счетов нет</div>':
       bills.map(b=>`<div class="tech-card ${b.paid?'paid':'unpaid'}">
         <div class="tc-row">
           <div>
-            <div class="tc-title">${b.category}${b.description?` — ${b.description}`:''}</div>
-            <div class="tc-meta">${!branch?b.branch+' · ':''}${fmtDate(b.bill_date)}</div>
+            <div class="tc-title">${b.category}${b.description?` — ${esc(b.description)}`:''}</div>
+            <div class="tc-meta">${esc(!branch?b.branch+' · ':'')}${fmtDate(b.bill_date)}</div>
           </div>
           <div class="tc-amount ${b.paid?'paid':'unpaid'}">${fmt(Number(b.amount))}</div>
         </div>
@@ -206,13 +206,13 @@ async function techRenderIssues(body, branch, editable) {
   const issues = await DB.getTechIssues(branch);   // только незакрытые, сорт. по приоритету
   body.innerHTML=`
     ${editable?`<button class="btn btn-primary btn-full" style="margin-bottom:14px"
-      onclick="renderAddIssueModal('${branch}')">+ Сообщить о поломке</button>`:''}
+      onclick="renderAddIssueModal('${jsq(branch)}')">+ Сообщить о поломке</button>`:''}
     ${!issues.length?'<div class="tech-empty"><span class="ic">✅</span>Всё исправно</div>':
       issues.map(iss=>`<div class="tech-card">
         <div class="tc-row">
           <div>
-            <div class="tc-title">${iss.description}</div>
-            <div class="tc-meta">${!branch?iss.branch+' · ':''}${techAgeBadge(iss.created_at)}</div>
+            <div class="tc-title">${esc(iss.description)}</div>
+            <div class="tc-meta">${esc(!branch?iss.branch+' · ':'')}${techAgeBadge(iss.created_at)}</div>
           </div>
           <span class="tc-prio ${iss.priority}">${PRIORITY_LBL[iss.priority]||iss.priority}</span>
         </div>
@@ -272,13 +272,13 @@ async function techRenderChlorine(body, branch, editable) {
       <div class="summary-card"><div class="s-val" style="font-size:16px">${fmt(Math.round(totalSum))}</div><div class="s-lbl">потрачено</div></div>
     </div>
     ${editable?`<button class="btn btn-primary btn-full" style="margin-bottom:14px"
-      onclick="renderAddChlorineModal('${branch}')">+ Добавить закуп</button>`:''}
+      onclick="renderAddChlorineModal('${jsq(branch)}')">+ Добавить закуп</button>`:''}
     ${!list.length?'<div class="tech-empty"><span class="ic">🧪</span>Закупов нет</div>':
       list.map(o=>`<div class="tech-card">
         <div class="tc-row">
           <div>
             <div class="tc-title">${o.quantity_kg} кг</div>
-            <div class="tc-meta">${fmtDate(o.order_date)}${!branch?' · '+o.branch:''}${o.supplier?' · '+o.supplier:''}${o.note?' · '+o.note:''}</div>
+            <div class="tc-meta">${fmtDate(o.order_date)}${esc(!branch?' · '+o.branch:'')}${esc(o.supplier?' · '+o.supplier:'')}${esc(o.note?' · '+o.note:'')}</div>
           </div>
           <div class="tc-amount">${fmt(Number(o.price_total))}</div>
         </div>

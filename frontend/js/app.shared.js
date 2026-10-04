@@ -93,14 +93,14 @@ async function doApproveDelete(reqId, clientId, nameEnc) {
         <div class="modal-header"><h3>Удаление клиента</h3>
           <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
         <div class="warn-banner" style="margin-bottom:16px">
-          ⚠️ У клиента <b>${fio}</b> есть история тренировок и записи.<br>
+          ⚠️ У клиента <b>${esc(fio)}</b> есть история тренировок и записи.<br>
           Полное удаление уберёт все данные безвозвратно и <b>уменьшит ЗП тренера</b> за те периоды.
         </div>
         <button class="btn btn-full btn-primary" style="margin-bottom:8px"
-          onclick="doArchiveFromDelete('${reqId}','${clientId}','${encodeURIComponent(fio)}')">
+          onclick="doArchiveFromDelete('${reqId}','${clientId}','${encArg(fio)}')">
           📦 В архив (сохранить историю и ЗП)</button>
         <button class="btn btn-full btn-danger" style="margin-bottom:8px"
-          onclick="doForceDelete('${reqId}','${clientId}','${encodeURIComponent(fio)}')">
+          onclick="doForceDelete('${reqId}','${clientId}','${encArg(fio)}')">
           🗑 Удалить принудительно вместе с историей</button>
         <button class="btn btn-full" style="background:var(--card)"
           onclick="this.closest('.modal-overlay').remove()">Отмена</button>
@@ -172,9 +172,9 @@ async function renderTrainerEditProfile() {
     <div class="modal-header"><h3>Мой профиль</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="form-group"><label>Фамилия Имя</label>
-      <input id="ep-fio" type="text" value="${profile.fio}"></div>
+      <input id="ep-fio" type="text" value="${esc(profile.fio)}"></div>
     <div class="form-group"><label>Телефон</label>
-      <input id="ep-phone" type="tel" placeholder="+998 90 000 00 00" value="${profile.phone||''}"></div>
+      <input id="ep-phone" type="tel" placeholder="+998 90 000 00 00" value="${esc(profile.phone||'')}"></div>
     <div class="form-group"><label>Текущий PIN (только при смене PIN)</label>
       <input id="ep-pin-old" type="password" inputmode="numeric" maxlength="4" placeholder="••••"></div>
     <div class="form-group"><label>Новый PIN (оставьте пустым чтобы не менять)</label>
@@ -342,10 +342,10 @@ async function renderGroupSubstitutionsHistory(groupId) {
       const st = statusMeta[s.status]||statusMeta.pending;
       return `<div class="staff-card" style="flex-direction:column;align-items:stretch;gap:4px">
         <div style="display:flex;justify-content:space-between;align-items:center">
-          <span style="font-size:14px;font-weight:500">${s.substitute?.fio||'?'}</span>
+          <span style="font-size:14px;font-weight:500">${esc(s.substitute?.fio||'?')}</span>
           <span style="font-size:11px;font-weight:600;color:${st.color};background:${st.bg};padding:2px 8px;border-radius:8px">${st.label}</span>
         </div>
-        <div style="font-size:12px;color:var(--hint)">вместо ${s.original?.fio||'?'} · ${fmtDate(s.session_date)}${s.status==='approved'&&s.rate?` · ${fmt(s.rate)} сум`:''}</div>
+        <div style="font-size:12px;color:var(--hint)">вместо ${esc(s.original?.fio||'?')} · ${fmtDate(s.session_date)}${s.status==='approved'&&s.rate?` · ${fmt(s.rate)} сум`:''}</div>
       </div>`;
     }).join('') : '<div class="empty-state">🔄<p>Замен пока не было</p></div>';
     setScreen(`<div class="app-header">
@@ -384,7 +384,7 @@ async function renderGroupSubstitutionModal(groupId) {
       <div class="form-group"><label>Тренер-замена</label>
         <select id="sub-trainer">
           <option value="">— выберите —</option>
-          ${others.map(t=>`<option value="${t.id}">${t.fio}</option>`).join('')}
+          ${others.map(t=>`<option value="${t.id}">${esc(t.fio)}</option>`).join('')}
         </select></div>
       ${isHeadcount?`<div class="form-group"><label>Сколько человек было на занятии</label>
         <input type="number" id="sub-headcount" min="1" inputmode="numeric" placeholder="напр. 5">
@@ -419,8 +419,8 @@ async function renderPendingSubstitutions() {
       ${subs.map(s=>{
         const sugg = (s.trainer_groups?.group_types?.billing_model==='headcount' && s.headcount) ? getAdultGroupRate(s.headcount) : '';
         return `<div style="padding:8px 0;border-top:1px solid rgba(255,255,255,.1)">
-        <div style="font-size:12px">${s.trainer_groups?.group_types?.name||'Группа'} · ${s.session_date}</div>
-        <div style="font-size:12px">Провёл: <b>${s.substitute?.fio||'?'}</b> вместо ${s.original?.fio||'?'}</div>
+        <div style="font-size:12px">${esc(s.trainer_groups?.group_types?.name||'Группа')} · ${s.session_date}</div>
+        <div style="font-size:12px">Провёл: <b>${esc(s.substitute?.fio||'?')}</b> вместо ${esc(s.original?.fio||'?')}</div>
         ${s.headcount?`<div style="font-size:12px;color:#10b981">👥 ${s.headcount} чел.${sugg?` → ставка ${fmt(sugg)} сум`:''}</div>`:''}
         <div style="display:flex;gap:6px;margin-top:6px;align-items:center">
           <input type="number" id="sub-rate-${s.id}" placeholder="Ставка (сум)" value="${sugg||''}"
@@ -488,12 +488,12 @@ async function renderAdultGroupDetail(groupId) {
     const monthTotal = sessions.reduce((s,x)=>s+getAdultGroupRate(x.headcount),0);
     setScreen(`<div class="app-header">
       ${backBtn()}
-      <div class="app-title">${tgInfo?.group_types?.name||'Группа'}</div>
-      <span style="font-size:12px;color:var(--hint)">${branch}</span>
+      <div class="app-title">${esc(tgInfo?.group_types?.name||'Группа')}</div>
+      <span style="font-size:12px;color:var(--hint)">${esc(branch)}</span>
     </div>
     <div class="tab-content"><div class="tab-pad">
       <div class="staff-card" style="flex-direction:column;align-items:stretch;gap:8px;margin-bottom:14px">
-        ${groupHubInfoRow('Филиал', `<span style="font-weight:600;font-size:13px">${branch}</span>`)}
+        ${groupHubInfoRow('Филиал', `<span style="font-weight:600;font-size:13px">${esc(branch)}</span>`)}
         ${groupHubInfoRow('Участников', `<span style="font-weight:600;font-size:13px">${clients.length}</span>`)}
         ${groupHubInfoRow('Занятий в этом месяце', `<span style="font-weight:600;font-size:13px">${sessions.length}${monthTotal?` · ${fmt(monthTotal)} сум`:''}</span>`)}
       </div>
@@ -524,8 +524,8 @@ async function renderAdultGroupMembers(groupId) {
     <div class="tab-content"><div class="tab-pad">
       ${!clients.length?'<div class="empty-state">👤<p>Участников нет</p></div>':
         clients.map(c=>`<div class="staff-card" style="justify-content:space-between">
-          <span>${c.name}</span>
-          <button class="btn btn-sm btn-danger" onclick="archiveAdultClientConfirm('${c.id}','${encodeURIComponent(c.name)}','${groupId}')">✕</button>
+          <span>${esc(c.name)}</span>
+          <button class="btn btn-sm btn-danger" onclick="archiveAdultClientConfirm('${c.id}','${encArg(c.name)}','${groupId}')">✕</button>
         </div>`).join('')}
     </div></div>`);
   } catch(e) { toast('Ошибка','error'); console.error(e); }
@@ -566,7 +566,7 @@ async function renderAdultGroupHistory(groupId, monthStr) {
             <span class="hi-client">${fmtDate(s.session_date)}</span>
             <span class="hi-cat" style="background:rgba(16,185,129,.15);color:#10b981">${fmt(rate)} сум</span>
             <span class="hint">${s.headcount} чел.</span>
-            ${isAdminView && s.profiles?.fio ? `<span class="hint" style="font-size:11px">· ${s.profiles.fio}</span>` : ''}
+            ${isAdminView && s.profiles?.fio ? `<span class="hint" style="font-size:11px">· ${esc(s.profiles.fio)}</span>` : ''}
           </div>
           ${isCurrentMonth?`<div style="display:flex;gap:6px;margin-top:4px">
             <button class="btn btn-sm" style="font-size:11px;background:var(--card);border:1px solid var(--border)"
@@ -622,7 +622,7 @@ async function renderAdultGroupReport(groupId, monthStr) {
       </div>
       ${!rows.length?'<div class="empty-state">💰<p>Нет занятий за этот месяц</p></div>':rows.map(r=>`
         <div class="staff-card" style="justify-content:space-between">
-          <div><div class="staff-fio">${r.fio}</div><div class="staff-meta">${r.count} занятий</div></div>
+          <div><div class="staff-fio">${esc(r.fio)}</div><div class="staff-meta">${r.count} занятий</div></div>
           <span style="font-weight:600;color:#10b981">${fmt(r.sum)} сум</span>
         </div>`).join('')}
     </div></div>`);
@@ -659,7 +659,7 @@ function renderEditGroupClientModal(clientId, nameEnc, age, price, groupId) {
     <div class="modal-header"><h3>Редактировать ребёнка</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="form-group"><label>Имя</label>
-      <input id="egc-name" value="${name}"></div>
+      <input id="egc-name" value="${esc(name)}"></div>
     <div class="form-group"><label>Возраст</label>
       <input id="egc-age" type="number" min="3" max="18" value="${age||''}"></div>
     <div class="form-group"><label>Стоимость (сум/мес)</label>
@@ -696,7 +696,7 @@ async function renderGroupAttendanceEdit(groupId, date) {
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <div id="att-list">
       ${clients.map(c=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)">
-        <span style="font-size:14px">${c.name}</span>
+        <span style="font-size:14px">${esc(c.name)}</span>
         <input type="checkbox" id="att-${c.id}" ${attMap[c.id]?'checked':''} style="width:22px;height:22px">
       </div>`).join('')}
     </div>
@@ -723,7 +723,7 @@ async function renderGroupAttendanceByDate(groupId) {
       <input type="date" id="att-date" value="${todayStr()}" onchange="loadAttendanceForDate('${groupId}',this.value,'${instanceId||''}')"></div>
     <div id="att-list">
       ${clients.map(c=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)">
-        <span>${c.name}</span>
+        <span>${esc(c.name)}</span>
         <input type="checkbox" id="att-${c.id}" style="width:20px;height:20px">
       </div>`).join('')}
     </div>
@@ -854,7 +854,7 @@ function archiveAdultClientConfirm(id, nameEnc, groupId) {
   const name = decodeURIComponent(nameEnc);
   const m = el('div','modal-overlay');
   m.innerHTML=`<div class="modal">
-    <div class="modal-header"><h3>${name}</h3>
+    <div class="modal-header"><h3>${esc(name)}</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <p class="hint" style="margin-bottom:16px">Архив — скрыть из группы. Удалить — навсегда.</p>
     <div style="display:flex;flex-direction:column;gap:8px">
@@ -901,7 +901,7 @@ async function renderAdultGroupHeadcount(groupId) {
       <div style="margin-bottom:12px">
         <label style="font-size:13px;font-weight:600">Кто был:</label>
         ${clients.map(c=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">
-          <span>${c.name}</span>
+          <span>${esc(c.name)}</span>
           <input type="checkbox" id="hc-${c.id}" style="width:20px;height:20px">
         </div>`).join('')}
         ${!clients.length?`<div class="form-group" style="margin-top:8px"><label>Или введите количество вручную</label>
@@ -1005,7 +1005,7 @@ async function renderCoordinatorSchedule() {
             const start = new Date(duty.start_time).toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit'});
             const end   = new Date(duty.end_time).toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit'});
             return `<div style="font-size:12px;padding:2px 0;color:var(--text)">
-              🟢 ${duty.profiles?.fio||'?'} · ${start}–${end} · ${h}ч</div>`;
+              🟢 ${esc(duty.profiles?.fio||'?')} · ${start}–${end} · ${h}ч</div>`;
           }).join(''):`<div style="font-size:11px;color:var(--hint);padding:2px 0">Нет дежурств</div>`}
         </div>`;
       }

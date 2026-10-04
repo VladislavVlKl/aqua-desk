@@ -158,8 +158,8 @@ function renderSlotPill(s) {
   if (s._isEvent) {
     const bg = s.blocks_pool ? 'rgba(239,68,68,.15)' : 'rgba(245,158,11,.15)';
     const color = s.blocks_pool ? 'var(--danger)' : 'var(--warn)';
-    return `<div class="slot-pill" style="background:${bg};color:${color}" title="${s.title}">
-      📌 ${s.title.slice(0,8)}</div>`;
+    return `<div class="slot-pill" style="background:${bg};color:${color}" title="${esc(s.title)}">
+      📌 ${esc(s.title.slice(0,8))}</div>`;
   }
   // Для групп — определяем цвет по роли тренера
   let c = SLOT_COLORS[s.slot_type];
@@ -176,7 +176,7 @@ function renderSlotPill(s) {
     const bBot=s._dutyLast?`border-bottom:2px solid ${c.color};border-radius:0 0 4px 4px;margin-bottom:0;`:'';
     const label=s._dutyFirst?`${s.start_time.slice(0,5)}–${s.end_time.slice(0,5)}`:'│';
     return `<div class="slot-pill slot-duty-block" style="background:${c.bg};color:${c.color};${bTop}${bBot}"
-      onclick="showSlotMenu('${s.id}','${s.slot_type}','${s._date||''}',${!!s._oneTime})">${label}</div>`;
+      onclick="showSlotMenu('${s.id}','${s.slot_type}','${s._date||''}',${!!s._oneTime})">${esc(label)}</div>`;
   }
   const label = s.slot_type==='pt'
     ? (s.clients?.fio?.split(' ')[0]||'ПТ')
@@ -188,7 +188,7 @@ function renderSlotPill(s) {
   const lowTitle = lowBal ? ' title="Остаток ПТ исчерпан — продлите абонемент"' : '';
   return `<div class="slot-pill" style="background:${c.bg};color:${c.color};${oneBorder}${lowStyle}"${lowTitle}
     onclick="showSlotMenu('${s.id}','${s.slot_type}','${s._date||''}',${!!s._oneTime})">
-    ${oneTimeMark}${label}${lowMark}</div>`;
+    ${oneTimeMark}${esc(label)}${lowMark}</div>`;
 }
 
 function showSlotMenu(slotId, type, date, isOneTime) {
@@ -286,13 +286,13 @@ function onSlotTypeChange(sel) {
   if (sel.value==='pt') {
     extra.innerHTML=`<div class="form-group"><label>Клиент</label>
       <select id="slot-client"><option value="">— выберите —</option>
-        ${clients.map(c=>`<option value="${c.id}">${c.fio}</option>`).join('')}
+        ${clients.map(c=>`<option value="${c.id}">${esc(c.fio)}</option>`).join('')}
       </select></div>`;
   } else if (sel.value==='group') {
     extra.innerHTML=`
       <div class="form-group"><label>Тип группы</label>
         <select id="slot-group"><option value="">— выберите —</option>
-          ${groups.map(g=>`<option value="${g.group_type_id}">${g.group_types?.name||'?'}</option>`).join('')}
+          ${groups.map(g=>`<option value="${g.group_type_id}">${esc(g.group_types?.name||'?')}</option>`).join('')}
         </select></div>
       <div class="form-group"><label>Средняя явка (чел.)</label>
         <input type="number" id="slot-headcount" min="1" value="5"></div>`;
@@ -396,7 +396,7 @@ async function renderTodayTab() {
         <button class="btn" style="background:var(--card);border:1px solid var(--border);padding:12px 14px" onclick="renderDutyModal()">⏱ Дежурство</button>
       </div>
       ${todayEvents.map(ev=>`<div class="today-card event-card-mini ${ev.blocks_pool?'event-blocking':''}">
-        <span>${EVENT_TYPES[ev.event_type]||'📌'} <b>${ev.title}</b></span>
+        <span>${EVENT_TYPES[ev.event_type]||'📌'} <b>${esc(ev.title)}</b></span>
         <span class="hint">${fmtTime(ev.start_time)}–${fmtTime(ev.end_time)}</span>
         ${ev.blocks_pool?'<span class="overdue-badge">Бассейн закрыт</span>':''}
       </div>`).join('')}
@@ -414,11 +414,11 @@ async function renderTodayTab() {
           return `<div class="today-card duty-card">
             <div class="today-card-row">
               <span class="today-time">⏱ ${s.start_time.slice(0,5)}–${s.end_time.slice(0,5)}</span>
-              <span class="today-label">Дежурство · ${s.branch}</span>
+              <span class="today-label">Дежурство · ${esc(s.branch)}</span>
               ${confirmed?'<span class="status-badge confirmed">✓ Подтверждено</span>'
                 :rejected?'<span class="status-badge cancelled">✗ Отклонено</span>'
                 :`<button class="btn btn-sm btn-primary"
-                    onclick="doConfirmDutySlot('${date}','${s.start_time.slice(0,5)}','${s.end_time.slice(0,5)}','${encodeURIComponent(s.branch)}')">Подтвердить</button>`}
+                    onclick="doConfirmDutySlot('${date}','${s.start_time.slice(0,5)}','${s.end_time.slice(0,5)}','${encArg(s.branch)}')">Подтвердить</button>`}
             </div></div>`;
         }).join('')}`:''}
       ${ptSlots.length?`<h4>Персональные тренировки</h4>${ptSlots.map(s=>renderTodaySlot(s,date)).join('')}`:''}
@@ -432,7 +432,7 @@ async function renderTodayTab() {
           const color = w.is_debt?'#f59e0b':w.is_drop_in?'#7c3aed':'#10b981';
           return `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:var(--card);border:1px solid var(--border);border-radius:10px">
             <div>
-              <div style="font-weight:500">${w.clients?.fio||'—'}</div>
+              <div style="font-weight:500">${esc(w.clients?.fio||'—')}</div>
               <div style="font-size:12px;color:var(--hint)">Кат.${w.clients?.category||w.category||'?'}</div>
             </div>
             <div style="display:flex;gap:6px;align-items:center">
@@ -453,11 +453,11 @@ function renderTodaySlot(s,date) {
   const timeStr=`${s.start_time.slice(0,5)}–${s.end_time.slice(0,5)}`;
   const cat=s.clients?.category||1;
   const clientId=s.client_id||'';
-  const slotBranch=encodeURIComponent(s.branch||'');
+  const slotBranch=encArg(s.branch||'');
 
   if (status==='confirmed') return `<div class="today-card confirmed-card">
     <div class="today-card-row">
-      <span class="today-time">${timeStr}</span><span class="today-label">${label}</span>
+      <span class="today-time">${timeStr}</span><span class="today-label">${esc(label)}</span>
       <span class="status-badge confirmed">✓ Подтверждено</span>
     </div>
     ${conf?.actual_headcount?`<div class="today-sub">Явка: ${conf.actual_headcount} чел.</div>`:''}
@@ -465,16 +465,16 @@ function renderTodaySlot(s,date) {
 
   if (status==='cancelled') return `<div class="today-card cancelled-card">
     <div class="today-card-row">
-      <span class="today-time">${timeStr}</span><span class="today-label">${label}</span>
+      <span class="today-time">${timeStr}</span><span class="today-label">${esc(label)}</span>
       <span class="status-badge cancelled">✗ Отменено</span>
     </div>
-    ${conf?.cancel_reason?`<div class="today-sub">${conf.cancel_reason}</div>`:''}
+    ${conf?.cancel_reason?`<div class="today-sub">${esc(conf.cancel_reason)}</div>`:''}
   </div>`;
 
   const isPt=s.slot_type==='pt';
   return `<div class="today-card pending-card">
     <div class="today-card-row">
-      <span class="today-time">${timeStr}</span><span class="today-label">${label}</span>
+      <span class="today-time">${timeStr}</span><span class="today-label">${esc(label)}</span>
       <span class="status-badge pending">Ожидает</span>
     </div>
     ${s.clients?.balance===0?'<div class="today-sub warn-text">⚠️ Нулевой баланс</div>':''}
@@ -566,19 +566,19 @@ async function renderDutyModal() {
       return `<div class="history-item" style="${rej?'opacity:.55':''}">
         <div class="hi-main" style="display:flex;justify-content:space-between;align-items:center">
           <div>
-            <span class="hi-client" style="${rej?'text-decoration:line-through':''}">${d.branch}</span>
+            <span class="hi-client" style="${rej?'text-decoration:line-through':''}">${esc(d.branch)}</span>
             <span class="hi-cat">${h.toFixed(2)}ч = ${fmt(Math.round(h*RATES.duty_per_hour))} сум</span>
             ${rej?'<span class="hi-cat" style="background:rgba(239,68,68,.15);color:#ef4444">отклонено координатором</span>':''}
           </div>
           ${rej?'':`<div style="display:flex;gap:4px">
             <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
-              onclick="renderEditDutyModal('${d.id}','${startLocal}','${endLocal}','${d.branch}')">✏️</button>
+              onclick="renderEditDutyModal('${d.id}','${startLocal}','${endLocal}','${jsq(d.branch)}')">✏️</button>
             <button class="btn btn-sm btn-danger"
               onclick="doDeleteDuty('${d.id}')">🗑</button>
           </div>`}
         </div>
         <div class="hi-sub">${fmtDT(d.start_time)} → ${fmtDT(d.end_time)}</div>
-        ${rej&&d.reject_reason?`<div class="hi-sub" style="color:#ef4444">Причина: ${d.reject_reason}</div>`:''}
+        ${rej&&d.reject_reason?`<div class="hi-sub" style="color:#ef4444">Причина: ${esc(d.reject_reason)}</div>`:''}
       </div>`;
     }).join('')}
   </div>`;
@@ -667,7 +667,7 @@ async function renderLateRequestModal() {
     <div class="form-group"><label>Клиент</label>
       <select id="lr-client">
         <option value="">— выберите —</option>
-        ${clients.map(c=>`<option value="${c.id}" data-cat="${c.category}">${c.fio} (кат.${c.category}, баланс:${c.balance})</option>`).join('')}
+        ${clients.map(c=>`<option value="${c.id}" data-cat="${c.category}">${esc(c.fio)} (кат.${c.category}, баланс:${c.balance})</option>`).join('')}
       </select></div>
     <div class="form-group"><label>Дата и время тренировки</label>
       <input type="datetime-local" id="lr-date"></div>
@@ -739,8 +739,8 @@ function catRecalcCardHtml(r, after) {
   const scopeLbl = r.scope==='all' ? 'все тренировки' : 'текущий месяц';
   return `<div class="staff-card" style="flex-direction:column;gap:8px;border-left:3px solid #8b5cf6">
     <div>
-      <div class="staff-fio">🔄 ${r.clients?.fio||r.client_fio||'?'} · Кат.${r.clients?.category||'?'} → <b>Кат.${r.new_category}</b></div>
-      <div class="staff-meta">${r.profiles?.fio||'?'} · ${r.branch||''}</div>
+      <div class="staff-fio">🔄 ${esc(r.clients?.fio||r.client_fio||'?')} · Кат.${r.clients?.category||'?'} → <b>Кат.${r.new_category}</b></div>
+      <div class="staff-meta">${esc(r.profiles?.fio||'?')} · ${esc(r.branch||'')}</div>
       <div class="staff-meta">Пересчёт: ${scopeLbl}</div>
     </div>
     <div style="display:flex;gap:8px">
@@ -876,13 +876,13 @@ function renderEventCard(ev) {
   const canCreate=['admin','senior_trainer'].includes(STATE.profile.role);
   return `<div class="event-card ${ev.blocks_pool?'event-blocking':''}">
     <div class="event-type-badge">${EVENT_TYPES[ev.event_type]||'📌 Другое'}</div>
-    <div class="event-title">${ev.title}</div>
-    <div class="event-meta">📍 ${ev.location||'—'} · ${ev.branch||'Все филиалы'}</div>
+    <div class="event-title">${esc(ev.title)}</div>
+    <div class="event-meta">📍 ${esc(ev.location||'—')} · ${esc(ev.branch||'Все филиалы')}</div>
     <div class="event-meta">🕐 ${fmtDT(ev.start_time)} → ${fmtDT(ev.end_time)}</div>
-    ${ev.description?`<div class="event-desc">${ev.description}</div>`:''}
+    ${ev.description?`<div class="event-desc">${esc(ev.description)}</div>`:''}
     ${ev.blocks_pool?'<div class="event-block-warn">🚫 Бассейн закрыт в это время</div>':''}
     <div class="event-footer">
-      <span class="hint">👥 ${count} · ${ev.profiles?.fio?.split(' ')[0]||'?'}</span>
+      <span class="hint">👥 ${count} · ${esc(ev.profiles?.fio?.split(' ')[0]||'?')}</span>
       <div style="display:flex;gap:6px">
         ${isParticipant
           ?`<button class="btn btn-sm btn-danger" onclick="doLeaveEvent('${ev.id}')">Не иду</button>`

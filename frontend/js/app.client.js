@@ -31,22 +31,22 @@ async function renderClientProfile(clientId, backTab='home') {
 
     $('#tab-content').innerHTML=`<div class="tab-pad">
       <div class="client-header">
-        <div class="client-avatar">${client.fio.charAt(0)}</div>
+        <div class="client-avatar">${esc(client.fio.charAt(0))}</div>
         <div style="flex:1">
-          <div class="client-name">${client.is_archived?'<span style="font-size:12px;color:var(--hint);font-weight:400;margin-right:6px">[Архив]</span>':''}${client.fio}</div>
+          <div class="client-name">${client.is_archived?'<span style="font-size:12px;color:var(--hint);font-weight:400;margin-right:6px">[Архив]</span>':''}${esc(client.fio)}</div>
           <div class="client-meta">${client.age?client.age+' лет · ':''}Кат.${client.category} · Баланс: <span${client.balance<=0?' style="color:var(--danger);font-weight:600"':''}>${client.balance}</span></div>
-          ${client.is_archived&&client.archive_reason?`<div class="client-meta" style="color:var(--hint)">Причина архивации: ${client.archive_reason}</div>`:''}
-          <div class="client-meta">Тренер: ${client.profiles?.fio||'—'}</div>
+          ${client.is_archived&&client.archive_reason?`<div class="client-meta" style="color:var(--hint)">Причина архивации: ${esc(client.archive_reason)}</div>`:''}
+          <div class="client-meta">Тренер: ${esc(client.profiles?.fio||'—')}</div>
           ${!canEdit&&!isAdmin?'<div class="hint" style="margin-top:4px;font-size:11px">👁 Только просмотр</div>':''}
           <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
             ${canEditInfo?`<button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
-              onclick="renderEditClientModal('${clientId}','${encodeURIComponent(client.fio)}',${client.category},'${client.age||''}','${activeSub?.start_date||''}','${client.subscription_end||''}',${client.balance||0})">
+              onclick="renderEditClientModal('${clientId}','${encArg(client.fio)}',${client.category},'${client.age||''}','${activeSub?.start_date||''}','${client.subscription_end||''}',${client.balance||0})">
               ✏️ Редактировать</button>`:''}
             ${canEdit&&!client.is_archived&&(balanceZero||subExpired)?`<button class="btn btn-sm btn-primary"
               onclick="renderBuyPackageModal('${clientId}',${isChildClient},${client.balance||0})">
               🛒 Новый пакет</button>`:''}
             ${canEdit&&!client.is_archived&&!isChildClient&&(client.balance||0)>0?`<button class="btn btn-sm" style="background:rgba(245,158,11,.15);color:#f59e0b;border:1px solid rgba(245,158,11,.3)"
-              onclick="renderGymDeductModal('${clientId}','${encodeURIComponent(client.fio)}',${client.balance||0})">
+              onclick="renderGymDeductModal('${clientId}','${encArg(client.fio)}',${client.balance||0})">
               ➖ Списать в ТЗ</button>`:''}
             <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
               onclick="renderClientReportModal('${clientId}')">
@@ -57,20 +57,20 @@ async function renderClientProfile(clientId, backTab='home') {
               onclick="renderMismatchModal('${clientId}')">🔁 Уточнить заявку (1С)</button>` : ''}
             ${mismatchFlag && mismatchFlag.status!=='returned' ? `<span class="btn btn-sm" style="background:rgba(245,158,11,.12);color:#fcd34d;border:1px solid rgba(245,158,11,.4);cursor:default">⏳ На проверке (1С)</span>` : ''}
             ${canEdit?`<button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
-              onclick="renderTransferClientModal('${clientId}','${client.fio}',${STATE.profile.id})">
+              onclick="renderTransferClientModal('${clientId}','${jsq(client.fio)}',${STATE.profile.id})">
               🔄 Передать</button>`:''}
             ${isAdmin?`<button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
-              onclick="renderAdminTransferModal('${clientId}','${client.fio}')">
+              onclick="renderAdminTransferModal('${clientId}','${jsq(client.fio)}')">
               🔄 Передать (адм.)</button>`:''}
             ${canEdit&&!client.is_archived&&activeSub&&!activeSub.freeze_start?`<button class="btn btn-sm" style="background:rgba(96,165,250,.15);color:#3b82f6;border:1px solid rgba(96,165,250,.3)" onclick="renderFreezeModal(${activeSub.id},'${clientId}','${client.subscription_end||''}')">🧊 Заморозка</button>`:''}
             ${canEdit&&!client.is_archived?`<button class="btn btn-sm" style="background:rgba(239,68,68,.15);color:#ef4444;border:1px solid rgba(239,68,68,.3)"
-              onclick="renderArchiveClientModal('${clientId}','${encodeURIComponent(client.fio)}')">
+              onclick="renderArchiveClientModal('${clientId}','${encArg(client.fio)}')">
               📦 Архив</button>`:''}
             ${canEditInfo&&client.is_archived?`<button class="btn btn-sm" style="background:rgba(34,197,94,.15);color:#22c55e;border:1px solid rgba(34,197,94,.3)"
-              onclick="renderRestoreClientModal('${clientId}','${encodeURIComponent(client.fio)}','${backTab}')">
+              onclick="renderRestoreClientModal('${clientId}','${encArg(client.fio)}','${backTab}')">
               ♻️ Восстановить</button>`:''}
             ${canEdit?`<button class="btn btn-sm btn-danger"
-              onclick="doDeleteClientCheck('${clientId}','${encodeURIComponent(client.fio)}','${client.created_at||''}')">
+              onclick="doDeleteClientCheck('${clientId}','${encArg(client.fio)}','${client.created_at||''}')">
               🗑 Удалить</button>`:''}
           </div>
         </div>
@@ -103,7 +103,7 @@ async function renderClientProfile(clientId, backTab='home') {
             </div>
             ${activeSub.training_goals?.length
               ?activeSub.training_goals.map(g=>`<div class="goal-item">
-                  <span>${g.goal_text}</span>
+                  <span>${esc(g.goal_text)}</span>
                   ${canEdit?`<button class="btn-icon" style="font-size:12px;color:var(--danger)" onclick="doDeleteGoal('${g.id}','${clientId}')">✕</button>`:''}
                 </div>`).join('')
               :'<p class="hint">Цели не установлены</p>'}
@@ -124,9 +124,9 @@ async function renderClientProfile(clientId, backTab='home') {
               <span>📦 ${s.start_date} → ${s.end_date||'?'}</span>
               <span class="cr-arrow" id="arrow-past-${i}">›</span>
             </div>
-            ${s.closing_note?`<div class="hint" style="margin-top:4px">${s.closing_note}</div>`:''}
+            ${s.closing_note?`<div class="hint" style="margin-top:4px">${esc(s.closing_note)}</div>`:''}
             <div id="past-${i}" style="display:none;margin-top:10px">
-              ${s.training_goals?.map(g=>`<div class="goal-item">${g.goal_text}</div>`).join('')||'<p class="hint">Нет целей</p>'}
+              ${s.training_goals?.map(g=>`<div class="goal-item">${esc(g.goal_text)}</div>`).join('')||'<p class="hint">Нет целей</p>'}
             </div>
           </div>`).join('')}`:''}
     </div>`;
@@ -238,8 +238,8 @@ function renderSessionsList(workouts, activeSubId, clientId, canEdit=true) {
         ${isOverdue&&canEdit?'<span class="overdue-badge">⛔ Нет конспекта</span>':''}
       </div>
       ${hasNote?`<div class="note-block">
-          <div class="note-label">✅ ${note.accomplishments}</div>
-          ${note.next_task?`<div class="note-next">→ ${note.next_task}</div>`:''}
+          <div class="note-label">✅ ${esc(note.accomplishments)}</div>
+          ${note.next_task?`<div class="note-next">→ ${esc(note.next_task)}</div>`:''}
           ${canWriteNote?`<button class="btn btn-sm" style="font-size:11px;margin-top:4px"
             onclick="renderSessionNoteModal('${w.id}','${clientId}')">✏️ Изменить</button>`:''}
         </div>`
@@ -400,9 +400,9 @@ async function renderSessionNoteModal(workoutId,clientId) {
     <div class="modal-header"><h3>Конспект занятия</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="form-group"><label>Что сделали на занятии</label>
-      <textarea id="note-acc" rows="3" placeholder="Освоили дыхание во время кроля...">${existing?.accomplishments||''}</textarea></div>
+      <textarea id="note-acc" rows="3" placeholder="Освоили дыхание во время кроля...">${esc(existing?.accomplishments||'')}</textarea></div>
     <div class="form-group"><label>Задача на следующее занятие</label>
-      <textarea id="note-next" rows="2" placeholder="Откорректировать работу рук...">${existing?.next_task||''}</textarea></div>
+      <textarea id="note-next" rows="2" placeholder="Откорректировать работу рук...">${esc(existing?.next_task||'')}</textarea></div>
     <button class="btn btn-primary btn-full" onclick="doSaveNote('${workoutId}','${clientId}')">Сохранить</button>
   </div>`;
   document.body.appendChild(m);
@@ -590,8 +590,8 @@ function renderMismatchModal(clientId) {
   m.innerHTML=`<div class="modal">
     <div class="modal-header"><h3>${isReturn?'🔁 Уточнить заявку (1С)':'⚠ Расходится с 1С'}</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
-    ${isReturn?`<div class="ci-sub" style="background:rgba(96,165,250,.12);border:1px solid rgba(96,165,250,.3);border-radius:8px;padding:8px 10px;margin:0 0 12px;color:#93c5fd">Координатор вернул заявку на уточнение${c.returnedNote?`:<br><b>${c.returnedNote}</b>`:'.'}</div>`:''}
-    <p class="hint" style="margin:0 0 12px">${c.fio} · остаток в системе: <b>${c.balance}</b>. Отправим координатору и старшему на сверку с 1С.</p>
+    ${isReturn?`<div class="ci-sub" style="background:rgba(96,165,250,.12);border:1px solid rgba(96,165,250,.3);border-radius:8px;padding:8px 10px;margin:0 0 12px;color:#93c5fd">Координатор вернул заявку на уточнение${c.returnedNote?`:<br><b>${esc(c.returnedNote)}</b>`:'.'}</div>`:''}
+    <p class="hint" style="margin:0 0 12px">${esc(c.fio)} · остаток в системе: <b>${c.balance}</b>. Отправим координатору и старшему на сверку с 1С.</p>
     <div class="form-group">
       <label>Сколько реально осталось (если знаешь, необязательно)</label>
       <input type="number" id="mm-suggested" min="0" placeholder="напр. 6" value="${(isReturn&&c.prevSuggested!=null)?c.prevSuggested:''}" style="width:120px">

@@ -12,7 +12,7 @@ function renderAdminApp(initialTab='summary') {
   setupBack(null);
   setScreen(`<div class="app-header">
     <div><div class="app-title">👑 Координатор</div>
-      <div class="app-sub">${STATE.profile.fio}</div></div>
+      <div class="app-sub">${esc(STATE.profile.fio)}</div></div>
     <div style="display:flex;gap:6px;align-items:center">
       <button class="btn-icon" onclick="openSelfInBrowser()" title="Открыть в браузере (больше экран)">🖥</button>
       <button class="btn-icon" onclick="openSchedule()">📅</button>
@@ -92,7 +92,7 @@ async function renderAdminMore() {
         ${branches.map(b=>`
         <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px;display:flex;justify-content:space-between;align-items:center">
           <span style="font-size:13px">📍 ${b}</span>
-          <button class="btn btn-sm btn-primary" onclick="copyScheduleLink('${baseUrl}?branch=${encodeURIComponent(b)}')">📋 Копировать</button>
+          <button class="btn btn-sm btn-primary" onclick="copyScheduleLink('${baseUrl}?branch=${encArg(b)}')">📋 Копировать</button>
         </div>`).join('')}
       </div>
     </div>
@@ -194,7 +194,7 @@ async function loadAuditLog() {
             <span style="font-size:15px">${meta.icon}</span>
             <span style="font-size:13px;font-weight:500;margin-left:4px">${meta.label}</span>
             <div style="font-size:12px;color:var(--hint);margin-top:2px">
-              ${l.actor_fio||'—'}${l.branch?' · '+l.branch:''}${detail}
+              ${esc(l.actor_fio||'—')}${esc(l.branch?' · '+l.branch:'')}${esc(detail)}
             </div>
           </div>
           <div style="font-size:11px;color:var(--hint);white-space:nowrap">${dtStr}</div>
@@ -228,7 +228,7 @@ async function renderAdminSessionNotes() {
   const profiles = await cached('profiles',()=>DB.getAllProfiles());
   const trainers = profiles.filter(p=>['trainer','senior_trainer'].includes(p.role));
   const sel = document.getElementById('sn-trainer');
-  if (sel) sel.innerHTML += trainers.map(t=>`<option value="${t.id}">${t.fio}</option>`).join('');
+  if (sel) sel.innerHTML += trainers.map(t=>`<option value="${t.id}">${esc(t.fio)}</option>`).join('');
 
   await loadAdminSessionNotes();
 }
@@ -250,23 +250,23 @@ async function loadAdminSessionNotes() {
       ${!(notes||[]).length?'<p class="hint">Нет</p>':(notes||[]).map(n=>`
         <div class="history-item">
           <div class="hi-main">
-            <span class="hi-client">${n.clients?.fio||'—'}</span>
-            <span class="hint" style="font-size:12px">← ${n.profiles?.fio||'—'}</span>
+            <span class="hi-client">${esc(n.clients?.fio||'—')}</span>
+            <span class="hint" style="font-size:12px">← ${esc(n.profiles?.fio||'—')}</span>
             ${n.workouts?.category_at_moment?`<span class="hi-cat cat-${n.workouts.category_at_moment}">Кат.${n.workouts.category_at_moment}</span>`:''}
           </div>
           ${n.workouts?.workout_date?`<div class="hi-sub">${fmtDate(n.workouts.workout_date)}</div>`:''}
-          ${n.accomplishments?`<div style="font-size:13px;margin-top:4px"><b>Что делали:</b> ${n.accomplishments}</div>`:''}
-          ${n.next_task?`<div style="font-size:13px;color:var(--hint)"><b>Задача:</b> ${n.next_task}</div>`:''}
+          ${n.accomplishments?`<div style="font-size:13px;margin-top:4px"><b>Что делали:</b> ${esc(n.accomplishments)}</div>`:''}
+          ${n.next_task?`<div style="font-size:13px;color:var(--hint)"><b>Задача:</b> ${esc(n.next_task)}</div>`:''}
         </div>`).join('')}
 
       <h4 style="margin-top:20px">Цели (${(goals||[]).length})</h4>
       ${!(goals||[]).length?'<p class="hint">Нет</p>':(goals||[]).map(g=>`
         <div class="history-item">
           <div class="hi-main">
-            <span class="hi-client">${g.clients?.fio||'—'}</span>
-            <span class="hint" style="font-size:12px">← ${g.clients?.profiles?.fio||'—'}</span>
+            <span class="hi-client">${esc(g.clients?.fio||'—')}</span>
+            <span class="hint" style="font-size:12px">← ${esc(g.clients?.profiles?.fio||'—')}</span>
           </div>
-          <div style="font-size:13px;margin-top:4px">${g.text||'—'}</div>
+          <div style="font-size:13px;margin-top:4px">${esc(g.goal_text||'—')}</div>
           <div class="hi-sub">${fmtDate(g.created_at)}</div>
         </div>`).join('')}
     `;

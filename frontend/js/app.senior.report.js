@@ -28,7 +28,7 @@ async function loadBranchSummary(year,month,branch) {
     const data=await DB.getSummary(year,month,branch);
     body.innerHTML=renderSummaryTable(data,year,month,false);
     body.innerHTML+=`<button class="btn btn-sm" style="margin-top:12px;width:100%"
-      onclick="doExportSummary(${year},${month},'${branch}')">⬇️ Скачать Excel</button>`;
+      onclick="doExportSummary(${year},${month},'${jsq(branch)}')">⬇️ Скачать Excel</button>`;
   } catch(e) { body.innerHTML='<p class="hint">Ошибка</p>'; console.error(e); }
 }
 

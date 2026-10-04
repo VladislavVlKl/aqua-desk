@@ -13,7 +13,7 @@ async function renderCeoApp() {
     <div class="app-header">
       <div>
         <div class="app-title">👑 AquaDesk</div>
-        <div class="app-sub">${STATE.profile.fio} · Топ-менеджмент</div>
+        <div class="app-sub">${esc(STATE.profile.fio)} · Топ-менеджмент</div>
       </div>
       <button class="btn-icon" id="notif-bell" onclick="renderInAppNotifications()" style="position:relative">🔔<span id="notif-count" style="display:none;position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;border-radius:50%;font-size:9px;width:16px;height:16px;line-height:16px;text-align:center"></span></button>
     </div>
@@ -159,7 +159,7 @@ async function renderCeoFinance() {
             (_isPaidPT(w)||w.is_drop_in)?s+_wRev(w):s, 0);
           return `<div class="staff-card" style="flex-direction:column;gap:4px;margin-bottom:8px">
             <div style="display:flex;justify-content:space-between;align-items:center">
-              <div style="font-weight:700;font-size:14px">${b.name}</div>
+              <div style="font-weight:700;font-size:14px">${esc(b.name)}</div>
               <div style="font-size:13px;font-weight:600">${fmt(Math.round(bRev))} сум</div>
             </div>
             <div style="font-size:12px;color:var(--hint);display:flex;gap:12px">
@@ -253,7 +253,7 @@ async function renderCeoStats() {
           <summary style="font-size:12px;color:var(--hint);cursor:pointer">Отток — список (${churned.length})</summary>
           <div style="margin-top:6px">
             ${churned.slice(0,15).map(c=>`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px">
-              <span>${c.fio}</span><span class="hint">${fioMap[c.trainer_id]||''} · до ${fmtDate(c.subscription_end)}</span>
+              <span>${esc(c.fio)}</span><span class="hint">${esc(fioMap[c.trainer_id]||'')} · до ${fmtDate(c.subscription_end)}</span>
             </div>`).join('')}
             ${churned.length>15?`<p class="hint" style="margin-top:4px">Ещё ${churned.length-15}...</p>`:''}
           </div>
@@ -337,7 +337,7 @@ async function renderCeoTrainers() {
           const pt=ptByTrainer[p.id]||0;
           return `<div class="staff-card" style="flex-direction:column;gap:6px;margin-bottom:8px">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
-              <div class="staff-fio" style="flex:1;min-width:0">${p.fio}</div>
+              <div class="staff-fio" style="flex:1;min-width:0">${esc(p.fio)}</div>
               <div style="font-weight:700;font-size:15px;white-space:nowrap;flex-shrink:0">${fmt(sal.total)} сум</div>
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px">
@@ -401,7 +401,7 @@ function renderReceptionApp(initialTab='pending') {
   if (!STATE._recDate) STATE._recDate = _recToday();
   setScreen(`<div class="app-header">
     <div><div class="app-title">🛎 Ресепшн</div>
-      <div class="app-sub">${STATE.profile.fio}${_recBranch()?' · '+_recBranch():''}</div></div>
+      <div class="app-sub">${esc(STATE.profile.fio)}${_recBranch()?' · '+_recBranch():''}</div></div>
     <div style="display:flex;gap:6px;align-items:center">
       <button class="btn-icon" id="notif-bell" onclick="renderInAppNotifications()" style="position:relative">🔔<span id="notif-count" style="display:none;position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;border-radius:50%;font-size:9px;width:16px;height:16px;line-height:16px;text-align:center"></span></button>
     </div>
@@ -528,12 +528,12 @@ function recCard(it) {
   const seqBadge = (it._kind==='w' && it.balance_after!=null)
     ? `<span style="font-size:11px;font-weight:600;background:rgba(59,130,246,.14);color:#60a5fa;padding:2px 8px;border-radius:8px">${(!it.is_debt&&!it.is_drop_in)?'−1 · ':''}остаток ${it.balance_after} ПТ</span>`
     : '';
-  const cnameEnc = encodeURIComponent(it._client);
+  const cnameEnc = encArg(it._client);
   return `<div class="history-item" id="rec-card-${it._kind}-${it.id}">
     <div class="hi-main">
-      <span class="hi-client">${it._client}</span> ${cat} ${typeBadge} ${seqBadge}
+      <span class="hi-client">${esc(it._client)}</span> ${cat} ${typeBadge} ${seqBadge}
     </div>
-    <div class="hi-sub">👤 ${it._trainer} · ${fmtTime(it._ts)}</div>
+    <div class="hi-sub">👤 ${esc(it._trainer)} · ${fmtTime(it._ts)}</div>
     <div style="display:flex;gap:8px;margin-top:8px">
       <button class="btn btn-sm btn-primary" style="flex:1" onclick="doReceptionConfirm('${it._kind}','${it.id}')">✓ Подтвердить</button>
       <button class="btn btn-sm btn-danger" style="flex:1" onclick="renderReceptionRejectModal('${it._kind}','${it.id}','${cnameEnc}',${it.trainer_id||'null'})">✗ Отклонить</button>
@@ -582,7 +582,7 @@ function renderReceptionRejectModal(kind, id, cnameEnc, trainerId) {
   m.innerHTML = `<div class="modal">
     <div class="modal-header"><h3>Отклонить списание</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
-    <p class="hint" style="margin-bottom:12px">${cname}</p>
+    <p class="hint" style="margin-bottom:12px">${esc(cname)}</p>
     ${opts}
     <button class="btn btn-danger btn-full" onclick="doReceptionReject('${kind}','${id}',${trainerId},'${cnameEnc}')">Отклонить</button>
   </div>`;
@@ -629,9 +629,9 @@ async function renderReceptionRejected() {
         const q = it.reception_reason==='questions';
         const label = RECEPTION_REJECT_REASONS[it.reception_reason]||it.reception_reason||'—';
         return `<div class="history-item" ${q?'style="border-left:3px solid #ef4444;padding-left:9px"':''}>
-          <div class="hi-main"><span class="hi-client">${it._client}</span>
-            <span style="font-size:11px;background:rgba(239,68,68,.12);color:#ef4444;padding:2px 8px;border-radius:8px">${q?'🔴 ':''}${label}</span></div>
-          <div class="hi-sub">👤 ${it._trainer} · отклонено ${fmtDT(it._ts)}</div>
+          <div class="hi-main"><span class="hi-client">${esc(it._client)}</span>
+            <span style="font-size:11px;background:rgba(239,68,68,.12);color:#ef4444;padding:2px 8px;border-radius:8px">${q?'🔴 ':''}${esc(label)}</span></div>
+          <div class="hi-sub">👤 ${esc(it._trainer)} · отклонено ${fmtDT(it._ts)}</div>
         </div>`;
       }).join('')}
     </div>`;
@@ -654,13 +654,13 @@ async function renderReceptionGroups() {
       ${!groups.length?'<p class="hint">Нет активных детских групп в филиале</p>':groups.map(g=>{
         const paidN=g.children.filter(c=>c.paid).length;
         return `<div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:12px">
-          <div style="font-weight:700;margin-bottom:2px">${g.name}</div>
-          <div class="hint" style="margin-bottom:10px">${g.trainer?'👤 '+g.trainer+' · ':''}оплачено ${paidN}/${g.children.length}</div>
+          <div style="font-weight:700;margin-bottom:2px">${esc(g.name)}</div>
+          <div class="hint" style="margin-bottom:10px">${esc(g.trainer?'👤 '+g.trainer+' · ':'')}оплачено ${paidN}/${g.children.length}</div>
           ${!g.children.length?'<p class="hint">Нет детей</p>':g.children.map(c=>`
             <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">
-              <div><div style="font-size:14px">${c.name}</div><div class="hint">${fmt(c.amount)} сум</div></div>
+              <div><div style="font-size:14px">${esc(c.name)}</div><div class="hint">${fmt(c.amount)} сум</div></div>
               <button class="btn btn-sm" id="recpay-${c.id}"
-                onclick="doReceptionTogglePay('${g.groupId}','${c.id}',${g.instanceId?`'${g.instanceId}'`:'null'},${c.amount},${c.paid?'false':'true'},'${encodeURIComponent(month)}')"
+                onclick="doReceptionTogglePay('${g.groupId}','${c.id}',${g.instanceId?`'${g.instanceId}'`:'null'},${c.amount},${c.paid?'false':'true'},'${encArg(month)}')"
                 style="${c.paid?'background:rgba(16,185,129,.15);color:#10b981;border:1px solid rgba(16,185,129,.3)':'background:var(--primary);color:#fff'}">${c.paid?'✓ Оплачено':'Отметить'}</button>
             </div>`).join('')}
         </div>`;
@@ -701,10 +701,10 @@ async function renderReceptionHistory() {
       <p class="hint" style="margin-bottom:12px">${fmtDate(fromDate)} — ${fmtDate(toDate)} · ${items.length}</p>
       ${!items.length?'<p class="hint">Пусто</p>':items.map(it=>`
         <div class="history-item">
-          <div class="hi-main"><span class="hi-client">${it._client}</span>
+          <div class="hi-main"><span class="hi-client">${esc(it._client)}</span>
             ${it._cat?`<span class="hi-cat cat-${it._cat}">Кат.${it._cat}</span>`:''}
             <span style="font-size:11px;background:rgba(16,185,129,.12);color:#10b981;padding:2px 8px;border-radius:8px">✓ ${_recTypeLabel(it)}</span></div>
-          <div class="hi-sub">👤 ${it._trainer} · ${fmtDT(it._ts)}</div>
+          <div class="hi-sub">👤 ${esc(it._trainer)} · ${fmtDT(it._ts)}</div>
         </div>`).join('')}
     </div>`;
   } catch(e){ body.innerHTML='<div class="tab-pad"><p class="hint">Ошибка</p></div>'; console.error(e); }
@@ -723,7 +723,7 @@ function renderManagerApp(initialTab='analytics') {
   setupBack(null);
   setScreen(`<div class="app-header">
     <div><div class="app-title">📊 Управляющий</div>
-      <div class="app-sub">${STATE.profile.fio}${_mgrBranch()?' · '+_mgrBranch():''}</div></div>
+      <div class="app-sub">${esc(STATE.profile.fio)}${_mgrBranch()?' · '+_mgrBranch():''}</div></div>
     <div style="display:flex;gap:6px;align-items:center">
       <span style="font-size:11px;padding:3px 9px;border-radius:10px;background:rgba(124,58,237,.15);color:#a78bfa;font-weight:600">👁 Просмотр</span>
       <button class="btn-icon" onclick="openSelfInBrowser()" title="Открыть в браузере (больше экран)">🖥</button>
@@ -771,7 +771,7 @@ function renderManagerAnalytics(year, month) {
         <button id="next-man">›</button>
       </div>
     </div>
-    <p class="hint" style="margin-bottom:14px">📍 ${branch||'—'}</p>
+    <p class="hint" style="margin-bottom:14px">📍 ${esc(branch||'—')}</p>
     <div class="aov-grid">
       <div class="aov-card" id="aov-money"   onclick="openManagerAnHub('money')">${_anSkel(4)}</div>
       <div class="aov-card" id="aov-clients" onclick="openManagerAnHub('clients')">${_anSkel(4)}</div>
@@ -811,7 +811,7 @@ async function renderManagerStaff(year, month) {
     <div class="section-header"><h3>Персонал</h3>
       <div class="month-nav"><button id="prev-mst">‹</button><span id="mst-m">${fmtMY(year,month)}</span><button id="next-mst">›</button></div>
     </div>
-    <p class="hint" style="margin-bottom:12px">📍 ${branch||'—'} · показатели за месяц</p>
+    <p class="hint" style="margin-bottom:12px">📍 ${esc(branch||'—')} · показатели за месяц</p>
     <div id="mst-body"><div class="center-screen"><div class="spinner"></div></div></div>
   </div>`;
   document.getElementById('prev-mst')?.addEventListener('click',()=>{let y=year,m=month-1;if(m<1){y--;m=12;}renderManagerStaff(y,m);});
@@ -834,10 +834,10 @@ async function renderManagerStaff(year, month) {
     const archived = staff.filter(p=>p.is_archived);
     const card = p=>{
       const m = payMap[p.id]||{}; const cnt = wc[p.id]||0; const hrs = dh[p.id]||0;
-      return `<div class="staff-card clickable" onclick="renderManagerTrainerCard(${p.id},'${encodeURIComponent(p.fio)}',${year},${month})">
+      return `<div class="staff-card clickable" onclick="renderManagerTrainerCard(${p.id},'${encArg(p.fio)}',${year},${month})">
         <div class="staff-info">
-          <div class="staff-fio">${p.fio}</div>
-          <div class="staff-meta">${ROLE_LBL[p.role]||p.role}${p.phone?' · '+p.phone:''}</div>
+          <div class="staff-fio">${esc(p.fio)}</div>
+          <div class="staff-meta">${ROLE_LBL[p.role]||p.role}${esc(p.phone?' · '+p.phone:'')}</div>
           <div class="staff-meta">ПТ: ${cnt} · Дежур: ${hrs.toFixed(1)}ч · ФОТ: ${fmt(m.total||0)} сум</div>
         </div>
         <span style="color:var(--hint)">›</span>
@@ -858,7 +858,7 @@ function renderManagerTrainerCard(id, fioEnc, year, month) {
   const back = ()=>renderManagerStaff(year,month);
   navPush(back); setupBack(back);
   $('#tab-content').innerHTML = `<div class="tab-pad">
-    <div class="ah-head">${backBtn()}<h3>${fio}</h3></div>
+    <div class="ah-head">${backBtn()}<h3>${esc(fio)}</h3></div>
     <p class="hint">${fmtMY(year,month)} · ${_mgrBranch()||'—'}</p>
     <div class="summary-cards" style="margin:12px 0">
       <div class="summary-card"><div class="s-val">${cnt}</div><div class="s-lbl">ПТ за месяц</div></div>
@@ -889,7 +889,7 @@ async function renderManagerGroups(year, month) {
     <div class="section-header"><h3>Группы</h3>
       <div class="month-nav"><button id="prev-mg">‹</button><span id="mg-m">${fmtMY(year,month)}</span><button id="next-mg">›</button></div>
     </div>
-    <p class="hint" style="margin-bottom:12px">📍 ${branch||'—'} · активные группы</p>
+    <p class="hint" style="margin-bottom:12px">📍 ${esc(branch||'—')} · активные группы</p>
     <div id="mg-body"><div class="center-screen"><div class="spinner"></div></div></div>
   </div>`;
   document.getElementById('prev-mg')?.addEventListener('click',()=>{let y=year,m=month-1;if(m<1){y--;m=12;}renderManagerGroups(y,m);});
@@ -909,7 +909,7 @@ async function renderManagerGroups(year, month) {
         const sched = `${(head.days_of_week||[]).join('/')}${head.session_time?' '+String(head.session_time).slice(0,5):''}`.trim();
         return `<div class="staff-card clickable" onclick="renderManagerGroupCard(${head.id},'${monthStr}')">
           <div class="staff-info">
-            <div class="staff-fio">${typeName}</div>
+            <div class="staff-fio">${esc(typeName)}</div>
             <div class="staff-meta">${kind} · ${trainers}</div>
             ${sched?`<div class="staff-meta">🗓 ${sched}</div>`:''}
           </div>
@@ -934,7 +934,7 @@ async function renderManagerGroupCard(groupId, monthStr) {
     const trainers = (rep.trainers||[]).map(t=>t.profiles?.fio).filter(Boolean).join(', ')||'—';
     const sessCnt = [...new Set((rep.instanceSessions||[]).map(s=>s.session_date))].length;
     document.getElementById('mgc-body').innerHTML = `
-      <h3 style="margin:0 0 2px">${typeName}</h3>
+      <h3 style="margin:0 0 2px">${esc(typeName)}</h3>
       <p class="hint" style="margin-bottom:12px">${trainers} · ${monthStr.slice(0,7)}</p>
       <div class="summary-cards" style="margin-bottom:14px">
         <div class="summary-card"><div class="s-val">${clients.length}</div><div class="s-lbl">клиентов</div></div>
@@ -945,11 +945,11 @@ async function renderManagerGroupCard(groupId, monthStr) {
       ${clients.length?clients.map(c=>{
         const pd = payByClient[c.id];
         return `<div class="staff-card"><div class="staff-info">
-          <div class="staff-fio">${c.name}${c.age?` · ${c.age} лет`:''}</div>
-          <div class="staff-meta">${c.level?c.level+' · ':''}${pd?.paid?'<span style="color:var(--success)">оплачено</span>':'<span style="color:var(--danger)">не оплачено</span>'}${pd?.amount?' · '+fmt(pd.amount)+' сум':''}</div>
+          <div class="staff-fio">${esc(c.name)}${c.age?` · ${c.age} лет`:''}</div>
+          <div class="staff-meta">${esc(c.level?c.level+' · ':'')}${pd?.paid?'<span style="color:var(--success)">оплачено</span>':'<span style="color:var(--danger)">не оплачено</span>'}${pd?.amount?' · '+fmt(pd.amount)+' сум':''}</div>
         </div></div>`;
       }).join(''):'<p class="hint">Нет клиентов</p>'}
-      ${debtors.length?`<div class="warn-banner" style="margin-top:12px"><b>Должники (${debtors.length}):</b> ${debtors.map(c=>c.name).join(', ')}</div>`:''}
+      ${debtors.length?`<div class="warn-banner" style="margin-top:12px"><b>Должники (${debtors.length}):</b> ${esc(debtors.map(c=>c.name).join(', '))}</div>`:''}
       <p class="hint" style="text-align:center;margin-top:14px">👁 Только просмотр · ${sessCnt} занятий за месяц</p>`;
   } catch(e){ console.error(e); document.getElementById('mgc-body').innerHTML='<p class="hint">⚠️ Ошибка загрузки</p>'; }
 }
@@ -967,7 +967,7 @@ async function renderManagerSalary(year, month) {
     <div class="section-header"><h3>ЗП по филиалу</h3>
       <div class="month-nav"><button id="prev-msl">‹</button><span id="msl-m">${fmtMY(year,month)}</span><button id="next-msl">›</button></div>
     </div>
-    <p class="hint" style="margin-bottom:12px">📍 ${branch||'—'} · поимённо</p>
+    <p class="hint" style="margin-bottom:12px">📍 ${esc(branch||'—')} · поимённо</p>
     <div id="msl-body"><div class="center-screen"><div class="spinner"></div></div></div>
   </div>`;
   document.getElementById('prev-msl')?.addEventListener('click',()=>{let y=year,m=month-1;if(m<1){y--;m=12;}renderManagerSalary(y,m);});
@@ -985,7 +985,7 @@ async function renderManagerSalary(year, month) {
       </div>
       ${renderSummaryTable(data, year, month, false)}
       <button class="btn btn-sm" style="margin-top:12px;width:100%"
-        onclick="doExportSummary(${year},${month},'${branch||''}')">⬇️ Скачать Excel (сводный)</button>`;
+        onclick="doExportSummary(${year},${month},'${jsq(branch||'')}')">⬇️ Скачать Excel (сводный)</button>`;
   } catch(e){ console.error(e); body.innerHTML='<p class="hint">⚠️ Ошибка загрузки</p>'; }
 }
 

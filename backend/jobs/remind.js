@@ -8,6 +8,10 @@ const { createClient } = require('@supabase/supabase-js');
 const sb  = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 const BOT = process.env.BOT_TOKEN;
 
+// Сообщения — HTML (parse_mode=HTML). Данные из БД (ФИО, ссылки) — только через escHtml:
+// «&» / «<» иначе ломают отправку и исполняются в колокольчике. Синхронно с Edge Function.
+const escHtml = s => String(s ?? '').replace(/[&<>]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[ch]);
+
 async function tg(chatId, text) {
   try {
     const r = await fetch('https://api.telegram.org/bot' + BOT + '/sendMessage', {
@@ -90,7 +94,7 @@ async function ruleSubExpiring() {
   for (const c of clients||[]) {
     const tgId = c.profiles?.tg_id; if (!tgId) continue;
     const days = Math.ceil((new Date(c.subscription_end)-new Date())/86400000);
-    const msg  = '⏰ <b>Истекает абонемент</b>\n\nКлиент: <b>' + c.fio + '</b>\nОсталось: ' + days + ' дн.\n\nНапомните о продлении.';
+    const msg  = '⏰ <b>Истекает абонемент</b>\n\nКлиент: <b>' + escHtml(c.fio) + '</b>\nОсталось: ' + days + ' дн.\n\nНапомните о продлении.';
     // App-only: rule_key вне чат-вайтлиста → воркер пометит 'skipped',
     // в чат не уйдёт, покажется только в колокольчике приложения.
     await sb.from('notifications_queue').insert({
@@ -117,7 +121,7 @@ async function ruleDebtOverdue() {
   for (const w of workouts||[]) {
     const tgId = w.profiles?.tg_id; if (!tgId) continue;
     if (!byTrainer[tgId]) byTrainer[tgId] = { name: w.profiles?.fio, items: [] };
-    byTrainer[tgId].items.push(w.clients?.fio + ' (' + new Date(w.workout_date).toLocaleDateString('ru-RU') + ')');
+    byTrainer[tgId].items.push(escHtml(w.clients?.fio) + ' (' + new Date(w.workout_date).toLocaleDateString('ru-RU') + ')');
   }
   for (const [tgId, data] of Object.entries(byTrainer)) {
     const msg = '❌ <b>Долг не подтверждён (3+ дня)</b>\n\n' + data.items.map(i=>'• '+i).join('\n') + '\n\nПодтвердите оплату в разделе Отчёт.';
@@ -138,7 +142,7 @@ async function ruleInactive() {
   const inactive = [];
   for (const tr of trainers||[]) {
     const { data: ws } = await sb.from('workouts').select('id').eq('trainer_id',tr.id).gte('workout_date',cutoff.toISOString()).limit(1);
-    if (!ws?.length) inactive.push(tr.fio);
+    if (!ws?.length) inactive.push(escHtml(tr.fio));
   }
   if (!inactive.length) return;
 
@@ -385,7 +389,7 @@ async function ruleCoordinatorAgents(today, hour, utcDay) {
   if (!recipients.length) return;
   const link = (rule.schedule && rule.schedule.link) || '';
   await enqueueCoordinator('coordinator_agents', recipients,
-    `🤖 Отчёты агентов — загляни, что происходит: ${link}`, today);
+    `🤖 Отчёты агентов — загляни, что происходит: ${escHtml(link)}`, today);
 }
 
 async function main() {

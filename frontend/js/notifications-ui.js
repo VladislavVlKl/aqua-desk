@@ -29,8 +29,8 @@ async function renderAdminNotifications() {
         ${rules.map(r => `
           <div class="notif-rule-card">
             <div class="notif-rule-info">
-              <div class="notif-rule-name">${r.name}</div>
-              <div class="notif-rule-desc hint">${r.description||''}</div>
+              <div class="notif-rule-name">${esc(r.name)}</div>
+              <div class="notif-rule-desc hint">${esc(r.description||'')}</div>
             </div>
             <label class="toggle-row" style="flex-shrink:0">
               <input type="checkbox" ${r.active?'checked':''} onchange="toggleRule(${r.id},this.checked)">
@@ -53,14 +53,14 @@ async function renderAdminNotifications() {
       <div id="notif-branch-wrap" style="display:none" class="form-group">
         <label>Филиал</label>
         <select id="notif-branch">
-          ${branches.map(b=>`<option>${b.name}</option>`).join('')}
+          ${branches.map(b=>`<option>${esc(b.name)}</option>`).join('')}
         </select>
       </div>
 
       <div id="notif-trainer-wrap" style="display:none" class="form-group">
         <label>Тренер</label>
         <select id="notif-trainer">
-          ${trainers.map(t=>`<option value="${t.tg_id}" data-fio="${t.fio}">${t.fio}</option>`).join('')}
+          ${trainers.map(t=>`<option value="${t.tg_id}" data-fio="${esc(t.fio)}">${esc(t.fio)}</option>`).join('')}
         </select>
       </div>
 
@@ -94,7 +94,7 @@ async function renderAdminNotifications() {
         recent.map(n => `
           <div class="notif-history-item">
             <div class="notif-h-row">
-              <span class="notif-h-name">${n.recipient_name||n.recipient_tg_id}</span>
+              <span class="notif-h-name">${esc(n.recipient_name||n.recipient_tg_id)}</span>
               <div style="display:flex;gap:6px;align-items:center">
                 <span class="notif-status-badge ${n.status}">${
                   n.status==='sent'?'✓ Отправлено':n.status==='failed'?'✗ Ошибка':'⏳ Ожидает'
@@ -103,7 +103,7 @@ async function renderAdminNotifications() {
                   onclick="doDeleteNotif('${n.id}')" title="Удалить">✕</button>`:''}
               </div>
             </div>
-            <div class="notif-h-msg hint">${n.message.slice(0,80)}${n.message.length>80?'…':''}</div>
+            <div class="notif-h-msg hint">${(t => esc(t.slice(0,80)) + (t.length>80?'…':''))(htmlToText(n.message))}</div>
             <div class="notif-h-time hint">${fmtDT(n.scheduled_for)}</div>
           </div>`).join('')}
     </div>`;
@@ -129,7 +129,7 @@ function previewNotif() {
   if (preview) {
     preview.style.display = '';
     preview.innerHTML = `<div class="notif-preview-label">Предпросмотр:</div>
-      <div class="notif-preview-bubble">📢 <b>AquaDesk</b>\n\n${text}</div>`;
+      <div class="notif-preview-bubble">📢 <b>AquaDesk</b>\n\n${esc(text)}</div>`;
   }
 }
 
@@ -155,7 +155,8 @@ async function doSendNotif(trainers, branchNames) {
     ? new Date(timeVal).toISOString()
     : new Date().toISOString();
 
-  const msg = '📢 <b>AquaDesk</b>\n\n' + text;
+  // Текст координатора — обычный текст: «<5 мин» иначе ломал Telegram (parse_mode=HTML)
+  const msg = '📢 <b>AquaDesk</b>\n\n' + esc(text);
 
   // Формируем список получателей
   let recipients = [];

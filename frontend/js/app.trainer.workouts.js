@@ -59,10 +59,10 @@ function _wkClientFilter(q) {
         ${i===matches.length-1?'border-bottom:none;':''}"
       onmouseenter="this.style.background='rgba(124,58,237,.25)'"
       onmouseleave="this.style.background=''"
-      ontouchstart="this.style.background='rgba(124,58,237,.25)';wkClientPick('${o.value}','${encodeURIComponent(o.text)}')"
-      onmousedown="wkClientPick('${o.value}','${encodeURIComponent(o.text)}')">
+      ontouchstart="this.style.background='rgba(124,58,237,.25)';wkClientPick('${o.value}','${encArg(o.text)}')"
+      onmousedown="wkClientPick('${o.value}','${encArg(o.text)}')">
       <span style="font-size:15px;font-weight:500;color:#f1f5f9;flex:1;min-width:0;
-        overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${o.text}</span>
+        overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(o.text)}</span>
       <span style="display:flex;gap:6px;align-items:center;flex-shrink:0">
         ${cat?`<span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:8px;
           background:${catColor}22;color:${catColor}">кат.${cat}</span>`:''}

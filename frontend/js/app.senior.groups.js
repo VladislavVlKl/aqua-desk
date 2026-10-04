@@ -42,12 +42,12 @@ async function loadExtraBranchGroups() {
       const tgs = await DB.getActiveGroupsByBranch(branch);
       const monthStr = new Date().toISOString().slice(0,7)+'-01';
       div.innerHTML += `<div style="margin-bottom:12px">
-        <div style="font-weight:600;font-size:13px;color:var(--hint);margin-bottom:6px">${branch}</div>
+        <div style="font-weight:600;font-size:13px;color:var(--hint);margin-bottom:6px">${esc(branch)}</div>
         ${(tgs||[]).map(tg=>`<div class="staff-card" style="flex-direction:column;align-items:flex-start;gap:6px">
           <div style="display:flex;justify-content:space-between;width:100%">
             <div>
-              <div class="staff-fio">${tg.group_types?.name||'Группа'}</div>
-              <div class="staff-meta">${tg.profiles?.fio||'—'}</div>
+              <div class="staff-fio">${esc(tg.group_types?.name||'Группа')}</div>
+              <div class="staff-meta">${esc(tg.profiles?.fio||'—')}</div>
             </div>
             <div style="display:flex;gap:6px">
               ${tg.group_types?.type==='children'?`<button class="btn btn-sm btn-primary"
@@ -73,7 +73,7 @@ function _trainerOptionsWithFlags(trainers) {
     if (!t.tg_id) flags.push('⚠️ не в Telegram');
     if (counts[_normFio(t.fio)] > 1) flags.push('дубль?');
     const suffix = flags.length ? ` — ${flags.join(', ')}` : '';
-    return `<option value="${t.id}" data-unclaimed="${t.tg_id?'':'1'}">${t.fio}${suffix}</option>`;
+    return `<option value="${t.id}" data-unclaimed="${t.tg_id?'':'1'}">${esc(t.fio)}${suffix}</option>`;
   }).join('');
 }
 // Подтверждение, если выбран непривязанный профиль (тренер не увидит группу).
@@ -102,10 +102,10 @@ async function renderSeniorAssignForm() {
     window._saGroups = Object.fromEntries(activeGroups.map(g=>[String(g.id), g]));
     const groupOpts = activeGroups.map(g=>{
       const label = `${g.group_types?.name||'Группа'} · ${g.branch}${g.profiles?.fio?' — '+g.profiles.fio:''}${g.role?' ('+g.role+')':''}`;
-      return `<option value="${g.id}" data-type="${g.group_types?.type||''}">${label}</option>`;
+      return `<option value="${g.id}" data-type="${g.group_types?.type||''}">${esc(label)}</option>`;
     }).join('');
     const trainerOpts = `<option value="">— выберите —</option>${_trainerOptionsWithFlags(myTrainers)}`;
-    const gtOpts = gts.map(g=>`<option value="${g.id}" data-type="${g.type}" data-name="${g.name}">${g.name}</option>`).join('');
+    const gtOpts = gts.map(g=>`<option value="${g.id}" data-type="${g.type}" data-name="${esc(g.name)}">${esc(g.name)}</option>`).join('');
     const branchOpts = branches.map(b=>`<option>${b}</option>`).join('');
 
     form.innerHTML=`
@@ -255,8 +255,8 @@ async function loadSeniorGroupsList() {
       return `<div class="staff-card" style="flex-direction:column;align-items:flex-start;gap:8px">
         <div style="display:flex;justify-content:space-between;width:100%">
           <div>
-            <div class="staff-fio">${dots}${rep.group_types?.name||'Группа'}${roleLabel}</div>
-            <div class="staff-meta">${rep.branch} · с ${rep.subscription_start||'—'}</div>
+            <div class="staff-fio">${dots}${esc(rep.group_types?.name||'Группа')}${roleLabel}</div>
+            <div class="staff-meta">${esc(rep.branch)} · с ${rep.subscription_start||'—'}</div>
             ${schedLabel}
           </div>
           <button class="btn btn-sm btn-primary" style="align-self:flex-start"
@@ -273,8 +273,8 @@ async function loadSeniorGroupsList() {
       return `<div class="staff-card" style="flex-direction:column;align-items:flex-start;gap:8px">
         <div style="display:flex;justify-content:space-between;width:100%">
           <div>
-            <div class="staff-fio">${g.group_types?.name||'Группа'}</div>
-            <div class="staff-meta">${g.branch} · с ${g.subscription_start||'—'}</div>
+            <div class="staff-fio">${esc(g.group_types?.name||'Группа')}</div>
+            <div class="staff-meta">${esc(g.branch)} · с ${g.subscription_start||'—'}</div>
             ${schedLabel}
           </div>
           <button class="btn btn-sm btn-primary" style="align-self:flex-start"
@@ -388,12 +388,12 @@ async function renderGroupDetail(groupId) {
 
     setScreen(`<div class="app-header">
       ${backBtn()}
-      <div class="app-title">${window._gd.groupName}</div>
-      <span style="font-size:12px;color:var(--hint)">${branch}</span>
+      <div class="app-title">${esc(window._gd.groupName)}</div>
+      <span style="font-size:12px;color:var(--hint)">${esc(branch)}</span>
     </div>
     <div class="tab-content"><div class="tab-pad">
       <div class="staff-card" style="flex-direction:column;align-items:stretch;gap:8px;margin-bottom:10px">
-        ${infoRow('Филиал', `<span style="font-weight:600;font-size:13px">${branch}</span>`)}
+        ${infoRow('Филиал', `<span style="font-weight:600;font-size:13px">${esc(branch)}</span>`)}
         ${infoRow('Тренеров', `<span style="font-weight:600;font-size:13px">${new Set(members.map(t=>t.trainer_id)).size}</span>`)}
         ${infoRow('Активных детей', `<span style="font-weight:600;font-size:13px">${clients.length}${subgroups.length?` · подгрупп: ${subgroups.length+1}`:''}</span>`)}
       </div>
@@ -468,7 +468,7 @@ function _cndPillStyle(active, role) {
 }
 function _cndPill(trainerId, role, fio, active) {
   return `<button class="cnd-chip" id="cnd-${trainerId}-${role}" style="${_cndPillStyle(active, role)}"
-    onclick="toggleConducted('${trainerId}','${role}')">${fio}${active?' ✓':''}</button>`;
+    onclick="toggleConducted('${trainerId}','${role}')">${esc(fio)}${active?' ✓':''}</button>`;
 }
 // Уникальные тренеры (один человек может быть в двух строках инстанса: вода + суша)
 function _uniqMembers(members) {
@@ -482,7 +482,7 @@ function _cndSummaryInner(g, sub) {
   const parts = CONDUCTED_ROLES.map(role=>{
     const names = uniq.filter(t=>(cm[t.trainer_id]||[]).includes(role)).map(t=>t.profiles?.fio||'—');
     if (!names.length) return '';
-    return `<span style="white-space:nowrap">${STATION_META[role]?.icon||''} ${role[0].toUpperCase()+role.slice(1)} — ${names.join(', ')}</span>`;
+    return `<span style="white-space:nowrap">${STATION_META[role]?.icon||''} ${role[0].toUpperCase()+role.slice(1)} — ${esc(names.join(', '))}</span>`;
   }).filter(Boolean);
   return parts.length ? parts.join(' &nbsp;·&nbsp; ') : '<span style="color:var(--hint)">пока никто не отмечен</span>';
 }
@@ -498,7 +498,7 @@ function renderGroupSessionScreenHtml() {
     <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
       ${hasSubs ? ['', ...g.subgroups].map(s=>`<button class="btn btn-sm"
         style="font-size:12px;${s===sub?'background:var(--accent);color:#fff':'background:var(--card);border:1px solid var(--border)'}"
-        onclick="switchSessionSubgroup('${encodeURIComponent(s)}')">${subLabel(s)}</button>`).join('') : ''}
+        onclick="switchSessionSubgroup('${encArg(s)}')">${subLabel(s)}</button>`).join('') : ''}
       <button class="btn btn-sm" style="font-size:12px;background:var(--card);border:1px solid var(--border)${hasSubs?';margin-left:auto':''}"
         onclick="openSubgroupManager('${g.groupId}','session')">${hasSubs?'👥 Подгруппы':'➕ Подгруппа'}</button>
     </div>`;
@@ -660,7 +660,7 @@ async function cbdReload(groupId) {
 
 function _cbdPill(trainerId, role, fio, active) {
   return `<button id="cbd-${trainerId}-${role}" style="${_cndPillStyle(active, role)}"
-    onclick="cbdToggle('${trainerId}','${role}')">${fio}${active?' ✓':''}</button>`;
+    onclick="cbdToggle('${trainerId}','${role}')">${esc(fio)}${active?' ✓':''}</button>`;
 }
 function cbdRenderBody() {
   const g = window._gd; const cbd = g?._cbd; if (!cbd) return;
@@ -671,7 +671,7 @@ function cbdRenderBody() {
   const segHtml = hasSubs ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
     ${['', ...g.subgroups].map(s=>`<button class="btn btn-sm"
       style="font-size:12px;${s===sub?'background:var(--accent);color:#fff':'background:var(--card);border:1px solid var(--border)'}"
-      onclick="cbdSwitchSub('${encodeURIComponent(s)}')">${subLabel(s)}</button>`).join('')}</div>` : '';
+      onclick="cbdSwitchSub('${encArg(s)}')">${subLabel(s)}</button>`).join('')}</div>` : '';
   const cards = uniqMembers.length ? CONDUCTED_ROLES.map(role=>{
     const meta = STATION_META[role]||{};
     const pills = uniqMembers.map(t=>_cbdPill(t.trainer_id, role, t.profiles?.fio||'—', (cm[t.trainer_id]||[]).includes(role))).join('');
@@ -801,8 +801,8 @@ function _childCardHtml(c) {
   const clickable = st!=='left';
   return `<div class="staff-card" ${clickable?`onclick="openChildMenu('${c.id}')" style="cursor:pointer"`:'style="opacity:.6"'}>
     <div style="flex:1;min-width:0">
-      <div class="staff-fio">${c.name}</div>
-      <div class="staff-meta">${c.level||'—'} · ${fmt(c.monthly_price)} сум/мес${note?.note?' · 📝':''}${sub}</div>
+      <div class="staff-fio">${esc(c.name)}</div>
+      <div class="staff-meta">${esc(c.level||'—')} · ${fmt(c.monthly_price)} сум/мес${note?.note?' · 📝':''}${sub}</div>
     </div>
     <span style="font-size:11px;padding:3px 8px;border-radius:12px;background:${m.badge};color:${m.color}">${m.label}</span>
     ${clickable?'<span style="font-size:14px;color:var(--hint);margin-left:8px">⋯</span>':''}
@@ -889,12 +889,12 @@ function renderSubgroupManagerHtml() {
   setupBack(_subgroupBack(g));
   navPush(_subgroupBack(g));
   const subOptions = (cur) => ['', ...g.subgroups]
-    .map(s=>`<option value="${encodeURIComponent(s)}" ${s===(cur||'')?'selected':''}>${subLabel(s)}</option>`).join('');
+    .map(s=>`<option value="${encArg(s)}" ${s===(cur||'')?'selected':''}>${subLabel(s)}</option>`).join('');
   const childRows = g.clients.length ? g.clients.map(c=>`
     <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:10px 12px">
       <div style="flex:1;min-width:0">
-        <div style="font-size:14px;font-weight:500;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.name||'Без имени'}</div>
-        ${c.level?`<div style="font-size:11px;color:var(--hint)">${c.level}</div>`:''}
+        <div style="font-size:14px;font-weight:500;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.name||'Без имени')}</div>
+        ${c.level?`<div style="font-size:11px;color:var(--hint)">${esc(c.level)}</div>`:''}
       </div>
       <select onchange="quickAssignSubgroup('${c.id}',this.value)"
         style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:7px 8px;color:var(--text);font-size:13px;flex-shrink:0;max-width:140px">
@@ -908,7 +908,7 @@ function renderSubgroupManagerHtml() {
     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:9px 12px">
       <span style="font-size:14px">${subLabel(s)}${s===''?' <span style="font-size:11px;color:var(--hint)">(главная)</span>':''} · <span style="color:var(--hint)">${counts[s]||0} дет.</span></span>
       <button class="btn btn-sm" style="background:var(--bg);border:1px solid var(--border);font-size:12px"
-        onclick="promptRenameSubgroup('${encodeURIComponent(s)}')">✏️ Переименовать</button>
+        onclick="promptRenameSubgroup('${encArg(s)}')">✏️ Переименовать</button>
     </div>`).join('');
   setScreen(`<div class="app-header">
     ${backBtn()}
@@ -992,7 +992,7 @@ function promptRenameSubgroup(encS) {
     <div class="modal-header"><h3>${isMain?'Название главной подгруппы':'Переименовать подгруппу'}</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="form-group"><label>${isMain?'Напр. 15:00 (пусто = «Основная»)':'Новое название'}</label>
-      <input id="ren-subgroup-name" type="text" value="${cur}" placeholder="15:00" autocomplete="off"
+      <input id="ren-subgroup-name" type="text" value="${esc(cur)}" placeholder="15:00" autocomplete="off"
         style="width:100%;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text)"
         onkeydown="if(event.key==='Enter')doRenameSubgroup('${encS}')"></div>
     <button class="btn btn-primary btn-full" onclick="doRenameSubgroup('${encS}')">Сохранить</button>
@@ -1035,12 +1035,12 @@ function renderMoveSubgroupModal(clientId) {
   const cur = c.subgroup||'';
   const m = el('div','modal-overlay');
   m.innerHTML=`<div class="modal">
-    <div class="modal-header"><h3>Подгруппа — ${c.name}</h3>
+    <div class="modal-header"><h3>Подгруппа — ${esc(c.name)}</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="form-group"><label>Перевести в</label>
       <select id="msg-sub">
         <option value="" ${cur===''?'selected':''}>${subLabel('')}</option>
-        ${g.subgroups.map(s=>`<option value="${encodeURIComponent(s)}" ${s===cur?'selected':''}>${s}</option>`).join('')}
+        ${g.subgroups.map(s=>`<option value="${encArg(s)}" ${s===cur?'selected':''}>${s}</option>`).join('')}
       </select></div>
     <button class="btn btn-primary btn-full" onclick="doMoveSubgroup('${clientId}')">Перевести</button>
   </div>`;
@@ -1091,7 +1091,7 @@ async function renderGroupHistoryScreen(groupId, monthStr) {
     setScreen(`<div class="app-header">
       ${backBtn()}
       <div class="app-title">История занятий</div>
-      <span style="font-size:12px;color:var(--hint)">${g.groupName||''}</span>
+      <span style="font-size:12px;color:var(--hint)">${esc(g.groupName||'')}</span>
     </div>
     <div class="tab-content"><div class="tab-pad">
       <div class="section-header"><h3>${monthLabel}</h3>
@@ -1105,13 +1105,13 @@ async function renderGroupHistoryScreen(groupId, monthStr) {
         const attTotal = Object.values(d.att).reduce((s,v)=>s+v,0);
         const totTotal = Object.values(d.total).reduce((s,v)=>s+v,0);
         const attLine = hasSubs && totTotal
-          ? Object.keys(d.total).sort().map(sg=>`${sg||'осн.'}: ${d.att[sg]||0}/${d.total[sg]||0}`).join(' · ')
+          ? Object.keys(d.total).sort().map(sg=>`${esc(sg||'осн.')}: ${d.att[sg]||0}/${d.total[sg]||0}`).join(' · ')
           : '';
         const condLine = d.conducted.length
-          ? d.conducted.map(s=>`${fioByTrainer[s.trainer_id]||'—'} <span style="color:var(--hint)">(${s.conducted_role}${(s.subgroup||'')?` · ${s.subgroup}`:''})</span>`).join(', ')
+          ? d.conducted.map(s=>`${esc(fioByTrainer[s.trainer_id]||'—')} <span style="color:var(--hint)">(${s.conducted_role}${(s.subgroup||'')?` · ${esc(s.subgroup)}`:''})</span>`).join(', ')
           : '<span style="color:var(--hint)">не отмечено</span>';
         const subsLine = d.subs.length
-          ? d.subs.map(s=>`${s.substitute?.fio||'?'} вместо ${s.original?.fio||'?'}${s.status!=='approved'?' ⏳':''}`).join(', ')
+          ? d.subs.map(s=>`${esc(s.substitute?.fio||'?')} вместо ${esc(s.original?.fio||'?')}${s.status!=='approved'?' ⏳':''}`).join(', ')
           : '';
         return `<div class="history-item">
           <div class="hi-main" style="justify-content:space-between">
@@ -1139,28 +1139,28 @@ function openChildMenu(clientId) {
   const c = g.clients.find(x=>String(x.id)===String(clientId)); if (!c) return;
   const m = el('div','modal-overlay');
   m.innerHTML=`<div class="modal">
-    <div class="modal-header"><h3>${c.name}</h3>
+    <div class="modal-header"><h3>${esc(c.name)}</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
-    <div style="font-size:12px;color:var(--hint);margin-bottom:12px">${c.level} · ${fmt(c.monthly_price)} сум/мес${c.age?` · ${c.age}л`:''}</div>
+    <div style="font-size:12px;color:var(--hint);margin-bottom:12px">${esc(c.level)} · ${fmt(c.monthly_price)} сум/мес${c.age?` · ${c.age}л`:''}</div>
     <div style="display:flex;flex-direction:column;gap:8px">
       <button class="btn btn-full btn-primary"
         onclick="this.closest('.modal-overlay').remove();toggleGroupPayment('${g.groupId}','${c.id}',true,${c.monthly_price||0},'${g.month}')">💳 Оплата абонемента</button>
       <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border)"
         onclick="this.closest('.modal-overlay').remove();doToggleUnpay('${c.id}')">✕ Снять оплату</button>
       <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border)"
-        onclick="this.closest('.modal-overlay').remove();renderGroupNoteModal('${g.groupId}','${c.id}','${encodeURIComponent(c.name)}','${g.month}','')">📝 Заметка</button>
+        onclick="this.closest('.modal-overlay').remove();renderGroupNoteModal('${g.groupId}','${c.id}','${encArg(c.name)}','${g.month}','')">📝 Заметка</button>
       <div class="form-group" style="margin:0"><label style="font-size:12px">Уровень</label>
         <select onchange="updateGroupClientLevel('${c.id}',this.value)">
           ${GROUP_LEVELS.map(l=>`<option ${l===c.level?'selected':''}>${l}</option>`).join('')}
         </select></div>
       <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border)"
-        onclick="this.closest('.modal-overlay').remove();renderEditGroupClientModal('${c.id}','${encodeURIComponent(c.name)}',${c.age||0},${c.monthly_price||0},'${g.groupId}')">✏️ Редактировать</button>
+        onclick="this.closest('.modal-overlay').remove();renderEditGroupClientModal('${c.id}','${encArg(c.name)}',${c.age||0},${c.monthly_price||0},'${g.groupId}')">✏️ Редактировать</button>
       <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border)"
-        onclick="this.closest('.modal-overlay').remove();renderChildAttendanceHistory('${c.id}','${encodeURIComponent(c.name)}')">📅 История посещений</button>
+        onclick="this.closest('.modal-overlay').remove();renderChildAttendanceHistory('${c.id}','${encArg(c.name)}')">📅 История посещений</button>
       ${g.subgroups?.length?`<button class="btn btn-full" style="background:var(--card);border:1px solid var(--border)"
-        onclick="this.closest('.modal-overlay').remove();renderMoveSubgroupModal('${c.id}')">👥 Перевести в подгруппу…${(c.subgroup||'')?` <span style="font-size:11px;color:var(--hint)">(сейчас: ${c.subgroup})</span>`:''}</button>`:''}
+        onclick="this.closest('.modal-overlay').remove();renderMoveSubgroupModal('${c.id}')">👥 Перевести в подгруппу…${(c.subgroup||'')?` <span style="font-size:11px;color:var(--hint)">(сейчас: ${esc(c.subgroup)})</span>`:''}</button>`:''}
       <button class="btn btn-full btn-danger"
-        onclick="this.closest('.modal-overlay').remove();archiveGroupClientConfirm('${c.id}','${encodeURIComponent(c.name)}','${g.groupId}')">📦 Архив / Удалить</button>
+        onclick="this.closest('.modal-overlay').remove();archiveGroupClientConfirm('${c.id}','${encArg(c.name)}','${g.groupId}')">📦 Архив / Удалить</button>
     </div>
   </div>`;
   document.body.appendChild(m);
@@ -1180,7 +1180,7 @@ async function doToggleUnpay(clientId) {
 async function renderChildAttendanceHistory(clientId, nameEnc) {
   const name = decodeURIComponent(nameEnc);
   const m = el('div','modal-overlay');
-  m.innerHTML=`<div class="modal"><div class="modal-header"><h3>Посещения — ${name}</h3>
+  m.innerHTML=`<div class="modal"><div class="modal-header"><h3>Посещения — ${esc(name)}</h3>
     <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <div id="cah-body"><div class="center-screen"><div class="spinner"></div></div></div></div>`;
   document.body.appendChild(m);

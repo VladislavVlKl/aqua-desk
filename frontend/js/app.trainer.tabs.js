@@ -21,7 +21,7 @@ function renderTrainerShell(tab) {
   setScreen(`
     <div class="app-header">
       <div><div class="app-title">🏋️ AquaDesk</div>
-        <div class="app-sub">${STATE.profile.fio}</div></div>
+        <div class="app-sub">${esc(STATE.profile.fio)}</div></div>
     <div style="display:flex;gap:6px;align-items:center">
       <button class="btn-icon" id="note-badge" onclick="renderOverdueNotesModal(window._overdueMap, window._clientsList)" style="position:relative">📝</button>
       <button class="btn-icon" onclick="openSchedule()">📅</button>
@@ -119,7 +119,7 @@ function _logWorkoutFormInner(clients, branches, subs) {
           const isFrozen = c.freeze_start && c.freeze_end && todayStr() >= c.freeze_start && todayStr() <= c.freeze_end;
           return `<option value="${c.id}" data-cat="${c.category}" data-bal="${c.balance}"
             data-age="${c.age||''}" data-di="${c.drop_in_used}" data-archived="${c.is_archived?'1':''}" data-frozen="${isFrozen?'1':''}" data-weekend="${c.is_weekend?'1':''}">
-            ${c.is_archived?'[Архив] ':isFrozen?'[Заморожен] ':''}${c.fio}${warn}</option>`;
+            ${c.is_archived?'[Архив] ':isFrozen?'[Заморожен] ':''}${esc(c.fio)}${warn}</option>`;
         }).join('')}
       </select>
       <div id="wk-client-chip" style="display:none;padding:10px 12px;background:var(--card);border:1px solid var(--accent);border-radius:8px;justify-content:space-between;align-items:center;cursor:pointer;margin-bottom:0">
@@ -168,7 +168,7 @@ function _logWorkoutFormInner(clients, branches, subs) {
       <div class="form-group"><label>Тренер Б <span class="required">*</span></label>
         <select id="wk-sub-trainer">
           <option value="">— выберите тренера —</option>
-          ${subs.map(p=>`<option value="${p.id}">${p.fio}</option>`).join('')}
+          ${subs.map(p=>`<option value="${p.id}">${esc(p.fio)}</option>`).join('')}
         </select>
       </div>
       <p class="hint">Тренер получит уведомление для подтверждения. ЗП пойдёт ему.</p>
@@ -279,7 +279,7 @@ async function renderClientsTab() {
       else if (warn||noBalance) rowBg = 'background:rgba(245,158,11,.08);border-left:3px solid rgba(245,158,11,.5)';
       return `<div class="client-row" style="${rowBg}" onclick="renderClientProfile('${c.id}','clients')">
         <div style="flex:1;min-width:0">
-          <div class="cr-name" style="font-size:16px;font-weight:600">${dot}${c.is_archived?'<span style="font-size:11px;color:var(--hint);font-weight:400;margin-right:4px">[Архив]</span>':''}${dupBadge}${c.fio}</div>
+          <div class="cr-name" style="font-size:16px;font-weight:600">${dot}${c.is_archived?'<span style="font-size:11px;color:var(--hint);font-weight:400;margin-right:4px">[Архив]</span>':''}${dupBadge}${esc(c.fio)}</div>
           <div class="cr-meta" style="margin-top:2px;display:flex;flex-wrap:wrap;gap:4px;align-items:center">
             <span class="hi-cat cat-${c.category}" style="font-size:11px;padding:1px 7px;border-radius:8px;font-weight:600">Кат.${c.category}</span>
             <span style="font-size:12px;${noBalance?'color:#ef4444;font-weight:600':'color:var(--hint)'}">${c.balance} ПТ</span>
@@ -364,7 +364,7 @@ async function renderOverdueNotesModal(overdueMap, clients) {
           <div style="display:flex;justify-content:space-between;align-items:center;padding:12px;background:rgba(239,68,68,.07);cursor:pointer"
             onclick="toggleOverdueNoteForm('${clientId}')">
             <div>
-              <div style="font-weight:600">${c.fio}</div>
+              <div style="font-weight:600">${esc(c.fio)}</div>
               <div style="font-size:12px;color:var(--hint)">Кат.${c.category} · ${c.balance} ПТ</div>
             </div>
             <span style="background:rgba(239,68,68,.15);color:#ef4444;padding:3px 10px;border-radius:12px;font-weight:700;font-size:13px">${count} конспект${count>1?'а':''}</span>

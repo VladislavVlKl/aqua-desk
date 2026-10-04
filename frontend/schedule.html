@@ -136,6 +136,9 @@
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5rd2Z2dWh0cGFveHNhY3p3c3JnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgxMzUwMzIsImV4cCI6MjA5MzcxMTAzMn0.a2rKoLNBB4OGpuENu1XUhsfbc-8JmPbxEkvLrXqUM3A';
     const DAYS  = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
     const HOURS = Array.from({length:17},(_,i)=>`${String(i+7).padStart(2,'0')}:00`);
+    // Экранирование текста при сборке HTML (ФИО, названия, ?branch= из адреса) — см. esc в app.core.js
+    const _ESC_MAP = { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' };
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, ch => _ESC_MAP[ch]);
 
     const _sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     let allSlots  = [];
@@ -205,7 +208,7 @@
       } else {
         // Показываем бейдж с названием филиала
         document.getElementById('branch-badge').innerHTML =
-          `<span class="branch-badge">📍 ${decodeURIComponent(urlBranch)}</span>`;
+          `<span class="branch-badge">📍 ${esc(decodeURIComponent(urlBranch))}</span>`;
         document.title = `Расписание — ${decodeURIComponent(urlBranch)}`;
       }
 
@@ -295,12 +298,12 @@
                           const role = (window._trainerRoleMap||{})[`${s.trainer_id}_${s.group_type_id}`]||'';
                           slotClass = role==='суша' ? 'slot-group-susha' : 'slot-group-voda';
                         }
-                        return `<div class="slot ${slotClass}"><div class="slot-name">${name}</div><div class="slot-sub">${sub}</div></div>`;
+                        return `<div class="slot ${slotClass}"><div class="slot-name">${esc(name)}</div><div class="slot-sub">${sub}</div></div>`;
                       }),
                       ...dayDuties.map(d=>{
                         const start=new Date(d.start_time).toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit'});
                         const end  =new Date(d.end_time).toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit'});
-                        return `<div class="slot slot-duty"><div class="slot-name">${d.profiles?.fio?.split(' ')[0]||'?'}</div><div class="slot-sub">Деж. ${start}–${end}</div></div>`;
+                        return `<div class="slot slot-duty"><div class="slot-name">${esc(d.profiles?.fio?.split(' ')[0]||'?')}</div><div class="slot-sub">Деж. ${start}–${end}</div></div>`;
                       }),
                     ];
                     return `<td>${items.join('')}</td>`;

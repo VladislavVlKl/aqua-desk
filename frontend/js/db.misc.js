@@ -275,7 +275,7 @@ Object.assign(DB, {
       const subFio  = data.substitute?.fio || 'тренер';
       const origFio = data.original?.fio || 'тренер';
       const approvers = await DB.getBranchApprovers(branch);
-      const msg = `🔄 Замена на подтверждение: ${subFio} вместо ${origFio} · ${grpName} · ${sessionDate}${branch?` · ${branch}`:''}. Подтвердите во вкладке «Контроль».`;
+      const msg = `🔄 Замена на подтверждение: ${esc(subFio)} вместо ${esc(origFio)} · ${esc(grpName)} · ${sessionDate}${branch?` · ${esc(branch)}`:''}. Подтвердите во вкладке «Контроль».`;
       await Promise.all(approvers.map(a => DB.enqueueTrainerNotification(a.id, msg, 'substitution_approve')));
     } catch(e) { console.error('[sub-notify]', e); }
     return data;

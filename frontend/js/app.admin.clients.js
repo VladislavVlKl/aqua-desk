@@ -22,11 +22,11 @@ async function renderAdminClients() {
     <div class="form-group" style="display:flex;gap:8px">
       <select id="cl-branch" onchange="filterAdminClients()" style="flex:1">
         <option value="">Все филиалы</option>
-        ${branches.map(b=>`<option>${b.name}</option>`).join('')}
+        ${branches.map(b=>`<option>${esc(b.name)}</option>`).join('')}
       </select>
       <select id="cl-trainer" onchange="filterAdminClients()" style="flex:1">
         <option value="">Все тренеры</option>
-        ${trainers.map(t=>`<option value="${t.id}">${t.fio}</option>`).join('')}
+        ${trainers.map(t=>`<option value="${t.id}">${esc(t.fio)}</option>`).join('')}
       </select>
     </div>
     <input id="cl-search" type="text" placeholder="🔍 Поиск по имени..."
@@ -65,11 +65,11 @@ function renderClientList(clients, dupNamesOverride) {
     <div class="client-row" onclick="renderClientProfile('${c.id}','admin-clients')">
       <div style="flex:1;min-width:0">
         <div class="cr-name" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-          ${dupBadge}${c.fio}${c.age?` <span class="hint" style="font-weight:400">${c.age}л</span>`:''}
+          ${dupBadge}${esc(c.fio)}${c.age?` <span class="hint" style="font-weight:400">${c.age}л</span>`:''}
           ${expired?'<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:rgba(239,68,68,.15);color:#ef4444">истёк</span>':''}
           ${!expired&&noBalance?'<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:rgba(245,158,11,.15);color:#f59e0b">баланс 0</span>':''}
         </div>
-        <div class="cr-meta">${c._trainerFio} · кат.${c.category} · ${c.balance} ПТ${c.subscription_end?' · до '+fmtDate(c.subscription_end):''}</div>
+        <div class="cr-meta">${esc(c._trainerFio)} · кат.${c.category} · ${c.balance} ПТ${c.subscription_end?' · до '+fmtDate(c.subscription_end):''}</div>
       </div>
       <span class="cr-arrow" style="color:${warn?'#ef4444':'var(--hint)'}">›</span>
     </div>`;
@@ -104,7 +104,7 @@ async function renderAdminSummary() {
     </div>
     <div class="form-group"><select id="sum-branch">
       <option value="">Все филиалы</option>
-      ${branches.map(b=>`<option>${b.name}</option>`).join('')}
+      ${branches.map(b=>`<option>${esc(b.name)}</option>`).join('')}
     </select></div>
     <div id="sum-body"><div class="center-screen"><div class="spinner"></div></div></div>
   </div>`;
@@ -163,7 +163,7 @@ async function loadAdminSummary(year,month,branch) {
       ${renderDutyPlanFact(data,year,month,branch)}
       ${renderSummaryTable(data,year,month,true)}
       <button class="btn btn-sm" style="margin-top:12px;width:100%"
-        onclick="doExportSummary(${year},${month},'${branch||''}')">⬇️ Скачать Excel (сводный)</button>`;
+        onclick="doExportSummary(${year},${month},'${jsq(branch||'')}')">⬇️ Скачать Excel (сводный)</button>`;
   } catch(e) { body.innerHTML='<p class="hint">Ошибка</p>'; console.error(e); }
 }
 
@@ -241,8 +241,8 @@ function renderSummaryTable(data,year,month,isAdmin) {
     </tr></thead>
     <tbody>
       ${rows.map(({p,sal})=>`<tr class="clickable"
-        onclick="${isAdmin?`adminDetail(${p.id},'${encodeURIComponent(p.fio)}',${year},${month})`:'void(0)'}">
-        <td>${p.fio}</td>
+        onclick="${isAdmin?`adminDetail(${p.id},'${encArg(p.fio)}',${year},${month})`:'void(0)'}">
+        <td>${esc(p.fio)}</td>
         <td>${sal.cat[1]}</td><td>${sal.cat[2]}</td><td>${sal.cat[3]}</td>
         <td>${(sal.cat.dropIn1||0)+(sal.cat.dropIn2||0)+(sal.cat.dropIn3||0)}</td><td>${sal.cat.debt}</td>
         <td>${sal.hours.toFixed(1)}ч</td>
@@ -262,7 +262,7 @@ function renderSummaryTable(data,year,month,isAdmin) {
 async function adminDetail(trainerId,fioEnc,year,month) {
   const fio=decodeURIComponent(fioEnc);
   setupBack(()=>{renderAdminApp('summary');setupBack(null);});
-  $('#tab-content').innerHTML=`<div class="tab-pad"><h3>${fio}</h3><div class="center-screen"><div class="spinner"></div></div></div>`;
+  $('#tab-content').innerHTML=`<div class="tab-pad"><h3>${esc(fio)}</h3><div class="center-screen"><div class="spinner"></div></div></div>`;
   try {
     const d=await DB.getTrainerDetail(trainerId,year,month);
     // Экран открывается только для активных тренеров из сводки → find по общему списку.
@@ -270,8 +270,8 @@ async function adminDetail(trainerId,fioEnc,year,month) {
     const sal=calcSalary({...d,trainerId});
     $('#tab-content').innerHTML=`<div class="tab-pad">
       <div class="section-header">
-        <div><h3>${fio}</h3><p class="hint">${fmtMY(year,month)}</p></div>
-        <button class="btn btn-sm" onclick="doExportTrainer(${trainerId},'${encodeURIComponent(fio)}',${year},${month})">⬇️ Excel</button>
+        <div><h3>${esc(fio)}</h3><p class="hint">${fmtMY(year,month)}</p></div>
+        <button class="btn btn-sm" onclick="doExportTrainer(${trainerId},'${encArg(fio)}',${year},${month})">⬇️ Excel</button>
       </div>
       <div class="summary-cards">
         <div class="summary-card"><div class="s-val">${sal.cat[1]+sal.cat[2]+sal.cat[3]}</div><div class="s-lbl">ПТ</div></div>
@@ -294,12 +294,12 @@ async function adminDetail(trainerId,fioEnc,year,month) {
       ${!d.workouts.length?'<p class="hint">Нет</p>':d.workouts.map(w=>`
         <div class="history-item">
           <div class="hi-main">
-            <span class="hi-client">${w.clients?.fio||'—'}</span>
+            <span class="hi-client">${esc(w.clients?.fio||'—')}</span>
             <span class="hi-cat cat-${w.category_at_moment}">Кат.${w.category_at_moment}</span>
             ${w.is_drop_in?`<span class="drop-badge">Разовая ${w.drop_in_category||1}кт</span>`:''}
             ${w.is_debt&&!w.debt_confirmed_at?'<span class="debt-badge">В долг</span>':''}
           </div>
-          <div class="hi-sub">${fmtDT(w.workout_date)} · ${w.branch}</div>
+          <div class="hi-sub">${fmtDT(w.workout_date)} · ${esc(w.branch)}</div>
         </div>`).join('')}
 
       ${d.groupSessions.length?`
@@ -308,7 +308,7 @@ async function adminDetail(trainerId,fioEnc,year,month) {
           const rate = gs.group_types?.billing_model==='headcount' ? getAdultGroupRate(gs.headcount) : 0;
           return `<div class="history-item">
             <div class="hi-main">
-              <span class="hi-client">${gs.group_types?.name||'Группа'}</span>
+              <span class="hi-client">${esc(gs.group_types?.name||'Группа')}</span>
               ${rate>0?`<span class="hi-cat" style="background:rgba(16,185,129,.15);color:#10b981">${fmt(rate)} сум</span>`:''}
               ${gs.headcount?`<span class="hint">${gs.headcount} чел.</span>`:''}
             </div>
@@ -323,18 +323,18 @@ async function adminDetail(trainerId,fioEnc,year,month) {
         return `<div class="history-item" style="${rej?'opacity:.55':''}">
           <div class="hi-main" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
             <div style="min-width:0">
-              <span class="hi-client" style="${rej?'text-decoration:line-through':''}">${duty.branch}</span>
+              <span class="hi-client" style="${rej?'text-decoration:line-through':''}">${esc(duty.branch)}</span>
               <span class="hi-cat">${h.toFixed(2)}ч</span>
               ${rej?'<span class="hi-cat" style="background:rgba(239,68,68,.15);color:#ef4444">отклонено</span>':''}
             </div>
             ${rej
               ? `<button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border);flex-shrink:0"
-                   onclick="doRestoreDuty('${duty.id}',${trainerId},'${encodeURIComponent(fio)}',${year},${month})">↩︎ Вернуть</button>`
+                   onclick="doRestoreDuty('${duty.id}',${trainerId},'${encArg(fio)}',${year},${month})">↩︎ Вернуть</button>`
               : `<button class="btn btn-sm btn-danger" style="flex-shrink:0"
-                   onclick="doRejectDuty('${duty.id}',${trainerId},'${encodeURIComponent(fio)}',${year},${month})">Отклонить</button>`}
+                   onclick="doRejectDuty('${duty.id}',${trainerId},'${encArg(fio)}',${year},${month})">Отклонить</button>`}
           </div>
           <div class="hi-sub">${fmtDT(duty.start_time)} → ${fmtDT(duty.end_time)}</div>
-          <div class="hi-sub">${rej?'<s>':''}${fmt(Math.round(h*RATES.duty_per_hour))} сум${rej?'</s>':''}${rej&&duty.reject_reason?' · причина: '+duty.reject_reason:''}</div>
+          <div class="hi-sub">${rej?'<s>':''}${fmt(Math.round(h*RATES.duty_per_hour))} сум${rej?'</s>':''}${esc(rej&&duty.reject_reason?' · причина: '+duty.reject_reason:'')}</div>
         </div>`;
       }).join('')}
 
@@ -342,11 +342,11 @@ async function adminDetail(trainerId,fioEnc,year,month) {
         <h4 style="margin-top:16px">🆕 Пробные тренировки (${d.trialSessions.length})</h4>
         ${d.trialSessions.map(t=>`<div class="history-item">
           <div class="hi-main">
-            <span class="hi-client">${t.first_name}${t.last_name?' '+t.last_name:''}</span>
+            <span class="hi-client">${esc(t.first_name)}${esc(t.last_name?' '+t.last_name:'')}</span>
             <span class="hi-cat cat-${t.category}">Кат.${t.category}</span>
             <span style="font-size:11px;background:rgba(139,92,246,.15);color:#7c3aed;padding:2px 6px;border-radius:6px">${fmt(RATES.pt[t.category])} сум</span>
           </div>
-          <div class="hi-sub">${fmtDate(t.session_date)} · ${t.branch}${t.phone?' · '+t.phone:''}${t.age?' · '+t.age+' лет':''}</div>
+          <div class="hi-sub">${fmtDate(t.session_date)} · ${esc(t.branch)}${esc(t.phone?' · '+t.phone:'')}${t.age?' · '+t.age+' лет':''}</div>
         </div>`).join('')}`:''}
 
       <h4 style="margin-top:16px">Конспекты (${(d.sessionNotes||[]).length})</h4>
@@ -354,12 +354,12 @@ async function adminDetail(trainerId,fioEnc,year,month) {
         (d.sessionNotes||[]).map(n=>`
           <div class="history-item">
             <div class="hi-main">
-              <span class="hi-client">${n.clients?.fio||'—'}</span>
+              <span class="hi-client">${esc(n.clients?.fio||'—')}</span>
               ${n.workouts?.category_at_moment?`<span class="hi-cat cat-${n.workouts.category_at_moment}">Кат.${n.workouts.category_at_moment}</span>`:''}
             </div>
             ${n.workouts?.workout_date?`<div class="hi-sub">Тренировка: ${fmtDate(n.workouts.workout_date)}</div>`:''}
-            ${n.accomplishments?`<div style="margin-top:6px;font-size:13px"><b>Что делали:</b> ${n.accomplishments}</div>`:''}
-            ${n.next_task?`<div style="font-size:13px;color:var(--hint)"><b>Задача:</b> ${n.next_task}</div>`:''}
+            ${n.accomplishments?`<div style="margin-top:6px;font-size:13px"><b>Что делали:</b> ${esc(n.accomplishments)}</div>`:''}
+            ${n.next_task?`<div style="font-size:13px;color:var(--hint)"><b>Задача:</b> ${esc(n.next_task)}</div>`:''}
           </div>`).join('')}
     </div>`;
   } catch(e) { toast('Ошибка','error'); console.error(e); }
@@ -408,7 +408,7 @@ function renderAdjForm(trainerId, year, month, adjRows, branches) {
       <div class="form-group" style="flex:1;margin:0"><label>Штраф</label>
         <input type="number" id="adj-penalty" value="${curAdj.penalty||0}" min="0"></div>
     </div>
-    <input id="adj-notes" type="text" placeholder="Комментарий" value="${curAdj.notes||''}">
+    <input id="adj-notes" type="text" placeholder="Комментарий" value="${esc(curAdj.notes||'')}">
     <button class="btn btn-sm btn-primary" style="margin-top:8px;width:100%"
       onclick="doSaveAdj(${trainerId},${year},${month})">Сохранить</button>
   </div>`;

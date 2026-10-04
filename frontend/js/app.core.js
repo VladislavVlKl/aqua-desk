@@ -155,6 +155,25 @@ function el(tag,cls,html) {
 }
 function fmt(n)     { return Number(n).toLocaleString('ru-RU'); }
 
+// ── ЭКРАНИРОВАНИЕ пользовательских данных при сборке HTML строками ──
+// Любой текст, введённый людьми (ФИО, названия, заметки, причины…), вставлять
+// в шаблон только через эти хелперы — иначе «<» / «&» / кавычки ломают вёрстку,
+// а подставленный тег исполняется у того, кто открыл экран (XSS).
+// Для обычного текста все три возвращают строку без изменений.
+//   esc(x)    — текст и значения атрибутов:      <b>${esc(c.fio)}</b>, value="${esc(c.fio)}"
+//   jsq(x)    — строка внутри on*-обработчика:  onclick="fn('${jsq(c.fio)}')"  (на той стороне — как есть)
+//   encArg(x) — то же, но закодированно:        onclick="fn('${encArg(c.fio)}')" (на той стороне — decodeURIComponent)
+const _ESC_MAP = { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' };
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, ch => _ESC_MAP[ch]); }
+function jsq(s) { return esc(JSON.stringify(String(s)).slice(1, -1).replace(/'/g, "\\'")); }
+// encodeURIComponent не кодирует апостроф → «G'ulomov» рвал JS-строку обработчика.
+function encArg(s) { return encodeURIComponent(s).replace(/'/g, '%27'); }
+// HTML-сообщение (уведомления хранятся в HTML-формате) → обычный текст, без исполнения.
+function htmlToText(html) {
+  try { return new DOMParser().parseFromString(String(html ?? ''), 'text/html').body.textContent || ''; }
+  catch (e) { return String(html ?? '').replace(/<[^>]*>/g, ''); }
+}
+
 // Статья ЗП «Разница от пересчёта» (сверка с 1С) для «Детализации ЗП».
 // Раскрывается по клику → разбивка по клиентам: кому и на сколько доначислено/снято.
 // recalc = { sum, rows:[{clientFio, delta, category}] }. Пусто → ''.
@@ -183,7 +202,7 @@ function recalcArticleHtml(recalc) {
     </div>
     <div hidden>
       ${rows.map(r=>`<div style="display:flex;justify-content:space-between;padding:3px 0 3px 12px;font-size:12px;color:var(--hint)">
-        <span>${r.clientFio||'—'}${units(r)}</span>
+        <span>${esc(r.clientFio||'—')}${units(r)}</span>
         <span style="color:${col(r.delta)}">${sign(r.delta)}${money(r.delta)} сум</span>
       </div>`).join('')}
     </div>`;
@@ -296,7 +315,9 @@ function openSelfInBrowser() {
   openInBrowser(url);
 }
 function toast(msg, type='info') {
-  const t=el('div',`toast toast-${type}`,msg);
+  // Только текст (textContent): в тосты попадают ФИО и сообщения ошибок — разметки там нет.
+  const t=el('div',`toast toast-${type}`);
+  t.textContent = msg;
   document.body.appendChild(t);
   setTimeout(()=>t.classList.add('show'),10);
   setTimeout(()=>{t.classList.remove('show');setTimeout(()=>t.remove(),300);},3200);
@@ -539,7 +560,7 @@ async function maybeShowUpdateModal() {
 function _showUpdateModal(u, onClose) {
   const m = el('div','modal-overlay');
   m.innerHTML = `<div class="modal">
-    <div class="modal-header"><h3>🆕 ${u.title||'Что нового'}</h3></div>
+    <div class="modal-header"><h3>🆕 ${esc(u.title||'Что нового')}</h3></div>
     <div style="display:flex;flex-direction:column;gap:10px;margin:8px 0 16px">
       ${(u.items||[]).map(it=>`<div style="font-size:14px;line-height:1.5">${it}</div>`).join('')}
     </div>

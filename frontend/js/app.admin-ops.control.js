@@ -59,8 +59,8 @@ async function renderAdminControl(force=false) {
       ${pendingSubs.map(s=>{
         const sugg = (s.trainer_groups?.group_types?.billing_model==='headcount' && s.headcount) ? getAdultGroupRate(s.headcount) : '';
         return `<div class="control-item">
-        <div class="ci-main"><b>${s.substitute?.fio||'?'}</b> вместо ${s.original?.fio||'?'} <span class="hint">${s.trainer_groups?.branch||''}</span></div>
-        <div class="ci-sub">${s.trainer_groups?.group_types?.name||'Группа'} · ${fmtDate(s.session_date)}</div>
+        <div class="ci-main"><b>${esc(s.substitute?.fio||'?')}</b> вместо ${esc(s.original?.fio||'?')} <span class="hint">${esc(s.trainer_groups?.branch||'')}</span></div>
+        <div class="ci-sub">${esc(s.trainer_groups?.group_types?.name||'Группа')} · ${fmtDate(s.session_date)}</div>
         ${s.headcount?`<div class="ci-sub" style="color:#10b981">👥 ${s.headcount} чел.${sugg?` → ставка ${fmt(sugg)} сум`:''}</div>`:''}
         <div style="display:flex;gap:6px;margin-top:8px;align-items:center">
           <input type="number" id="asub-rate-${s.id}" placeholder="Ставка (сум)" value="${sugg||''}"
@@ -95,10 +95,10 @@ async function renderAdminControl(force=false) {
         `🛎 Несписанные — висят у ресепшн (${recHanging.length}${overdue.length?` · ⏰ ${overdue.length} > ${RECEPTION_ESCALATE_HRS}ч`:''})`,
         overdue.length?'danger':'warn',
         recHanging.slice(0,30).map(w=>{
-          const esc=new Date(w.workout_date).getTime()<escThreshold;
-          return `<div class="control-item" id="ctrl-hang-${w.id}" ${esc?'style="border-left:3px solid var(--danger)"':''}>
-            <div class="ci-main">${w.clients?.fio||'?'} <span class="hint">← ${w.profiles?.fio||'?'}</span>${seqStr(w)}</div>
-            <div class="ci-sub">🏊 ${w.branch||'—'} · ПТ ${fmtDT(w.workout_date)} · висит ${ageStr(w.workout_date)}${esc?' ⏰':''}</div>
+          const isOverdue=new Date(w.workout_date).getTime()<escThreshold;
+          return `<div class="control-item" id="ctrl-hang-${w.id}" ${isOverdue?'style="border-left:3px solid var(--danger)"':''}>
+            <div class="ci-main">${esc(w.clients?.fio||'?')} <span class="hint">← ${esc(w.profiles?.fio||'?')}</span>${seqStr(w)}</div>
+            <div class="ci-sub">🏊 ${esc(w.branch||'—')} · ПТ ${fmtDT(w.workout_date)} · висит ${ageStr(w.workout_date)}${isOverdue?' ⏰':''}</div>
             <div style="margin-top:8px">
               <button class="btn btn-sm btn-primary" onclick="doControlConfirmDeduction('${w.id}')" title="Подтвердить списание за ресепшн (Шаг 1 → 1С)">✓ Подтвердить</button>
             </div>
@@ -113,8 +113,8 @@ async function renderAdminControl(force=false) {
         recHangingTrials.slice(0,30).map(t=>{
           const cname = `${t.first_name||''}${t.last_name?' '+t.last_name:''}`.trim()||'?';
           return `<div class="control-item" id="ctrl-hangt-${t.id}">
-            <div class="ci-main">${cname} <span class="hint">← ${t.profiles?.fio||'?'}</span>${t.category?` <span class="hi-cat cat-${t.category}">Кат.${t.category}</span>`:''}</div>
-            <div class="ci-sub">🏊 ${t.branch||'—'} · 🆕 Пробная ${fmtDT(t.session_date)} · висит ${ageStrT(t.session_date)}</div>
+            <div class="ci-main">${esc(cname)} <span class="hint">← ${esc(t.profiles?.fio||'?')}</span>${t.category?` <span class="hi-cat cat-${t.category}">Кат.${t.category}</span>`:''}</div>
+            <div class="ci-sub">🏊 ${esc(t.branch||'—')} · 🆕 Пробная ${fmtDT(t.session_date)} · висит ${ageStrT(t.session_date)}</div>
             <div style="margin-top:8px">
               <button class="btn btn-sm btn-primary" onclick="doControlConfirmTrial('${t.id}')" title="Подтвердить пробную за ресепшн (Шаг 1 → 1С)">✓ Подтвердить</button>
             </div>
@@ -131,9 +131,9 @@ async function renderAdminControl(force=false) {
     if (recRej.length) monitorSections.push(collapse('rejected',
       `🔴 Отказанные списания (${recRej.length})`, 'danger',
       recRej.map(q=>`<div class="control-item" id="recrej-${q._kind}-${q.id}">
-        <div class="ci-main">${q.fio} <span class="hint">← ${q.trainer}</span>${q._kind==='t'?' <span class="hint">(пробное)</span>':''}${seqStr(q)}</div>
-        <div class="ci-sub">🏊 ${q.branch||'—'} · ПТ ${fmtDT(q.wdate)}</div>
-        <div class="ci-sub">✗ отклонено ${fmtDT(q.ts)}${q.reason?` · ${RECEPTION_REJECT_REASONS[q.reason]||q.reason}`:''}</div>
+        <div class="ci-main">${esc(q.fio)} <span class="hint">← ${esc(q.trainer)}</span>${q._kind==='t'?' <span class="hint">(пробное)</span>':''}${seqStr(q)}</div>
+        <div class="ci-sub">🏊 ${esc(q.branch||'—')} · ПТ ${fmtDT(q.wdate)}</div>
+        <div class="ci-sub">✗ отклонено ${fmtDT(q.ts)}${q.reason?` · ${esc(RECEPTION_REJECT_REASONS[q.reason]||q.reason)}`:''}</div>
         ${q._kind==='w'?`<div style="margin-top:8px">
           <button class="btn btn-sm btn-primary" onclick="doRestoreRejectedWorkout('${q.id}')" title="Отклонили ошибочно — заново списать ПТ и засчитать в ЗП">↩︎ Вернуть списание</button>
         </div>`:''}
@@ -148,17 +148,17 @@ async function renderAdminControl(force=false) {
     if (recConf.length) monitorSections.push(collapse('confirmed',
       `🧾 Списанные за 3 дня (${recConf.length})`, '',
       recConf.slice(0,100).map(q=>`<div class="control-item">
-        <div class="ci-main">${q.fio} <span class="hint">← ${q.trainer}</span>${q._kind==='t'?' <span class="hint">(пробное)</span>':''}${seqStr(q)}</div>
-        <div class="ci-sub">🏊 ${q.branch||'—'} · ПТ ${fmtDT(q.wdate)}</div>
+        <div class="ci-main">${esc(q.fio)} <span class="hint">← ${esc(q.trainer)}</span>${q._kind==='t'?' <span class="hint">(пробное)</span>':''}${seqStr(q)}</div>
+        <div class="ci-sub">🏊 ${esc(q.branch||'—')} · ПТ ${fmtDT(q.wdate)}</div>
       </div>`).join('')
       + (recConf.length>100?`<div class="ci-sub" style="padding:8px 0;color:var(--hint)">…показаны первые 100 из ${recConf.length}</div>`:'')));
     // ⏰ Запросы на поздние тренировки
     if (lateRequests.length) actionSections.push(`<div class="control-section">
       <div class="control-title danger">⏰ Запросы на поздние тренировки (${lateRequests.length})</div>
       ${lateRequests.map(r=>`<div class="control-item">
-        <div class="ci-main"><b>${r.clients?.fio||'?'}</b> · кат.${r.category} · ${r.profiles?.fio||'?'}</div>
-        <div class="ci-sub">📅 ${fmtDT(r.workout_date)} · ${r.branch}</div>
-        <div class="ci-sub" style="margin-top:4px;color:var(--text)">💬 ${r.reason}</div>
+        <div class="ci-main"><b>${esc(r.clients?.fio||'?')}</b> · кат.${r.category} · ${esc(r.profiles?.fio||'?')}</div>
+        <div class="ci-sub">📅 ${fmtDT(r.workout_date)} · ${esc(r.branch)}</div>
+        <div class="ci-sub" style="margin-top:4px;color:var(--text)">💬 ${esc(r.reason)}</div>
         <div style="display:flex;gap:6px;margin-top:8px">
           <button class="btn btn-sm btn-primary" onclick="doApproveLateRequest(${r.id})">✓ Одобрить</button>
           <button class="btn btn-sm btn-danger" onclick="doRejectLateRequest(${r.id})">✗ Отклонить</button>
@@ -169,8 +169,8 @@ async function renderAdminControl(force=false) {
     if (catRecalcReqs.length) actionSections.push(`<div class="control-section">
       <div class="control-title warn">🔄 Пересчёт категории прошлых ПТ (${catRecalcReqs.length})</div>
       ${catRecalcReqs.map(r=>`<div class="control-item">
-        <div class="ci-main"><b>${r.clients?.fio||r.client_fio||'?'}</b> · Кат.${r.clients?.category||'?'} → Кат.${r.new_category}</div>
-        <div class="ci-sub">Тренер: ${r.profiles?.fio||'?'} · ${r.branch||''} · ${r.scope==='all'?'все ПТ':'текущий месяц'}</div>
+        <div class="ci-main"><b>${esc(r.clients?.fio||r.client_fio||'?')}</b> · Кат.${r.clients?.category||'?'} → Кат.${r.new_category}</div>
+        <div class="ci-sub">Тренер: ${esc(r.profiles?.fio||'?')} · ${esc(r.branch||'')} · ${r.scope==='all'?'все ПТ':'текущий месяц'}</div>
         <div style="display:flex;gap:6px;margin-top:8px">
           <button class="btn btn-sm btn-primary" onclick="doApproveCatRecalc(${r.id},'admin')">✓ Одобрить</button>
           <button class="btn btn-sm btn-danger" onclick="doRejectCatRecalc(${r.id},'admin')">✗ Отклонить</button>
@@ -181,8 +181,8 @@ async function renderAdminControl(force=false) {
     if (workoutDelReqs.length) actionSections.push(`<div class="control-section">
       <div class="control-title danger">🗑 Запросы на удаление ПТ (${workoutDelReqs.length})</div>
       ${workoutDelReqs.map(r=>`<div class="control-item">
-        <div class="ci-main">${r.client_name||'—'} · ${fmtDate(r.workout_date)}</div>
-        <div class="ci-sub">Тренер: ${r.profiles?.fio||'?'} · ${r.branch||''}</div>
+        <div class="ci-main">${esc(r.client_name||'—')} · ${fmtDate(r.workout_date)}</div>
+        <div class="ci-sub">Тренер: ${esc(r.profiles?.fio||'?')} · ${esc(r.branch||'')}</div>
         <div style="display:flex;gap:6px;margin-top:6px">
           <button class="btn btn-sm btn-danger" onclick="doApproveWorkoutDelete('${r.id}','${r.workout_id}')">Удалить</button>
           <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
@@ -194,8 +194,8 @@ async function renderAdminControl(force=false) {
     if (trialDelReqs.length) actionSections.push(`<div class="control-section">
       <div class="control-title danger">🗑 Запросы на удаление пробной (${trialDelReqs.length})</div>
       ${trialDelReqs.map(r=>`<div class="control-item">
-        <div class="ci-main">${r.client_name||'—'} · ${fmtDate(r.session_date)}</div>
-        <div class="ci-sub">Тренер: ${r.profiles?.fio||'?'} · ${r.branch||''}</div>
+        <div class="ci-main">${esc(r.client_name||'—')} · ${fmtDate(r.session_date)}</div>
+        <div class="ci-sub">Тренер: ${esc(r.profiles?.fio||'?')} · ${esc(r.branch||'')}</div>
         <div style="display:flex;gap:6px;margin-top:6px">
           <button class="btn btn-sm btn-danger" onclick="doApproveTrialDelete('${r.id}','${r.trial_id}')">Удалить</button>
           <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
@@ -207,12 +207,12 @@ async function renderAdminControl(force=false) {
     if (deleteReqs.length) actionSections.push(`<div class="control-section">
       <div class="control-title danger">🗑 Запросы на удаление (${deleteReqs.length})</div>
       ${deleteReqs.map(r=>`<div class="control-item">
-        <div class="ci-main">${r.client_name} <span class="hint">← ${r.profiles?.fio||'?'}</span></div>
+        <div class="ci-main">${esc(r.client_name)} <span class="hint">← ${esc(r.profiles?.fio||'?')}</span></div>
         <div class="ci-sub" style="font-size:11px;color:var(--text-secondary)">
           Запрос: ${fmtDate(r.created_at)}${r.clients?.balance!=null?' · Баланс: '+r.clients.balance:''}${r.clients?.subscription_end?' · Абон до: '+fmtDate(r.clients.subscription_end):''}
         </div>
         <div style="display:flex;gap:6px;margin-top:6px">
-          <button class="btn btn-sm btn-danger" onclick="doApproveDelete('${r.id}','${r.client_id}','${encodeURIComponent(r.client_name||'')}')">Удалить</button>
+          <button class="btn btn-sm btn-danger" onclick="doApproveDelete('${r.id}','${r.client_id}','${encArg(r.client_name||'')}')">Удалить</button>
           <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
             onclick="doRejectDelete('${r.id}')">Отклонить</button>
         </div>
@@ -337,32 +337,32 @@ async function renderAdminMonitoring(force=false) {
     if (data.expiringClients.length) sections.push(`<div class="control-section">
       <div class="control-title warn">⚠️ Абонементы истекают (${data.expiringClients.length})</div>
       ${data.expiringClients.map(c=>`<div class="control-item">
-        <div class="ci-main">${c.fio} <span class="hint">→ ${c.profiles?.fio||'?'}</span></div>
+        <div class="ci-main">${esc(c.fio)} <span class="hint">→ ${esc(c.profiles?.fio||'?')}</span></div>
         <div class="ci-sub">Истекает: ${c.subscription_end} (${daysUntil(c.subscription_end)} дн.)</div>
       </div>`).join('')}</div>`);
     if (data.oldDebt.length) sections.push(`<div class="control-section">
       <div class="control-title danger">❗ Долг > 3 дней (${data.oldDebt.length})</div>
       ${data.oldDebt.map(w=>`<div class="control-item">
-        <div class="ci-main">${w.clients?.fio||'?'} ← ${w.profiles?.fio||'?'}</div>
+        <div class="ci-main">${esc(w.clients?.fio||'?')} ← ${esc(w.profiles?.fio||'?')}</div>
         <div class="ci-sub">${fmtDate(w.workout_date)}</div>
       </div>`).join('')}</div>`);
     if (data.childDropinAbuse.length) sections.push(`<div class="control-section">
       <div class="control-title danger">🚫 Дети с повторным разовым (${data.childDropinAbuse.length})</div>
       ${data.childDropinAbuse.map(c=>`<div class="control-item">
-        <div class="ci-main">${c.fio} (${c.age} лет)</div>
-        <div class="ci-sub">${c.profiles?.fio||'?'}</div>
+        <div class="ci-main">${esc(c.fio)} (${c.age} лет)</div>
+        <div class="ci-sub">${esc(c.profiles?.fio||'?')}</div>
       </div>`).join('')}</div>`);
     if (data.suspiciousBatch.length) sections.push(`<div class="control-section">
       <div class="control-title warn">🔍 Подозрительные пакетные</div>
       ${data.suspiciousBatch.map(x=>`<div class="control-item">
-        <div class="ci-main">${x.rec.profiles?.fio||'?'}</div>
-        <div class="ci-sub">«${x.rec.notes}» — ${x.count} ПТ · ${fmtDate(x.rec.workout_date)}</div>
+        <div class="ci-main">${esc(x.rec.profiles?.fio||'?')}</div>
+        <div class="ci-sub">«${esc(x.rec.notes)}» — ${x.count} ПТ · ${fmtDate(x.rec.workout_date)}</div>
       </div>`).join('')}</div>`);
     if (inactive.length) sections.push(`<div class="control-section">
       <div class="control-title hint-title">💤 Нет активности (${inactive.length})</div>
       ${inactive.map(t=>`<div class="control-item">
-        <div class="ci-main">${t.fio}</div>
-        <div class="ci-sub">${(t.branches||[]).join(', ')}</div>
+        <div class="ci-main">${esc(t.fio)}</div>
+        <div class="ci-sub">${esc((t.branches||[]).join(', '))}</div>
       </div>`).join('')}</div>`);
     // Пробные тренировки — алерт если >5 у одного тренера
     if (allTrials.length) {
@@ -375,18 +375,18 @@ async function renderAdminMonitoring(force=false) {
       const heavy = Object.entries(trialByTrainer).filter(([,arr])=>arr.length>=5);
       if (heavy.length) {
         sections.push(`<div class="control-section">
-          <div class="control-title warn">🆕 Много пробных (${heavy.map(([f,a])=>f+': '+a.length).join(', ')})</div>
+          <div class="control-title warn">🆕 Много пробных (${esc(heavy.map(([f,a])=>f+': '+a.length).join(', '))})</div>
           ${heavy.map(([fio,arr])=>`<div class="control-item">
-            <div class="ci-main">${fio} — <b>${arr.length}</b> пробных за месяц</div>
-            <div class="ci-sub">${arr.slice(0,3).map(t=>`${t.first_name}${t.last_name?' '+t.last_name:''}`).join(', ')}${arr.length>3?` и ещё ${arr.length-3}`:''}</div>
+            <div class="ci-main">${esc(fio)} — <b>${arr.length}</b> пробных за месяц</div>
+            <div class="ci-sub">${arr.slice(0,3).map(t=>`${esc(t.first_name)}${esc(t.last_name?' '+t.last_name:'')}`).join(', ')}${arr.length>3?` и ещё ${arr.length-3}`:''}</div>
           </div>`).join('')}
         </div>`);
       }
       sections.push(`<div class="control-section">
         <div class="control-title" style="background:rgba(139,92,246,.15);color:#7c3aed">🆕 Пробные за месяц (${allTrials.length})</div>
         ${allTrials.map(t=>`<div class="control-item">
-          <div class="ci-main">${t.first_name}${t.last_name?' '+t.last_name:''} · Кат.${t.category}${t.phone?' · '+t.phone:''}</div>
-          <div class="ci-sub">${t.profiles?.fio||'?'} · ${fmtDate(t.session_date)}</div>
+          <div class="ci-main">${esc(t.first_name)}${esc(t.last_name?' '+t.last_name:'')} · Кат.${t.category}${esc(t.phone?' · '+t.phone:'')}</div>
+          <div class="ci-sub">${esc(t.profiles?.fio||'?')} · ${fmtDate(t.session_date)}</div>
         </div>`).join('')}
       </div>`);
     }
@@ -404,13 +404,13 @@ async function renderAdminMonitoring(force=false) {
           const borderColor = t.overdueNotes>0?'var(--danger)':t.monthWorkouts===0?'var(--warn)':'var(--success)';
           return `<div class="control-item" style="border-left:3px solid ${borderColor}">
             <div class="ci-main" style="display:flex;justify-content:space-between;align-items:center">
-              <span>${t.fio}</span>
+              <span>${esc(t.fio)}</span>
               <div style="display:flex;gap:6px;font-size:12px">
                 ${t.overdueNotes>0?`<span style="background:rgba(239,68,68,.15);color:var(--danger);padding:2px 6px;border-radius:8px">⚠️ ${t.overdueNotes} конспект${t.overdueNotes>1?'ов':''}</span>`:''}
                 <span style="background:rgba(59,130,246,.1);color:#3b82f6;padding:2px 6px;border-radius:8px">${t.monthWorkouts} ПТ</span>
               </div>
             </div>
-            <div class="ci-sub">${(t.branches||[]).join(', ')} · последняя ПТ: ${daysSince(t.lastWorkout)}${!t.tg_id?' · ⏳ не входил':''}</div>
+            <div class="ci-sub">${esc((t.branches||[]).join(', '))} · последняя ПТ: ${daysSince(t.lastWorkout)}${!t.tg_id?' · ⏳ не входил':''}</div>
           </div>`;
         }).join('')}
       </div>`);
@@ -434,7 +434,7 @@ async function renderAdminMonitoring(force=false) {
         <div class="control-title" style="background:rgba(16,185,129,.12);color:#10b981">🛎 Подтверждения по тренерам (${new Date(y,mo-1).toLocaleString('ru-RU',{month:'long'})})</div>
         ${rows.map(r=>`<div class="control-item" ${r.rejected>0?'style="border-left:3px solid var(--warn)"':''}>
           <div class="ci-main" style="display:flex;justify-content:space-between">
-            <span>${r.fio}</span>
+            <span>${esc(r.fio)}</span>
             <span style="font-size:12px">✓ ${r.pct}%</span>
           </div>
           <div class="ci-sub">подтверждено ${r.confirmed} · отклонено ${r.rejected}${r.pending?` · ⏳ ${r.pending}`:''}</div>
@@ -448,8 +448,8 @@ async function renderAdminMonitoring(force=false) {
         const dtStr = dt.toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
         const deviceIcon = s.device==='iOS'?'🍎':s.device==='Android'?'🤖':s.device==='Desktop'?'💻':'📱';
         return `<div class="control-item">
-          <div class="ci-main">${s.fio||s.tg_id} <span class="hint">${s.role||''}</span></div>
-          <div class="ci-sub">${deviceIcon} ${s.device} · v${s.js_version||'?'} · ${dtStr}</div>
+          <div class="ci-main">${esc(s.fio||s.tg_id)} <span class="hint">${s.role||''}</span></div>
+          <div class="ci-sub">${deviceIcon} ${esc(s.device)} · v${esc(s.js_version||'?')} · ${dtStr}</div>
         </div>`;
       }).join('');
       sections.push(`<div class="control-section">
@@ -488,11 +488,11 @@ function _mmCard(f) {
       вводите остаток <b>по 1С на сегодня</b>, чтобы не обнулить новый пакет.</div>`;
   }
   return `<div class="control-item" id="mm-item-${f.id}">
-    <div class="ci-main"><b>${c.fio||'клиент'}</b> <span class="hint">${f.branch||''}</span></div>
-    <div class="ci-sub">Заявку подал: ${tr.fio||'—'} · ${fmtDate(f.created_at)}</div>
+    <div class="ci-main"><b>${esc(c.fio||'клиент')}</b> <span class="hint">${esc(f.branch||'')}</span></div>
+    <div class="ci-sub">Заявку подал: ${esc(tr.fio||'—')} · ${fmtDate(f.created_at)}</div>
     <div class="ci-sub">Сейчас в приложении: <b>${cur}</b> ПТ · Кат.${cat||'?'}${f.trainer_suggested!=null?` · тренер написал (на дату заявки): <b>${f.trainer_suggested}</b>`:''}</div>
     ${changesLine}
-    ${f.trainer_note?`<div class="ci-sub" style="color:var(--hint)">💬 ${f.trainer_note}</div>`:''}
+    ${f.trainer_note?`<div class="ci-sub" style="color:var(--hint)">💬 ${esc(f.trainer_note)}</div>`:''}
     <div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap">
       <input type="number" id="mm1c-${f.id}" value="${prefill}" min="0" placeholder="Остаток по 1С (сегодня)"
         style="width:150px;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:6px;color:var(--text);font-size:13px">

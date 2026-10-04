@@ -26,17 +26,17 @@ async function loadStaffList() {
     body.innerHTML=!profiles.length?'<p class="hint">Нет</p>':
       profiles.map(t=>`<div class="staff-card">
         <div class="staff-info">
-          <div class="staff-fio">${t.fio}</div>
-          <div class="staff-meta">${ROLE_LBL[t.role]||t.role} · ${t.tg_id?'✅ В системе':'⏳ Не входил'} · ${(t.branches||[]).join(', ')||'—'}</div>
+          <div class="staff-fio">${esc(t.fio)}</div>
+          <div class="staff-meta">${ROLE_LBL[t.role]||t.role} · ${t.tg_id?'✅ В системе':'⏳ Не входил'} · ${esc((t.branches||[]).join(', ')||'—')}</div>
         </div>
         <div style="display:flex;gap:6px;flex-wrap:wrap">
-          <button class="btn btn-sm" onclick="renderEditTrainerModal(${t.id},'${encodeURIComponent(t.fio)}','${(t.branches||[]).join(',')}','${t.role}')">✏️</button>
+          <button class="btn btn-sm" onclick="renderEditTrainerModal(${t.id},'${encArg(t.fio)}','${jsq((t.branches||[]).join(','))}','${t.role}')">✏️</button>
           ${t.role==='senior_trainer'?`<button class="btn btn-sm" style="background:rgba(124,58,237,.15);color:#a78bfa"
-            onclick="renderBranchAccessModal(${t.id},'${encodeURIComponent(t.fio)}')">🔑</button>`:''}
+            onclick="renderBranchAccessModal(${t.id},'${encArg(t.fio)}')">🔑</button>`:''}
           <button class="btn btn-sm" style="background:rgba(245,158,11,.15);color:#f59e0b"
-            onclick="doArchiveTrainer(${t.id},'${encodeURIComponent(t.fio)}')">📦</button>
+            onclick="doArchiveTrainer(${t.id},'${encArg(t.fio)}')">📦</button>
           <button class="btn btn-sm btn-danger"
-            onclick="doDeleteTrainer(${t.id},'${encodeURIComponent(t.fio)}')">🗑</button>
+            onclick="doDeleteTrainer(${t.id},'${encArg(t.fio)}')">🗑</button>
         </div>
       </div>`).join('');
   } catch(e) { console.error(e); body.innerHTML='<p class="hint">Ошибка</p>'; }
@@ -60,8 +60,8 @@ async function renderAddTrainerModal() {
     <div class="form-group"><label>Филиалы</label>
       <div style="display:flex;flex-direction:column;gap:8px">
         ${branches.map(b=>`<label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer">
-          <input type="checkbox" class="nt-branch-cb" value="${b.name}" style="width:18px;height:18px">
-          ${b.name}
+          <input type="checkbox" class="nt-branch-cb" value="${esc(b.name)}" style="width:18px;height:18px">
+          ${esc(b.name)}
         </label>`).join('')}
       </div>
     </div>
@@ -92,7 +92,7 @@ async function renderEditTrainerModal(id,fioEnc,branchesStr,role) {
   m.innerHTML=`<div class="modal">
     <div class="modal-header"><h3>Редактировать</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
-    <div class="form-group"><label>ФИО</label><input id="et-fio" value="${fio}"></div>
+    <div class="form-group"><label>ФИО</label><input id="et-fio" value="${esc(fio)}"></div>
     <div class="form-group"><label>Роль</label>
       <select id="et-role">
         <option value="trainer" ${role==='trainer'?'selected':''}>Тренер</option>
@@ -105,8 +105,8 @@ async function renderEditTrainerModal(id,fioEnc,branchesStr,role) {
     <div class="form-group"><label>Филиалы</label>
       <div style="display:flex;flex-direction:column;gap:8px">
         ${allBranches.map(b=>`<label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer">
-          <input type="checkbox" class="et-branch-cb" value="${b.name}" ${currentBranches.includes(b.name)?'checked':''} style="width:18px;height:18px">
-          ${b.name}
+          <input type="checkbox" class="et-branch-cb" value="${esc(b.name)}" ${currentBranches.includes(b.name)?'checked':''} style="width:18px;height:18px">
+          ${esc(b.name)}
         </label>`).join('')}
       </div>
     </div>
@@ -144,7 +144,7 @@ function renderAddGroupClientModal(groupId) {
     ${subs.length?`<div class="form-group"><label>Подгруппа</label>
       <select id="gc-subgroup">
         <option value="" ${(g?.currentSubgroup||'')===''?'selected':''}>${subLabel('')}</option>
-        ${subs.map(s=>`<option value="${encodeURIComponent(s)}" ${s===g?.currentSubgroup?'selected':''}>${s}</option>`).join('')}
+        ${subs.map(s=>`<option value="${encArg(s)}" ${s===g?.currentSubgroup?'selected':''}>${s}</option>`).join('')}
       </select></div>`:''}
     <button class="btn btn-primary btn-full" onclick="doAddGroupClient('${groupId}')">Добавить</button>
   </div>`;
@@ -241,11 +241,11 @@ function renderGroupNoteModal(groupId, clientId, nameEnc, month, noteEnc) {
   const note = decodeURIComponent(noteEnc);
   const m=el('div','modal-overlay');
   m.innerHTML=`<div class="modal">
-    <div class="modal-header"><h3>Заметка — ${name}</h3>
+    <div class="modal-header"><h3>Заметка — ${esc(name)}</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="form-group"><label>Прогресс за месяц</label>
       <textarea id="gn-note" rows="4" placeholder="Освоил технику кроля, работаем над дыханием..."
-        style="width:100%;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text);font-size:14px">${note}</textarea></div>
+        style="width:100%;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text);font-size:14px">${esc(note)}</textarea></div>
     <button class="btn btn-primary btn-full"
       onclick="doSaveGroupNote('${groupId}','${clientId}','${month}')">Сохранить</button>
   </div>`;
@@ -280,7 +280,7 @@ async function renderGroupArchiveModal(groupId, instanceId) {
       <div style="display:flex;flex-direction:column;gap:8px">
         ${archived.map(c=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:var(--card);border:1px solid var(--border);border-radius:10px">
           <div>
-            <div style="font-weight:500">${c.name}</div>
+            <div style="font-weight:500">${esc(c.name)}</div>
             <div style="font-size:12px;color:var(--hint)">${fmt(c.monthly_price||0)} сум/мес</div>
           </div>
           <button class="btn btn-sm btn-primary" style="font-size:12px" onclick="doRestoreGroupClient('${c.id}','${groupId}','${instanceId||''}')">Вернуть</button>
@@ -302,7 +302,7 @@ function archiveGroupClientConfirm(clientId, nameEnc, groupId) {
   const name = decodeURIComponent(nameEnc);
   const m = el('div','modal-overlay');
   m.innerHTML=`<div class="modal">
-    <div class="modal-header"><h3>${name}</h3>
+    <div class="modal-header"><h3>${esc(name)}</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <p class="hint" style="margin-bottom:16px">Архив — скрыть из группы (можно вернуть). Удалить — навсегда.</p>
     <div style="display:flex;flex-direction:column;gap:8px">
@@ -356,7 +356,7 @@ async function renderGroupAttendance(groupId) {
       <button class="btn-close" onclick="closeAttendanceModal(this)">✕</button></div>
     ${clients.map(c=>`
       <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)">
-        <span>${c.name}</span>
+        <span>${esc(c.name)}</span>
         <input type="checkbox" ${attMap[c.id]?'checked':''} style="width:20px;height:20px"
           onchange="saveAttendance('${groupId}','${c.id}','${today}',this.checked,'${instanceId||''}')">
       </div>`).join('')||'<p class="hint">В этой подгруппе детей нет</p>'}
@@ -384,7 +384,7 @@ function renderArchiveClientModal(clientId, fioEnc) {
   m.innerHTML=`<div class="modal">
     <div class="modal-header"><h3>📦 Архивировать клиента</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
-    <p style="margin-bottom:16px;font-weight:500">${fio}</p>
+    <p style="margin-bottom:16px;font-weight:500">${esc(fio)}</p>
     <p class="hint" style="margin-bottom:12px">Причина архивации:</p>
     <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px">
       <label style="display:flex;align-items:center;gap:10px;padding:12px;background:var(--card);border:1px solid var(--border);border-radius:10px;cursor:pointer">
@@ -426,7 +426,7 @@ function renderRestoreClientModal(clientId, fioEnc, backTab='home') {
   m.innerHTML=`<div class="modal">
     <div class="modal-header"><h3>♻️ Восстановить клиента</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
-    <p style="margin-bottom:16px;font-weight:500">${fio}</p>
+    <p style="margin-bottom:16px;font-weight:500">${esc(fio)}</p>
     <p class="hint" style="margin-bottom:16px">Клиент вернётся в активные. Баланс и история тренировок сохранены. Списания снова будут доступны.</p>
     <div style="display:flex;gap:8px">
       <button class="btn btn-primary" style="flex:1" onclick="doRestoreClientConfirmed('${clientId}','${backTab}')">Да, восстановить</button>
@@ -452,13 +452,13 @@ async function renderBranchAccessModal(trainerId, fioEnc) {
   ]);
   const m = el('div','modal-overlay');
   m.innerHTML=`<div class="modal">
-    <div class="modal-header"><h3>🔑 Субпанель — ${fio}</h3>
+    <div class="modal-header"><h3>🔑 Субпанель — ${esc(fio)}</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <p class="hint" style="margin-bottom:12px">Выберите филиалы к которым тренер получит доступ к группам и отчётам (дополнительно к своим)</p>
     <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px">
       ${allBranches.map(b=>`<label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer">
-        <input type="checkbox" class="ba-cb" value="${b.name}" ${currentAccess.includes(b.name)?'checked':''} style="width:18px;height:18px">
-        ${b.name}
+        <input type="checkbox" class="ba-cb" value="${esc(b.name)}" ${currentAccess.includes(b.name)?'checked':''} style="width:18px;height:18px">
+        ${esc(b.name)}
       </label>`).join('')}
     </div>
     <button class="btn btn-primary btn-full" onclick="doSaveBranchAccess(${trainerId})">Сохранить</button>
@@ -481,7 +481,7 @@ async function doArchiveTrainer(id, fioEnc) {
     <div class="modal-header"><h3>📦 Архивировать</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <p style="margin-bottom:16px;line-height:1.6">
-      <b>${fio}</b> потеряет доступ к приложению.<br>
+      <b>${esc(fio)}</b> потеряет доступ к приложению.<br>
       История тренировок сохранится и будет видна координатору.<br>
       Тренер не сможет войти снова под этим именем.
     </p>
@@ -508,7 +508,7 @@ async function doDeleteTrainer(id, fioEnc) {
     <div class="modal-header"><h3>🗑 Удалить профиль</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <p style="margin-bottom:16px;line-height:1.6">
-      <b>${fio}</b><br><br>
+      <b>${esc(fio)}</b><br><br>
       <b>Если у тренера нет истории</b> — профиль удалится полностью. Тренер сможет создать новый аккаунт.<br><br>
       <b>Если история есть</b> — нельзя удалить, только архивировать.
     </p>
@@ -553,10 +553,10 @@ async function loadBranchesList() {
     const branches=await cached('branches',()=>DB.getBranches());
     body.innerHTML=!branches.length?'<p class="hint">Нет филиалов</p>':
       branches.map(b=>`<div class="staff-card">
-        <div class="staff-info"><div class="staff-fio">🏢 ${b.name}</div></div>
+        <div class="staff-info"><div class="staff-fio">🏢 ${esc(b.name)}</div></div>
         <div style="display:flex;gap:6px">
-          <button class="btn btn-sm" onclick="renderRenameBranchModal('${encodeURIComponent(b.name)}')">✏️</button>
-          <button class="btn btn-sm btn-danger" onclick="doDeleteBranch(${b.id},'${b.name}')">🗑</button>
+          <button class="btn btn-sm" onclick="renderRenameBranchModal('${encArg(b.name)}')">✏️</button>
+          <button class="btn btn-sm btn-danger" onclick="doDeleteBranch(${b.id},'${jsq(b.name)}')">🗑</button>
         </div>
       </div>`).join('');
   } catch(e) { console.error(e); body.innerHTML='<p class="hint">Ошибка</p>'; }
@@ -585,7 +585,7 @@ function renderRenameBranchModal(nameEnc) {
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <p class="hint" style="margin-bottom:12px">Обновит название во всех записях.</p>
     <div class="form-group"><label>Новое название</label>
-      <input id="br-new-name" value="${name}"></div>
+      <input id="br-new-name" value="${esc(name)}"></div>
     <button class="btn btn-primary btn-full" onclick="doRenameBranch('${nameEnc}')">Переименовать</button>
   </div>`;
   document.body.appendChild(m);

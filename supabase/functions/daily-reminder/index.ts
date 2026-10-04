@@ -11,6 +11,11 @@ const sb = createClient(
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
 );
 
+// Сообщения — HTML (parse_mode=HTML здесь и в process-queue; колокольчик приложения рендерит как есть).
+// Данные из БД (ФИО, ссылки) — только через escHtml: «&» / «<» иначе ломают отправку
+// («can't parse entities») и исполняются в колокольчике. Синхронно с backend/jobs/remind.js.
+const escHtml = (s: unknown) => String(s ?? "").replace(/[&<>]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[ch]!);
+
 async function tg(chatId: number, text: string): Promise<boolean> {
   try {
     const r = await fetch(`https://api.telegram.org/bot${BOT}/sendMessage`, {
@@ -94,7 +99,7 @@ async function ruleSubExpiring() {
     const p = c.profiles as { fio?: string; tg_id?: number } | null;
     const tgId = p?.tg_id; if (!tgId) continue;
     const days = Math.ceil((+new Date(c.subscription_end) - Date.now()) / 86400000);
-    const msg = "⏰ <b>Истекает абонемент</b>\n\nКлиент: <b>" + c.fio + "</b>\nОсталось: " + days + " дн.\n\nНапомните о продлении.";
+    const msg = "⏰ <b>Истекает абонемент</b>\n\nКлиент: <b>" + escHtml(c.fio) + "</b>\nОсталось: " + days + " дн.\n\nНапомните о продлении.";
     // App-only: кладём в очередь с rule_key вне чат-вайтлиста → воркер пометит
     // 'skipped', в чат не уйдёт, но покажется в колокольчике приложения.
     await sb.from("notifications_queue").insert({
@@ -122,7 +127,7 @@ async function ruleDebtOverdue() {
     const p = w.profiles as { fio?: string; tg_id?: number } | null;
     const tgId = p?.tg_id; if (!tgId) continue;
     if (!byTrainer[tgId]) byTrainer[tgId] = { name: p?.fio, items: [] };
-    byTrainer[tgId].items.push((w.clients as { fio?: string } | null)?.fio + " (" + new Date(w.workout_date).toLocaleDateString("ru-RU") + ")");
+    byTrainer[tgId].items.push(escHtml((w.clients as { fio?: string } | null)?.fio) + " (" + new Date(w.workout_date).toLocaleDateString("ru-RU") + ")");
   }
   for (const [tgId, data] of Object.entries(byTrainer)) {
     const msg = "❌ <b>Долг не подтверждён (3+ дня)</b>\n\n" + data.items.map((i) => "• " + i).join("\n") + "\n\nПодтвердите оплату в разделе Отчёт.";
@@ -143,7 +148,7 @@ async function ruleInactive() {
   const inactive: string[] = [];
   for (const tr of trainers || []) {
     const { data: ws } = await sb.from("workouts").select("id").eq("trainer_id", tr.id).gte("workout_date", cutoff.toISOString()).limit(1);
-    if (!ws?.length) inactive.push(tr.fio);
+    if (!ws?.length) inactive.push(escHtml(tr.fio));
   }
   if (!inactive.length) return;
 
@@ -407,7 +412,7 @@ async function ruleCoordinatorAgents(today: string, hour: number, utcDay: number
   const recipients = await coordinatorRecipients(rule);
   if (!recipients.length) return;
   const link = (rule.schedule as { link?: string })?.link || "";
-  const msg = `🤖 Отчёты агентов — загляни, что происходит: ${link}`;
+  const msg = `🤖 Отчёты агентов — загляни, что происходит: ${escHtml(link)}`;
   await enqueueCoordinator("coordinator_agents", recipients, msg, today);
 }
 

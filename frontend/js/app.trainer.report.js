@@ -82,8 +82,8 @@ async function loadTrainerReport(year,month) {
         ${pending.map(w=>`
           <div class="sub-confirm-row">
             <div>
-              <span class="hi-client">${w.clients?.fio||'?'}</span>
-              <span class="hint"> · от ${w.profiles?.fio||'?'} · ${fmtDate(w.workout_date)}</span>
+              <span class="hi-client">${esc(w.clients?.fio||'?')}</span>
+              <span class="hint"> · от ${esc(w.profiles?.fio||'?')} · ${fmtDate(w.workout_date)}</span>
             </div>
             <div style="display:flex;gap:6px;margin-top:6px">
               <button class="btn btn-sm btn-primary" onclick="doResolveSubstitute('${w.id}','${w.client_id}',true)">✓ Принять</button>
@@ -97,9 +97,9 @@ async function loadTrainerReport(year,month) {
         ${transfers.map(t=>`
           <div class="sub-confirm-row">
             <div>
-              <span class="hi-client">${t.clients?.fio||'?'}</span>
-              <span class="hint"> · от ${t.profiles?.fio||'?'}</span>
-              ${t.note?`<div class="hint">${t.note}</div>`:''}
+              <span class="hi-client">${esc(t.clients?.fio||'?')}</span>
+              <span class="hint"> · от ${esc(t.profiles?.fio||'?')}</span>
+              ${t.note?`<div class="hint">${esc(t.note)}</div>`:''}
             </div>
             <div style="display:flex;gap:6px;margin-top:6px">
               <button class="btn btn-sm btn-primary" onclick="doResolveTransfer('${t.id}','${t.client_id}',${t.to_trainer_id},true)">✓ Принять</button>
@@ -154,15 +154,15 @@ async function loadTrainerReport(year,month) {
           return `
           <div style="font-size:12px;color:var(--hint);font-weight:600;margin-top:8px;margin-bottom:4px">ГРУППЫ</div>
           ${childRows.map(r=>`<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);font-size:13px">
-            <span>${r.groupName} <span style="font-size:11px;color:#10b981">авто</span>${r.bonus?` <span style="font-size:11px;color:#10b981">+${fmt(r.bonus)}</span>`:''}${r.penalty?` <span style="font-size:11px;color:#ef4444">−${fmt(r.penalty)}</span>`:''}</span>
+            <span>${esc(r.groupName)} <span style="font-size:11px;color:#10b981">авто</span>${r.bonus?` <span style="font-size:11px;color:#10b981">+${fmt(r.bonus)}</span>`:''}${r.penalty?` <span style="font-size:11px;color:#ef4444">−${fmt(r.penalty)}</span>`:''}</span>
             <span style="font-weight:600">${fmt(r.final)} сум</span>
           </div>`).join('')}
           ${adultRows.map(gs=>`<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);font-size:13px">
-            <span>${gs.group_types?.name||'Взрослая'} · ${fmtDate(gs.session_date)} (${gs.headcount} чел)</span>
+            <span>${esc(gs.group_types?.name||'Взрослая')} · ${fmtDate(gs.session_date)} (${gs.headcount} чел)</span>
             <span style="font-weight:600">${fmt(getAdultGroupRate(gs.headcount))} сум</span>
           </div>`).join('')}
           ${subRows.map(s=>`<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);font-size:13px">
-            <span>Замена ${s.trainer_groups?.group_types?.name||'группа'} · ${fmtDate(s.session_date)}</span>
+            <span>Замена ${esc(s.trainer_groups?.group_types?.name||'группа')} · ${fmtDate(s.session_date)}</span>
             <span style="font-weight:600">${fmt(Number(s.rate||0))} сум</span>
           </div>`).join('')}
           `;
@@ -186,7 +186,7 @@ async function loadTrainerReport(year,month) {
         <b>⚠️ Ходят, но не оплатили (${unpaidGroups.reduce((s,g)=>s+g.children.length,0)})</b>
         <div class="hint" style="margin-top:2px">ЗП по этим детям не начисляется — напомните родителям. Нажмите, чтобы раскрыть.</div>
         <div class="unpaid-list" style="display:none;margin-top:8px">
-          ${unpaidGroups.map(g=>`<div style="margin-bottom:6px"><b style="font-size:13px">${g.groupName}</b><div class="hint">${g.children.join(', ')}</div></div>`).join('')}
+          ${unpaidGroups.map(g=>`<div style="margin-bottom:6px"><b style="font-size:13px">${esc(g.groupName)}</b><div class="hint">${esc(g.children.join(', '))}</div></div>`).join('')}
         </div>
       </div>`:''}
 
@@ -194,7 +194,7 @@ async function loadTrainerReport(year,month) {
       ${!workouts.length?'<p class="hint">Нет записей за этот период</p>':workouts.map(w=>`
         <div class="history-item">
           <div class="hi-main">
-            <span class="hi-client">${w.clients?.fio||'—'}</span>
+            <span class="hi-client">${esc(w.clients?.fio||'—')}</span>
             <span class="hi-cat cat-${w.category_at_moment}">Кат.${w.category_at_moment}</span>
             ${w.is_drop_in?`<span class="drop-badge">Разовая ${w.drop_in_category||1}кт</span>`:''}
             ${w.is_debt&&!w.debt_confirmed_at?'<span class="debt-badge">В долг</span>':''}
@@ -202,7 +202,7 @@ async function loadTrainerReport(year,month) {
             ${w.reception_status==='pending'?'<span style="font-size:11px;background:rgba(245,158,11,.15);color:#f59e0b;padding:2px 8px;border-radius:8px">⏳ ожидает</span>':''}
             ${w.reception_status==='rejected'?'<span style="font-size:11px;background:rgba(239,68,68,.15);color:#ef4444;padding:2px 8px;border-radius:8px">✗ отклонено</span>':''}
           </div>
-          <div class="hi-sub">${fmtDT(w.workout_date)} · ${w.branch}</div>
+          <div class="hi-sub">${fmtDT(w.workout_date)} · ${esc(w.branch)}</div>
           <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
             ${w.is_debt&&!w.debt_confirmed_at?`
               <button class="btn btn-sm btn-primary" onclick="doConfirmDebt('${w.id}','${w.client_id}')">Подтвердить оплату</button>`:''}
@@ -213,7 +213,7 @@ async function loadTrainerReport(year,month) {
               (_dupWorkoutIds.has(w.id)?`
               <button class="btn btn-sm btn-danger" onclick="doDeleteDuplicate('${w.id}')" title="Дубль — создан почти одновременно с другой записью этого клиента">🗑 Удалить дубль</button>`:
               `<button class="btn btn-sm" style="background:rgba(239,68,68,.1);color:#ef4444;border:1px solid rgba(239,68,68,.25)"
-                onclick="doRequestWorkoutDelete('${w.id}','${w.workout_date}','${encodeURIComponent(w.clients?.fio||'')}','${w.branch||''}')">Запрос на удаление</button>`)
+                onclick="doRequestWorkoutDelete('${w.id}','${w.workout_date}','${encArg(w.clients?.fio||'')}','${jsq(w.branch||'')}')">Запрос на удаление</button>`)
               ):'')}
             ${isToday(w.workout_date)&&!w.is_debt?`
               <button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
@@ -232,31 +232,31 @@ async function loadTrainerReport(year,month) {
             : '<span style="background:rgba(239,68,68,.2);color:#991b1b;padding:2px 8px;border-radius:6px;font-size:11px">❌ Отклонено</span>';
           return `<div class="history-item">
             <div class="hi-main">
-              <span class="hi-client">${r.clients?.fio||'?'}</span>
+              <span class="hi-client">${esc(r.clients?.fio||'?')}</span>
               <span class="hi-cat cat-${r.category}">Кат.${r.category}</span>
               ${statusBadge}
             </div>
-            <div class="hi-sub">${fmtDT(r.workout_date)}${r.reject_note?` · ❌ ${r.reject_note}`:''}</div>
+            <div class="hi-sub">${fmtDT(r.workout_date)}${r.reject_note?` · ❌ ${esc(r.reject_note)}`:''}</div>
           </div>`;
         }).join('')}`:''}
       ${trialSessions.length?`
         <h4 style="margin-top:16px">🆕 Пробные тренировки</h4>
         ${trialSessions.map(t=>`<div class="history-item">
           <div class="hi-main">
-            <span class="hi-client">${t.first_name}${t.last_name?' '+t.last_name:''}</span>
+            <span class="hi-client">${esc(t.first_name)}${esc(t.last_name?' '+t.last_name:'')}</span>
             <span class="hi-cat cat-${t.category}">Кат.${t.category}</span>
             <span style="font-size:11px;background:rgba(139,92,246,.15);color:#7c3aed;padding:2px 6px;border-radius:6px">Пробная</span>
             ${t.reception_status==='pending'?'<span style="font-size:11px;background:rgba(245,158,11,.15);color:#f59e0b;padding:2px 8px;border-radius:8px">⏳ ожидает</span>':''}
             ${t.reception_status==='rejected'?'<span style="font-size:11px;background:rgba(239,68,68,.15);color:#ef4444;padding:2px 8px;border-radius:8px">✗ не оплачено</span>':''}
           </div>
-          <div class="hi-sub">${fmtDT(t.session_date)} · ${t.branch}${t.phone?' · '+t.phone:''}${t.age?' · '+t.age+' лет':''}</div>
+          <div class="hi-sub">${fmtDT(t.session_date)} · ${esc(t.branch)}${esc(t.phone?' · '+t.phone:'')}${t.age?' · '+t.age+' лет':''}</div>
           <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
             ${STATE.profile.role==='admin'
               ? `<button class="btn btn-sm btn-danger" onclick="doDeleteTrial(${t.id})">Удалить</button>`
               : (canEdit(t.created_at)
                   ? `<button class="btn btn-sm btn-danger" onclick="doDeleteTrial(${t.id})">Удалить</button>`
                   : `<button class="btn btn-sm" style="background:rgba(239,68,68,.1);color:#ef4444;border:1px solid rgba(239,68,68,.25)"
-                       onclick="doRequestTrialDelete(${t.id},'${encodeURIComponent(t.first_name+(t.last_name?' '+t.last_name:''))}','${t.session_date}','${t.branch||''}')">Запрос на удаление</button>`)}
+                       onclick="doRequestTrialDelete(${t.id},'${encArg(t.first_name+(t.last_name?' '+t.last_name:''))}','${t.session_date}','${jsq(t.branch||'')}')">Запрос на удаление</button>`)}
             ${isToday(t.session_date)?`<button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border)"
               onclick="renderEditTrialModal(${t.id})">✏️</button>`:''}
           </div>
@@ -267,11 +267,11 @@ async function loadTrainerReport(year,month) {
           const rate = gs.group_types?.billing_model==='headcount' ? getAdultGroupRate(gs.headcount) : 0;
           return `<div class="history-item">
             <div class="hi-main">
-              <span class="hi-client">${gs.group_types?.name||'Группа'}</span>
+              <span class="hi-client">${esc(gs.group_types?.name||'Группа')}</span>
               ${rate>0?`<span class="hi-cat" style="background:rgba(16,185,129,.15);color:#10b981">${fmt(rate)} сум</span>`:''}
               ${gs.headcount?`<span class="hint">${gs.headcount} чел.</span>`:''}
             </div>
-            <div class="hi-sub">${fmtDate(gs.session_date)} · ${gs.branch||''}</div>
+            <div class="hi-sub">${fmtDate(gs.session_date)} · ${esc(gs.branch||'')}</div>
           </div>`;
         }).join('')}`:''}
       `;
@@ -292,7 +292,7 @@ function renderGymDeductModal(clientId, fioEnc, balance) {
       <h3>➖ Списать в ТЗ</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button>
     </div>
-    <p class="hint" style="margin-bottom:12px">${fio} — общий пакет зал+бассейн.<br>Текущий остаток: <strong>${balance} ПТ</strong>. Укажите, сколько клиент отходил в зале.</p>
+    <p class="hint" style="margin-bottom:12px">${esc(fio)} — общий пакет зал+бассейн.<br>Текущий остаток: <strong>${balance} ПТ</strong>. Укажите, сколько клиент отходил в зале.</p>
     <div class="form-group">
       <label>Сколько ПТ списать (зал)</label>
       <input type="number" id="gym-deduct-n" min="1" max="${balance}" value="1" inputmode="numeric">
@@ -389,8 +389,8 @@ function renderEditTrialModal(trialId) {
     <div class="modal-header"><h3>✏️ Редактировать пробную</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="form-group" style="display:flex;gap:10px">
-      <div style="flex:1"><label>Имя</label><input id="et-fname" value="${t.first_name||''}"></div>
-      <div style="flex:1"><label>Фамилия</label><input id="et-lname" value="${t.last_name||''}"></div>
+      <div style="flex:1"><label>Имя</label><input id="et-fname" value="${esc(t.first_name||'')}"></div>
+      <div style="flex:1"><label>Фамилия</label><input id="et-lname" value="${esc(t.last_name||'')}"></div>
     </div>
     <div class="form-group"><label>Категория</label>
       <select id="et-cat">
@@ -398,7 +398,7 @@ function renderEditTrialModal(trialId) {
       </select></div>
     <div class="form-group" style="display:flex;gap:10px">
       <div style="flex:1"><label>Возраст</label><input id="et-age" type="number" min="1" max="99" value="${t.age||''}"></div>
-      <div style="flex:1"><label>Телефон</label><input id="et-phone" value="${t.phone||''}"></div>
+      <div style="flex:1"><label>Телефон</label><input id="et-phone" value="${esc(t.phone||'')}"></div>
     </div>
     <div class="form-group"><label>Дата и время</label>
       <input type="datetime-local" id="et-date" value="${dateLocal}"></div>
@@ -439,7 +439,7 @@ async function renderEditWorkoutModal(workoutId, clientId, workoutDate, category
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="form-group"><label>Клиент</label>
       <select id="ew-client">
-        ${clients.map(c=>`<option value="${c.id}" ${c.id===clientId?'selected':''}>${c.fio} (кат.${c.category}, баланс:${c.balance})</option>`).join('')}
+        ${clients.map(c=>`<option value="${c.id}" ${c.id===clientId?'selected':''}>${esc(c.fio)} (кат.${c.category}, баланс:${c.balance})</option>`).join('')}
       </select></div>
     <div class="form-group"><label>Дата и время</label>
       <input type="datetime-local" id="ew-date" value="${dateLocal}"></div>
@@ -506,11 +506,11 @@ async function renderTransferClientModal(clientId, clientFio, fromTrainerId) {
   m.innerHTML=`<div class="modal">
     <div class="modal-header"><h3>Передать клиента</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
-    <p class="hint" style="margin-bottom:12px">Клиент: <b>${clientFio}</b></p>
+    <p class="hint" style="margin-bottom:12px">Клиент: <b>${esc(clientFio)}</b></p>
     <div class="form-group"><label>Тренер <span class="required">*</span></label>
       <select id="transfer-trainer">
         <option value="">— выберите тренера —</option>
-        ${profiles.map(p=>`<option value="${p.id}">${p.fio}</option>`).join('')}
+        ${profiles.map(p=>`<option value="${p.id}">${esc(p.fio)}</option>`).join('')}
       </select>
     </div>
     <div class="form-group"><label>Примечание (необязательно)</label>
@@ -624,7 +624,7 @@ function renderEditClientModal(clientId, fioEnc, cat, age, subStart, subEnd, bal
     <div class="modal-header"><h3>Редактировать клиента</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="form-group"><label>ФИО</label>
-      <input id="ec-fio" value="${fio}"></div>
+      <input id="ec-fio" value="${esc(fio)}"></div>
     <div class="form-group"><label>Категория</label>
       <select id="ec-cat">
         <option value="1" ${cat==1?'selected':''}>Кат.1 — ${fmt(RATES.pt[1])} сум</option>
@@ -678,7 +678,7 @@ function renderBalanceCorrectionModal(clientId, curBalance, fioEnc) {
   m.innerHTML=`<div class="modal">
     <div class="modal-header"><h3>Коррекция остатка</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
-    <p class="hint" style="margin-bottom:14px">${fio} · текущий остаток <b>${curBalance} ПТ</b>.<br>Только для исправления ошибки. Обычное пополнение — через «Купить пакет».</p>
+    <p class="hint" style="margin-bottom:14px">${esc(fio)} · текущий остаток <b>${curBalance} ПТ</b>.<br>Только для исправления ошибки. Обычное пополнение — через «Купить пакет».</p>
     <div class="form-group"><label>Новый остаток, ПТ</label>
       <input id="bc-value" type="number" min="0" value="${curBalance}"></div>
     <div class="form-group"><label>Причина (обязательно)</label>
@@ -708,7 +708,7 @@ async function doBalanceCorrection(clientId, curBalance) {
 // Тренер отправляет запрос → одобряет координатор/старший. Сам тренер не применяет.
 function renderRecalcCategoryModal(clientId, newCat, fio) {
   const isApprover = ['admin','senior_trainer'].includes(STATE.profile.role);
-  const fioEnc = encodeURIComponent(fio||'');
+  const fioEnc = encArg(fio||'');
   const cancelJs = `this.closest('.modal-overlay').remove();renderClientProfile('${clientId}',STATE.currentTab||'clients')`;
   const m = el('div','modal-overlay');
   m.innerHTML=`<div class="modal">
@@ -766,11 +766,11 @@ async function renderAdminTransferModal(clientId, clientFio) {
   m.innerHTML=`<div class="modal">
     <div class="modal-header"><h3>Передать клиента</h3>
       <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
-    <p style="margin-bottom:12px">Клиент: <b>${clientFio}</b><br>
+    <p style="margin-bottom:12px">Клиент: <b>${esc(clientFio)}</b><br>
       <span class="hint">Передача без подтверждения тренера.</span></p>
     <div class="form-group"><label>Новый тренер</label>
       <select id="admin-transfer-trainer">
-        ${trainers.map(t=>`<option value="${t.id}">${t.fio}</option>`).join('')}
+        ${trainers.map(t=>`<option value="${t.id}">${esc(t.fio)}</option>`).join('')}
       </select>
     </div>
     <div class="form-group"><label>Примечание</label>
@@ -888,8 +888,8 @@ function _seqCardHtml(it) {
     if (a.is_manual) {
       const mRem = (a.final_total != null && a.final_next != null) ? (a.final_total - (a.final_next - 1)) : null;
       return `<div class="seq-card done-manual" data-cid="${it.client_id}">
-        <div class="seq-top"><div class="seq-cav" style="background:#0ea5e9">${initials}</div>
-          <div class="seq-nm">${it.fio}<small>добавлен вручную · ${cat}${pkg}</small></div>
+        <div class="seq-top"><div class="seq-cav" style="background:#0ea5e9">${esc(initials)}</div>
+          <div class="seq-nm">${esc(it.fio)}<small>добавлен вручную · ${cat}${pkg}</small></div>
           <div class="seq-seq"><div class="big">${mRem===0?'завершён · 0':('осталось '+(mRem??'?'))}</div><div class="lbl2">учтено</div></div></div>
         <button class="seq-edit" onclick="seqEdit('${it.client_id}')">Изменить</button></div>`;
     }
@@ -897,12 +897,12 @@ function _seqCardHtml(it) {
     const aTotal = a.final_total ?? it.total;
     const aRem = (aTotal != null && a.final_next != null) ? (aTotal - (a.final_next - 1)) : null;
     return `<div class="seq-card ${yes?'done-yes':'done-no'}" data-cid="${it.client_id}">
-      <div class="seq-top"><div class="seq-cav" style="background:${yes?'var(--success)':'var(--danger)'}">${initials}</div>
-        <div class="seq-nm">${it.fio}<small>${cat}${pkg}</small></div>
+      <div class="seq-top"><div class="seq-cav" style="background:${yes?'var(--success)':'var(--danger)'}">${esc(initials)}</div>
+        <div class="seq-nm">${esc(it.fio)}<small>${cat}${pkg}</small></div>
         <div class="seq-seq"><div class="big" style="color:${yes?'var(--success)':'var(--danger)'}">${yes?'✓':'✗'} ${aRem===0?'завершён · 0':('осталось '+aRem)}</div>
           <div class="lbl2">${yes?'совпадает':'исправлено'}</div></div></div>
       ${a.debt_final!=null?`<div class="seq-cmt">🔴 Долг подтверждён: ${a.debt_final}</div>`:''}
-      ${a.comment?`<div class="seq-cmt">💬 ${a.comment}</div>`:''}
+      ${a.comment?`<div class="seq-cmt">💬 ${esc(a.comment)}</div>`:''}
       <button class="seq-edit" onclick="seqEdit('${it.client_id}')">Изменить</button></div>`;
   }
   // Состояние «вопрос»
@@ -910,8 +910,8 @@ function _seqCardHtml(it) {
   const remaining = it.total - it.used;          // сколько осталось (может быть 0 = пакет завершён)
   const finished = it.next > it.total;            // остаток 0
   return `<div class="seq-card" data-cid="${it.client_id}">
-    <div class="seq-top"><div class="seq-cav" style="background:var(--accent)">${initials}</div>
-      <div class="seq-nm">${it.fio}<small>${cat}${pkg}</small></div>
+    <div class="seq-top"><div class="seq-cav" style="background:var(--accent)">${esc(initials)}</div>
+      <div class="seq-nm">${esc(it.fio)}<small>${cat}${pkg}</small></div>
       <div class="seq-seq">${finished
         ? `<div class="big" style="color:var(--hint)">0 осталось</div><div class="lbl2">пакет завершён</div>`
         : `<div class="big">след. <b>${it.next}</b> из ${it.total}</div><div class="lbl2">сделано ${it.used}</div>`}</div></div>
@@ -949,7 +949,7 @@ function _seqRenderBody() {
 
   // Финальный блок: «все ли отметили?» + добавить упущенного
   const allDone = total>0 && answered===total;
-  const candOpts = candidates.map(c=>`<option value="${c.client_id}">${c.fio}</option>`).join('');
+  const candOpts = candidates.map(c=>`<option value="${c.client_id}">${esc(c.fio)}</option>`).join('');
   const finalBlock = `
     <div class="seq-final ${allDone?'ok':''}">
       ${allDone
