@@ -47,15 +47,26 @@ const CONFIG = {
 // Оба значения запоминаются в localStorage до явного сброса (?apimode=reset).
 (function _resolveApiOverrides() {
   try {
+    // Работает ТОЛЬКО на машине разработчика (localhost). На боевом домене параметры
+    // игнорируются, а ранее запомненные значения стираются: иначе ссылка вида
+    // ?api=<чужой сервер>&apimode=all:api навсегда уводила бы приложение (и ввод PIN)
+    // на чужой сервер.
+    const isDevHost = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+    if (!isDevHost) {
+      localStorage.removeItem('aq_api_base');
+      localStorage.removeItem('aq_api_mode');
+      return;
+    }
     const p = new URLSearchParams(location.search);
+    const m = p.get('apimode');
+    if (m === 'reset') { localStorage.removeItem('aq_api_mode'); localStorage.removeItem('aq_api_base'); }
+
     const q = p.get('api');
     if (q) localStorage.setItem('aq_api_base', q);
     const storedBase = localStorage.getItem('aq_api_base');
     if (storedBase) CONFIG.API_BASE = storedBase;
 
-    const m = p.get('apimode');
-    if (m === 'reset') localStorage.removeItem('aq_api_mode');
-    else if (m) {
+    if (m && m !== 'reset') {
       const map = {};
       m.split(',').forEach(pair => {
         const [d, mode] = pair.split(':');
