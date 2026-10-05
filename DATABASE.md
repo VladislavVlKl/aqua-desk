@@ -244,11 +244,12 @@ leader_name + leader_fee_percent · group_instance_id uuid · days_of_week text[
 
 ### Уведомления
 
-**notifications_queue**: `recipient_tg_id, recipient_name, message, scheduled_for, sent_at, error_text, status, created_by, rule_key, read_at, attempts`
+**notifications_queue**: `recipient_tg_id, recipient_name, message, scheduled_for, sent_at, error_text, status, created_by, rule_key, read_at, attempts, reply_markup jsonb`
+> `reply_markup` (миграция 20261004120000) — Telegram inline-клавиатура, `process-queue` передаёт в `sendMessage` как есть (напр. кнопка мини-аппа `web_app`).
 **notification_rules**: `name, rule_key, description, active, branches text[], schedule jsonb, recipients integer[]`
 > `branches`/`schedule`/`recipients` — data-driven гейты (Вариант B): филиалы, время и получатели правила меняются UPDATE'ом в БД без деплоя. `schedule` = `{"windows":[[начало,конец]]}` по Ташкенту, опц. `"dow":[…]` (дни по JS getUTCDay 0=Вс..6=Сб; для окон 9–11 день по UTC совпадает с ташкентским), опц. `"link"`. `recipients` (миграция 20260920120000) — id профилей-получателей (пуш на их tg_id). Гейты: ресепшн `reception_eod`(21–23)/`reception_backlog`(9–11); координатор `coordinator_*` (см. ниже).
 
-> **Доставка пушей в чат:** `pg_cron` job `process-notif-queue` (раз в минуту) → `pg_net` → Edge Function `process-queue`. Матч по «семье» rule_key (часть до первого `:`). В чат идут: `substitution`, `substitution_approve`, `client_transfer`, `cat_recalc_approved`, `cat_recalc_rejected`, `reception_reject`, `reception_eod` (динамический ключ `reception_eod:<филиал>:<дата>`). Прочее (`sub_expiring`, `system`) → `status='skipped'` = только колокольчик. Ретраи до 5 (`attempts`), реальный текст ошибки Telegram в `error_text`. GitHub Actions крон (`process-queue.yml`) отключён (ручной аварийный канал). Колокольчик (`getMyNotifications`) читает таблицу напрямую, от статуса не зависит. Вайтлист держать синхронно в Edge Function и `backend/jobs/process-queue.js`.
+> **Доставка пушей в чат:** `pg_cron` job `process-notif-queue` (раз в минуту) → `pg_net` → Edge Function `process-queue`. Матч по «семье» rule_key (часть до первого `:`). В чат идут (полный список — `WHITELIST` в Edge Function): `schedule_reminder`, `substitution`, `substitution_approve`, `client_transfer`, `cat_recalc_approved`, `cat_recalc_rejected`, `reception_reject`, `reception_eod` (динамический ключ `reception_eod:<филиал>:<дата>`). Прочее (`sub_expiring`, `system`) → `status='skipped'` = только колокольчик. Ретраи до 5 (`attempts`), реальный текст ошибки Telegram в `error_text`. GitHub Actions крон (`process-queue.yml`) отключён (ручной аварийный канал). Колокольчик (`getMyNotifications`) читает таблицу напрямую, от статуса не зависит. Вайтлист держать синхронно в Edge Function и `backend/jobs/process-queue.js`.
 >
 > **«Истекает абонемент» — app-only:** `daily-reminder` кладёт напоминание в очередь с `rule_key='sub_expiring'` (вне чат-вайтлиста) → в чат не уходит, видно только в колокольчике. «Долг 3+ дн» — по-прежнему в чат.
 >
@@ -264,6 +265,12 @@ leader_name + leader_fee_percent · group_instance_id uuid · days_of_week text[
 > - `coordinator_analytics` — вторник (окно 9–11, `dow:[2]`): недельная сводка (ПТ 7дн, новые клиенты, зона риска ≤7дн, долги 3+дн, неактивные тренеры 5+дн).
 > - `coordinator_agents` — пн/ср/пт (окно 9–11, `dow:[1,3,5]`): дублирует ссылку на Claude Routine из `schedule.link` (обновлять при смене роутины). Путь A.
 > Дедуп на день+получатель в `notif_dedup`. Логика в `daily-reminder` + `remind.js` (синхронно).
+>
+> **Напоминания тренерам по расписанию** (`schedule_reminder`, миграция 20261004120000) — отдельная Edge Function `schedule-reminder`, `pg_cron` job `schedule-reminder-15m` (каждые 15 мин). **Точечно:** только тренерам из `recipients` (список ведёт координатор через Claude; пусто = никому).
+> - Вечер (`schedule.evening_hour`, 20 по Ташкенту): расписание на завтра.
+> - За `schedule.before_min` (120) минут до начала: о каждом занятии (несколько попавших в один прогон — одним сообщением).
+> - Какие типы слать — `schedule.types` = `{"<id тренера>": ["duty","group","pt"]}` (и в сводке, и в напоминании); нет записи → все три.
+> Слоты: `schedule_slots` active (регулярные по `day_of_week` Пн=0 + разовые `specific_date`) минус `schedule_cancellations`; ПТ — только клиенты с остатком и не в архиве (как экран расписания). К пушу — кнопка «📅 Открыть расписание» (`web_app` на `schedule.app_url`). Дедуп: `schedule_reminder:eve:<тренер>:<дата>`, `schedule_reminder:pre:<slot>:<дата>` в `notif_dedup`.
 
 ---
 

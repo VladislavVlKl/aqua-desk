@@ -15,16 +15,17 @@ const WHITELIST = new Set([
   'reception_reject', 'reception_eod', 'reception_backlog', 'pt_mismatch',
   'coordinator_decisions', 'coordinator_analytics', 'coordinator_agents',
   'on_request',   // разовые ручные рассылки (queueBroadcast)
+  'schedule_reminder', // тренерам: расписание на завтра / скоро начало (schedule-reminder)
 ]);
 const family = (rk) => (rk || '').split(':')[0];
 const MAX_ATTEMPTS = 5;
 
-async function tg(chatId, text) {
+async function tg(chatId, text, replyMarkup) {
   try {
     const r = await fetch('https://api.telegram.org/bot' + BOT + '/sendMessage', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' }),
+      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML', ...(replyMarkup ? { reply_markup: replyMarkup } : {}) }),
     });
     const d = await r.json();
     return { ok: !!d.ok, desc: d.description };
@@ -37,7 +38,7 @@ async function main() {
 
   const { data: rows, error } = await sb
     .from('notifications_queue')
-    .select('id,recipient_tg_id,recipient_name,message,attempts,scheduled_for,rule_key')
+    .select('id,recipient_tg_id,recipient_name,message,attempts,scheduled_for,rule_key,reply_markup')
     .eq('status', 'pending')
     .lt('attempts', MAX_ATTEMPTS)
     .order('scheduled_for', { ascending: true })
@@ -57,7 +58,7 @@ async function main() {
 
   let sent = 0, failed = 0, retry = 0;
   for (const n of toSend) {
-    const res = await tg(n.recipient_tg_id, n.message);
+    const res = await tg(n.recipient_tg_id, n.message, n.reply_markup);
     if (res.ok) {
       await sb.from('notifications_queue')
         .update({ status: 'sent', sent_at: new Date().toISOString(), error_text: null })

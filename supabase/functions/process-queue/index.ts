@@ -28,6 +28,7 @@ const WHITELIST = new Set([
   "coordinator_analytics", // координатору: недельная аналитика
   "coordinator_agents",    // координатору: ссылка на отчёты агентов
   "on_request",            // разовые ручные рассылки (queueBroadcast)
+  "schedule_reminder",     // тренерам: расписание на завтра / скоро начало (schedule-reminder)
 ]);
 const family = (rk: string | null) => (rk || "").split(":")[0];
 const MAX_ATTEMPTS = 5;
@@ -39,12 +40,12 @@ const sb = createClient(
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
 );
 
-async function tg(chatId: number, text: string): Promise<{ ok: boolean; desc?: string }> {
+async function tg(chatId: number, text: string, replyMarkup?: unknown): Promise<{ ok: boolean; desc?: string }> {
   try {
     const r = await fetch(`https://api.telegram.org/bot${BOT}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML" }),
+      body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML", ...(replyMarkup ? { reply_markup: replyMarkup } : {}) }),
     });
     const d = await r.json();
     return { ok: !!d.ok, desc: d.description };
@@ -64,7 +65,7 @@ Deno.serve(async () => {
 
   // Наступившие pending-строки, ещё не исчерпавшие попытки.
   const { data: rows, error } = await sb.from("notifications_queue")
-    .select("id,recipient_tg_id,message,attempts,rule_key")
+    .select("id,recipient_tg_id,message,attempts,rule_key,reply_markup")
     .eq("status", "pending")
     .lte("scheduled_for", nowIso)
     .lt("attempts", MAX_ATTEMPTS)
@@ -89,7 +90,7 @@ Deno.serve(async () => {
 
   let sent = 0, failed = 0, retry = 0;
   for (const n of toSend) {
-    const res = await tg(n.recipient_tg_id, n.message);
+    const res = await tg(n.recipient_tg_id, n.message, n.reply_markup);
     if (res.ok) {
       await sb.from("notifications_queue")
         .update({ status: "sent", sent_at: new Date().toISOString(), error_text: null })
