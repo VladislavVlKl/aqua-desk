@@ -204,7 +204,7 @@ Object.assign(DB, {
       .select('trainer_id,category_at_moment,branch,is_debt,debt_confirmed_at,is_drop_in,drop_in_category,workout_date,clients!client_id(age)')
       .gte('workout_date',from).lt('workout_date',to)
       .eq('pending_confirmation',false)   // исключаем незаконфирмированные замены
-      .is('substitute_for',null);         // обычные ПТ; замены с ставкой — отдельно в ptSubstitutions
+      .is('substitute_for',null);         // обычные ПТ; замены — отдельно в ptSubstitutions
     if (branch) wq = wq.eq('branch',branch);
 
     let dq = sb().from('duties')
@@ -239,16 +239,17 @@ Object.assign(DB, {
     // trainer_groups(group_type_id,branch) нужен calcSalary: фильтр двойной оплаты замен во взрослых группах
     let gsub= sb().from('group_substitutions').select('*, trainer_groups(group_type_id,branch)')
       .gte('session_date',fromDay).lt('session_date',toDay).eq('status','approved');
-    // ПТ-замены с выставленной ставкой
+    // ПТ-замены (подтверждённые тренером Б). Со ставкой координатора → ptSubSum,
+    // без ставки → оплачиваются по категории (как в calcSalary и личном отчёте тренера).
     let ptsub = sb().from('workouts')
-      .select('trainer_id,substitute_for,substitute_rate,branch')
-      .not('substitute_for','is',null).not('substitute_rate','is',null)
+      .select('trainer_id,substitute_for,substitute_rate,branch,category_at_moment,is_debt,debt_confirmed_at,is_drop_in,drop_in_category,workout_date,clients!client_id(age)')
+      .not('substitute_for','is',null)
       .gte('workout_date',from).lt('workout_date',to)
       .eq('pending_confirmation',false);
     if (branch) ptsub = ptsub.eq('branch',branch);
 
     let trialq = sb().from('trial_sessions')
-      .select('trainer_id,category').gte('session_date',from).lt('session_date',to);
+      .select('trainer_id,category,session_date,branch').gte('session_date',from).lt('session_date',to);
     if (branch) trialq = trialq.eq('branch',branch);
 
     const [w,d,tg,gs,p,adj,gp,gsubR,ptsubR,trialR,gpayR,gattR] =

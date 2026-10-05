@@ -448,7 +448,9 @@ async function doExportTrainer(trainerId,fioEnc,year,month) {
       }
     } catch(e) { console.error('[exportTrainer numbering]',e); }
     exportTrainerExcel(fio,year,month,d.workouts,d.duties,d.groupSessions,
-      d.adjustments?.length?d.adjustments:d.adjustment, numbering, d.trialSessions||[], d.recalcRows||[]);
+      d.adjustments?.length?d.adjustments:d.adjustment, numbering, d.trialSessions||[], d.recalcRows||[],
+      {trainerId:Number(trainerId), childAutoSum:d.childAutoSum||0, childAutoRows:d.childAutoRows||[],
+       groupSubstitutions:d.groupSubstitutions||[]});
     return;
   }
   const m=el('div','modal-overlay');
