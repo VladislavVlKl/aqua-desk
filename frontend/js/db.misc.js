@@ -69,20 +69,6 @@ Object.assign(DB, {
     const {error} = await sb().from('chlorine_orders').delete().eq('id',id);
     if (error) throw error;
   },
-  async getDutiesForSchedule(branch, from, to) {
-    if (useApi('schedule')) {
-      const rows = await api('/duties/schedule', { query: { branch, from, to } });
-      return (rows || []).map(r => ({ ...r, profiles: { fio: r.trainer_fio } }));
-    }
-    const {data,error} = await sb().from('duties')
-      .select('*, profiles(fio)')
-      .eq('branch',branch)
-      .gte('start_time',from)
-      .lt('start_time',to)
-      .not('end_time','is',null)
-      .order('start_time',{ascending:true});
-    if (error) throw error; return data||[];
-  },
 
   // ─── УВЕДОМЛЕНИЯ ВНУТРИ ПРИЛОЖЕНИЯ ───────────
   async getMyNotifications(tgId) {

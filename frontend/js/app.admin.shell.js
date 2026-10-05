@@ -24,7 +24,7 @@ function renderAdminApp(initialTab='summary') {
   <nav class="bottom-nav">
     <button class="nav-btn" onclick="adminTab('summary')"><span>📊</span>Сводка</button>
     <button class="nav-btn" onclick="adminTab('analytics')"><span>📈</span>Аналитика</button>
-    <button class="nav-btn" onclick="adminTab('clients')"><span>👥</span>Клиенты</button>
+    <button class="nav-btn" onclick="adminTab('schedule')"><span>📅</span>Расписание</button>
     <button class="nav-btn" onclick="adminTab('staff')"><span>🧑‍💼</span>Персонал</button>
     <button class="nav-btn" onclick="adminTab('groups')"><span>🏊</span>Группы</button>
     <button class="nav-btn" onclick="adminTab('control')"><span>🔍</span>Контроль</button>
@@ -39,7 +39,7 @@ function adminTab(tab) {
   // висеть со старым колбэком после ухода из хаба через нижнюю навигацию.
   setupBack(null); STATE._backFn = null;
   $$('.nav-btn').forEach((b,i)=>b.classList.toggle('active',
-    ['summary','analytics','clients','staff','groups','control','more','dev'][i]===tab));
+    ['summary','analytics','schedule','staff','groups','control','more','dev'][i]===tab));
   if (tab==='summary')       renderAdminSummary();
   if (tab==='analytics')     renderAdminAnalytics();
   if (tab==='clients')       renderAdminClients();
@@ -50,7 +50,7 @@ function adminTab(tab) {
   if (tab==='events')        renderEventsTab();
   if (tab==='control')       renderAdminControl();
   if (tab==='tech')          renderAdminTech();
-  if (tab==='schedule')      renderCoordinatorSchedule();
+  if (tab==='schedule')      renderAdminSchedule();
   if (tab==='more')          renderAdminMore();
   if (tab==='dev' && isDev()) renderDevPanel(); // SECTION: DEV
 }
@@ -71,7 +71,7 @@ async function renderAdminMore() {
       <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);text-align:left;padding:14px 16px;border-radius:12px"
         onclick="adminTab('tech')">⚙️ Техчасть</button>
       <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);text-align:left;padding:14px 16px;border-radius:12px"
-        onclick="renderCoordinatorSchedule()">📅 Расписание</button>
+        onclick="adminTab('clients')">👥 Клиенты</button>
       <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);text-align:left;padding:14px 16px;border-radius:12px"
         onclick="renderAdminSessionNotes()">📝 Конспекты и цели</button>
       <button class="btn btn-full" style="background:var(--card);border:1px solid var(--border);text-align:left;padding:14px 16px;border-radius:12px"

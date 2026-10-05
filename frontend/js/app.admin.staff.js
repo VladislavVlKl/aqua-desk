@@ -603,3 +603,161 @@ async function doDeleteBranch(id,name) {
   catch(e) { console.error(e); toast('Ошибка','error'); }
 }
 
+
+// ============================================================
+// SECTION: ADMIN:SCHEDULE — renderAdminSchedule (вкладка «📅 Расписание» в навбаре)
+// План из schedule_slots по филиалу/тренеру на неделю (без сверки с фактом).
+// Карточка тренера; блок 🔔 (пуши по расписанию, notification_rules.schedule_reminder) — только isDev().
+// ============================================================
+const _ASCH = { branch:null, trainer:'all', week:0, types:{duty:true, group:true, pt:true}, key:null, data:null, seq:0 };
+const _ASCH_TYPES = [['duty','🛎','Дежурства'], ['group','👥','Группы'], ['pt','🏊','ПТ']];
+const _aschDs = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+function _aschMonday(offset) {
+  const m = new Date(); m.setHours(0,0,0,0);
+  m.setDate(m.getDate() - (m.getDay()+6)%7 + offset*7);
+  return m;
+}
+
+async function renderAdminSchedule() {
+  const branches = (await cached('branches',()=>DB.getBranches())).map(b=>b.name);
+  if (!branches.includes(_ASCH.branch)) _ASCH.branch = branches[0]||'';
+  const sel = 'width:100%;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text);margin-bottom:8px';
+  $('#tab-content').innerHTML = `<div class="tab-pad">
+    <div class="section-header"><h3>📅 Расписание</h3>
+      <div class="month-nav">
+        <button onclick="_aschWeek(-1)">‹</button><span id="asch-week"></span><button onclick="_aschWeek(1)">›</button>
+      </div>
+    </div>
+    ${branches.length>1?`<select style="${sel}" onchange="_ASCH.branch=this.value;_ASCH.trainer='all';loadAdminSchedule()">
+      ${branches.map(b=>`<option value="${esc(b)}" ${b===_ASCH.branch?'selected':''}>${esc(b)}</option>`).join('')}
+    </select>`:''}
+    <select id="asch-trainer" style="${sel}" onchange="_ASCH.trainer=this.value;_aschRender()"></select>
+    <div id="asch-types" style="display:flex;gap:6px;margin-bottom:12px"></div>
+    <div id="asch-body"><div class="center-screen"><div class="spinner"></div></div></div>
+  </div>`;
+  loadAdminSchedule();
+}
+
+function _aschWeek(delta) { _ASCH.week += delta; loadAdminSchedule(); }
+function _aschToggleType(t) { _ASCH.types[t] = !_ASCH.types[t]; _aschRender(); }
+
+async function loadAdminSchedule() {
+  const mon = _aschMonday(_ASCH.week), sun = new Date(mon); sun.setDate(mon.getDate()+6);
+  const lbl = document.getElementById('asch-week');
+  if (lbl) lbl.textContent = `${mon.getDate()}.${mon.getMonth()+1} – ${sun.getDate()}.${sun.getMonth()+1}`;
+  const key = `${_ASCH.branch}|${_aschDs(mon)}`;
+  if (_ASCH.key === key && _ASCH.data) { _aschRender(); return; }
+  const body = document.getElementById('asch-body');
+  if (body) body.innerHTML = '<div class="center-screen"><div class="spinner"></div></div>';
+  const seq = ++_ASCH.seq; // защита от гонки при быстром листании недель
+  try {
+    const [slots, profiles, rule] = await Promise.all([
+      DB.getBranchWeekSlots(_ASCH.branch, _aschDs(mon), _aschDs(sun)),
+      cached('profiles',()=>DB.getAllProfiles()),
+      isDev() ? DB.getScheduleReminderRule().catch(()=>null) : null,
+    ]);
+    const cancels = await DB.getSlotCancellations(slots.map(s=>s.id), _aschDs(mon), _aschDs(sun));
+    if (seq !== _ASCH.seq) return;
+    const trainers = (profiles||[]).filter(p=>['trainer','senior_trainer'].includes(p.role) && !p.is_archived
+      && ((p.branches||[]).includes(_ASCH.branch) || slots.some(s=>s.trainer_id===p.id)))
+      .sort((a,b)=>a.fio.localeCompare(b.fio,'ru'));
+    _ASCH.key = key;
+    _ASCH.data = { mon, slots, cancels, trainers, rule };
+    if (_ASCH.trainer!=='all' && !trainers.some(t=>String(t.id)===String(_ASCH.trainer))) _ASCH.trainer = 'all';
+    _aschRender();
+  } catch(e) {
+    console.error('[adminSchedule]', e);
+    if (seq === _ASCH.seq && body) body.innerHTML = '<p class="hint">Не удалось загрузить расписание</p>';
+  }
+}
+
+// 🔔 — тренер в списке напоминаний; возвращает массив типов или null
+function _aschReminderTypes(rule, trainerId) {
+  if (!rule?.active || !(rule.recipients||[]).includes(trainerId)) return null;
+  return rule.schedule?.types?.[trainerId] || ['duty','group','pt'];
+}
+
+function _aschRender() {
+  const D = _ASCH.data; if (!D) return;
+  const {mon, slots, cancels, trainers, rule} = D;
+  const one = _ASCH.trainer !== 'all' ? Number(_ASCH.trainer) : null;
+
+  // Селект тренера: число слотов в неделю, 🔔 — только для isDev()
+  const cnt = {}; slots.forEach(s=>{ cnt[s.trainer_id]=(cnt[s.trainer_id]||0)+1; });
+  const tSel = document.getElementById('asch-trainer');
+  if (tSel) tSel.innerHTML = `<option value="all">Все тренеры (${trainers.length})</option>` +
+    trainers.map(t=>`<option value="${t.id}" ${one===t.id?'selected':''}>${esc(t.fio)}${cnt[t.id]?` · ${cnt[t.id]}`:' · нет расписания'}${isDev()&&_aschReminderTypes(rule,t.id)?' 🔔':''}</option>`).join('');
+
+  const tBox = document.getElementById('asch-types');
+  if (tBox) tBox.innerHTML = _ASCH_TYPES.map(([k,ic,l])=>`<button class="btn btn-sm" onclick="_aschToggleType('${k}')"
+    style="flex:1;border-radius:16px;${_ASCH.types[k]?'background:var(--accent,#2563eb);color:#fff':'background:var(--card);border:1px solid var(--border);color:var(--hint)'}">${ic} ${l}</button>`).join('');
+
+  const shown = slots.filter(s => _ASCH.types[s.slot_type] && (!one || s.trainer_id===one));
+  const today = _aschDs(new Date());
+  const DAYS = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+  let html = one ? _aschTrainerCard(trainers.find(t=>t.id===one), slots.filter(s=>s.trainer_id===one), rule) : '';
+
+  for (let d=0; d<7; d++) {
+    const day = new Date(mon); day.setDate(mon.getDate()+d);
+    const ds = _aschDs(day);
+    const items = shown.filter(s => s.specific_date ? s.specific_date===ds : s.day_of_week===d)
+      .sort((a,b)=> a.start_time<b.start_time?-1 : a.start_time>b.start_time?1 : (a.profiles?.fio||'').localeCompare(b.profiles?.fio||'','ru'));
+    const isToday = ds===today, past = ds<today;
+    html += `<div style="padding:8px 0;border-bottom:1px solid var(--border);${past?'opacity:.6':''}">
+      <div style="font-size:12px;font-weight:700;margin-bottom:4px;color:${isToday?'var(--accent,#2563eb)':'var(--hint)'}">
+        ${DAYS[d]} ${day.getDate()}.${day.getMonth()+1}${isToday?' · сегодня':''}</div>
+      ${items.length ? items.map(s=>_aschRow(s, cancels.has(`${s.id}|${ds}`), !one)).join('')
+                     : '<div style="font-size:12px;color:var(--hint);padding:2px 0">—</div>'}
+    </div>`;
+  }
+  const body = document.getElementById('asch-body');
+  if (body) body.innerHTML = html;
+}
+
+function _aschRow(s, cancelled, withTrainer) {
+  const t = (s.start_time||'').slice(0,5), e = (s.end_time||'').slice(0,5);
+  let icon, what;
+  if (s.slot_type==='duty')       { icon='🛎'; what=`Дежурство ${t}–${e}`; }
+  else if (s.slot_type==='group') { icon='👥'; what=`${t} ${esc(s.group_types?.name||'Группа')}`; }
+  else                            { icon='🏊'; what=`${t} ПТ — ${esc(s.clients?.fio||'клиент')}`; }
+  const noBal = s.slot_type==='pt' && (s.clients?.balance||0)<=0;
+  const tags = [
+    s.specific_date ? 'разово' : '',
+    noBal ? 'нет остатка' : '',
+    cancelled ? 'отменено' : '',
+  ].filter(Boolean).map(x=>`<span style="font-size:10px;color:var(--hint);margin-left:4px">· ${x}</span>`).join('');
+  const st = ['font-size:13px','padding:3px 0', cancelled&&'text-decoration:line-through', (cancelled||noBal)&&'opacity:.5'].filter(Boolean).join(';');
+  return `<div style="${st}">
+    ${icon} ${what}${withTrainer?` <span style="color:var(--hint)">· ${esc(s.profiles?.fio||'?')}</span>`:''}${tags}</div>`;
+}
+
+function _aschTrainerCard(t, tSlots, rule) {
+  if (!t) return '';
+  const by = {duty:0, group:0, pt:0}; tSlots.forEach(s=>{ by[s.slot_type]=(by[s.slot_type]||0)+1; });
+  let bell = '';
+  if (isDev()) {
+    const types = _aschReminderTypes(rule, t.id);
+    const name = {duty:'дежурства', group:'группы', pt:'ПТ'};
+    const ev = rule?.schedule?.evening_hour ?? 20, before = Math.round((rule?.schedule?.before_min ?? 120)/60);
+    bell = types
+      ? `<div style="margin-top:8px;font-size:12px">🔔 Напоминания в бот: <b>${types.map(x=>name[x]||x).join(', ')}</b>
+           <div class="hint" style="font-size:11px">вечером в ${ev}:00 — на завтра · за ${before} ч до начала</div></div>`
+      : `<div style="margin-top:8px;font-size:12px;color:var(--hint)">🔕 Не в списке напоминаний</div>`;
+  }
+  // Последняя активность — подгружаем асинхронно в уже отрисованную карточку
+  setTimeout(async () => {
+    const el = document.getElementById('asch-last'); if (!el) return;
+    try {
+      const a = await DB.getTrainerLastActivity(t.id);
+      const f = x => x ? new Date(x).toLocaleDateString('ru-RU',{day:'numeric',month:'short'}) : 'никогда';
+      if (document.getElementById('asch-last')) el.textContent = `Последняя ПТ внесена: ${f(a.lastPt)} · дежурство: ${f(a.lastDuty)}`;
+    } catch(e) { el.textContent = ''; }
+  }, 0);
+  return `<div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:8px">
+    <div style="font-weight:700">${esc(t.fio)}</div>
+    <div class="hint" style="font-size:12px">${esc((t.branches||[]).join(', '))}</div>
+    <div style="font-size:12px;margin-top:6px">В неделю: 🛎 ${by.duty} · 👥 ${by.group} · 🏊 ${by.pt}</div>
+    <div id="asch-last" class="hint" style="font-size:11px;margin-top:2px">…</div>
+    ${bell}
+  </div>`;
+}

@@ -403,3 +403,47 @@ Object.assign(DB, {
     return result;
   },
 });
+
+// ─── РАСПИСАНИЕ ТРЕНЕРОВ ДЛЯ КООРДИНАТОРА (вкладка «📅 Расписание») ───
+// Supabase-only (в FastAPI эндпоинтов под это нет; при флипе API_MODE — добавить).
+Object.assign(DB, {
+  /** Слоты филиала на неделю: регулярные + разовые в [weekStart, weekEnd]. С ФИО тренера. */
+  async getBranchWeekSlots(branch, weekStart, weekEnd) {
+    const {data,error} = await sb().from('schedule_slots')
+      .select('id,trainer_id,branch,slot_type,day_of_week,start_time,end_time,specific_date,client_id,'
+            + 'clients(fio,balance,is_archived),group_types(name),profiles!trainer_id(fio)')
+      .eq('branch',branch).eq('active',true)
+      .or(`specific_date.is.null,and(specific_date.gte.${weekStart},specific_date.lte.${weekEnd})`)
+      .order('start_time');
+    if (error) throw error;
+    return (data||[]).filter(s=>!(s.client_id && s.clients?.is_archived));
+  },
+
+  /** Отмены слотов на даты недели → Set ключей `${slot_id}|${date}` */
+  async getSlotCancellations(slotIds, weekStart, weekEnd) {
+    if (!slotIds.length) return new Set();
+    const {data,error} = await sb().from('schedule_cancellations')
+      .select('slot_id,cancel_date').in('slot_id',slotIds)
+      .gte('cancel_date',weekStart).lte('cancel_date',weekEnd);
+    if (error) throw error;
+    return new Set((data||[]).map(c=>`${c.slot_id}|${c.cancel_date}`));
+  },
+
+  /** Настройки пушей по расписанию (notification_rules.schedule_reminder) */
+  async getScheduleReminderRule() {
+    const {data,error} = await sb().from('notification_rules')
+      .select('active,recipients,schedule').eq('rule_key','schedule_reminder').maybeSingle();
+    if (error) throw error; return data;
+  },
+
+  /** Последняя активность тренера: внесённая ПТ и дежурство (даты) */
+  async getTrainerLastActivity(trainerId) {
+    const [w,d] = await Promise.all([
+      sb().from('workouts').select('created_at').eq('trainer_id',trainerId)
+        .order('created_at',{ascending:false}).limit(1),
+      sb().from('duties').select('start_time').eq('trainer_id',trainerId)
+        .order('start_time',{ascending:false}).limit(1),
+    ]);
+    return { lastPt: w.data?.[0]?.created_at||null, lastDuty: d.data?.[0]?.start_time||null };
+  },
+});
