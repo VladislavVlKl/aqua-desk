@@ -413,12 +413,19 @@ Object.assign(DB, {
       .eq('trainer_id',trainerId).order('created_at',{ascending:false}).limit(20);
     if (error) throw error; return data||[];
   },
-  async approveLateRequest(requestId, reviewerId) {
-    if (useApi('requests')) { await api('/requests/late/'+requestId+'/approve', { method:'POST' }); return; }
+  // asDebt=true — ПТ вносится «в долг» (без списания, как обычный долг из logWorkouts):
+  // для клиента с нулевым остатком, иначе одобрение упирается в INSUFFICIENT_BALANCE.
+  async approveLateRequest(requestId, reviewerId, {asDebt=false}={}) {
+    if (useApi('requests')) {
+      if (asDebt) throw new Error('Одобрение «в долг» пока не поддержано в API-режиме');
+      await api('/requests/late/'+requestId+'/approve', { method:'POST' }); return;
+    }
+    const insufficient = () => { const e=new Error('Баланс клиента исчерпан — сначала оформите пакет или долг'); e.code='INSUFFICIENT_BALANCE'; return e; };
     // Получаем данные запроса
     const {data:req,error:re} = await sb().from('late_workout_requests')
       .select('*').eq('id',requestId).single();
     if (re) throw re;
+    if (req.status !== 'pending') throw new Error('Запрос уже обработан');
     // Создаём тренировку
     const {data:wIns, error:we} = await sb().from('workouts').insert({
       trainer_id:   req.trainer_id,
@@ -426,12 +433,18 @@ Object.assign(DB, {
       branch:       req.branch,
       workout_date: req.workout_date,
       category_at_moment: req.category,
-      is_debt: false, is_drop_in: false,
+      is_debt: asDebt, is_drop_in: false,
       pending_confirmation: false,
       // позднее списание тоже подтверждает ресепшн — если филиал включён
       ...(receptionEnabledForBranch(req.branch) ? {reception_status:'pending'} : {}),
     }).select().single();
     if (we) throw we;
+    if (asDebt) {
+      // Долг баланс не трогает — снимок «до = после» (как в logWorkouts)
+      const {data:cl} = await sb().from('clients').select('balance').eq('id',req.client_id).single();
+      if (cl) await sb().from('workouts')
+        .update({balance_before:cl.balance, balance_after:cl.balance}).eq('id', wIns.id);
+    } else {
     // Списываем баланс клиента (deduct_balance отдаёт новый остаток для снимка)
     const {data:newBal, error:be} = await sb().rpc('deduct_balance', {client_id: req.client_id, n: 1});
     if (be) {
@@ -440,20 +453,19 @@ Object.assign(DB, {
         const {error:incErr} = await sb().rpc('increment_balance', {client_id: req.client_id, delta: -1});
         if (incErr) {
           await sb().from('workouts').delete().eq('id', wIns.id);
-          if (String(incErr.message||'').includes('INSUFFICIENT_BALANCE'))
-            throw new Error('Баланс клиента исчерпан — сначала оформите пакет или долг');
+          if (String(incErr.message||'').includes('INSUFFICIENT_BALANCE')) throw insufficient();
           throw incErr;
         }
       } else {
         // Защита от минуса: откатываем только что вставленную ПТ, запрос остаётся pending
         await sb().from('workouts').delete().eq('id', wIns.id);
-        if (String(be.message||'').includes('INSUFFICIENT_BALANCE'))
-          throw new Error('Баланс клиента исчерпан — сначала оформите пакет или долг');
+        if (String(be.message||'').includes('INSUFFICIENT_BALANCE')) throw insufficient();
         throw be;
       }
     } else if (newBal != null) {
       await sb().from('workouts')
         .update({balance_before:newBal+1, balance_after:newBal}).eq('id', wIns.id);
+    }
     }
     // Обновляем статус запроса
     const {error:ue} = await sb().from('late_workout_requests')

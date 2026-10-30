@@ -700,13 +700,26 @@ async function doSendLateRequest() {
 }
 
 // Одобрение / отклонение (для координатора и старшего тренера)
-async function doApproveLateRequest(id) {
+// Общая часть одобрения: при нулевом остатке клиента предлагаем внести ПТ «в долг»
+async function _approveLateRequest(id, rerender) {
   if (!confirm('Одобрить тренировку и списать с баланса клиента?')) return;
   try {
     await DB.approveLateRequest(id, STATE.profile.id);
     toast('✅ Тренировка добавлена','success');
-    renderAdminControl(true);
-  } catch(e) { toast('Ошибка','error'); console.error(e); }
+    rerender();
+  } catch(e) {
+    console.error(e);
+    if (e.code !== 'INSUFFICIENT_BALANCE') return toast(e.message||'Ошибка','error');
+    if (!confirm('У клиента остаток 0 ПТ. Внести тренировку «в долг»? Спишется, когда клиент купит пакет.')) return;
+    try {
+      await DB.approveLateRequest(id, STATE.profile.id, {asDebt:true});
+      toast('✅ Тренировка добавлена в долг','success');
+      rerender();
+    } catch(e2) { toast(e2.message||'Ошибка','error'); console.error(e2); }
+  }
+}
+async function doApproveLateRequest(id) {
+  return _approveLateRequest(id, () => renderAdminControl(true));
 }
 async function doRejectLateRequest(id) {
   const note = prompt('Причина отказа (опционально):');
@@ -718,12 +731,7 @@ async function doRejectLateRequest(id) {
   } catch(e) { toast('Ошибка','error'); console.error(e); }
 }
 async function doApproveLateRequestSenior(id) {
-  if (!confirm('Одобрить тренировку и списать с баланса клиента?')) return;
-  try {
-    await DB.approveLateRequest(id, STATE.profile.id);
-    toast('✅ Тренировка добавлена','success');
-    renderSeniorAnalytics();
-  } catch(e) { toast('Ошибка','error'); console.error(e); }
+  return _approveLateRequest(id, () => renderSeniorAnalytics());
 }
 async function doRejectLateRequestSenior(id) {
   const note = prompt('Причина отказа (опционально):');

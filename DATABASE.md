@@ -245,6 +245,7 @@ leader_name + leader_fee_percent · group_instance_id uuid · days_of_week text[
 ### Уведомления
 
 **notifications_queue**: `recipient_tg_id, recipient_name, message, scheduled_for, sent_at, error_text, status, created_by, rule_key, read_at, attempts, reply_markup jsonb`
+> **Глушилка пушей:** `profiles.push_muted=true` → BEFORE INSERT триггер `trg_notif_queue_mute` (функция `notif_queue_mute`) сразу ставит строке для его `tg_id` `status='skipped'`, `error_text='muted (profiles.push_muted)'`: в Telegram не уходит, колокольчик показывает. Ловит все источники очереди. Сейчас заглушён id 1 «Администратор» (миграция 20261031120000).
 > `reply_markup` (миграция 20261004120000) — Telegram inline-клавиатура, `process-queue` передаёт в `sendMessage` как есть (напр. кнопка мини-аппа `web_app`).
 **notification_rules**: `name, rule_key, description, active, branches text[], schedule jsonb, recipients integer[]`
 > `branches`/`schedule`/`recipients` — data-driven гейты (Вариант B): филиалы, время и получатели правила меняются UPDATE'ом в БД без деплоя. `schedule` = `{"windows":[[начало,конец]]}` по Ташкенту, опц. `"dow":[…]` (дни по JS getUTCDay 0=Вс..6=Сб; для окон 9–11 день по UTC совпадает с ташкентским), опц. `"link"`. `recipients` (миграция 20260920120000) — id профилей-получателей (пуш на их tg_id). Гейты: ресепшн `reception_eod`(21–23)/`reception_backlog`(9–11); координатор `coordinator_*` (см. ниже).
