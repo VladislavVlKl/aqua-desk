@@ -204,6 +204,12 @@ async function _doLogWorkoutInner() {
     if (isWeekendClient && !isWeekendDate(d)) return toast(`ПТ №${i+1}: пакет «Викенд» — занятия только по сб и вс`,'error');
     dates.push(v);
   }
+  // Детский абонемент истёк → обычную ПТ списать нельзя (долг/разовое — можно).
+  const subEnd = opt?.dataset.subend||'';
+  if (!isDropIn && !isDebt && subEnd && isChild(parseInt(opt.dataset.age))) {
+    const lateIdx = dates.findIndex(v => v.slice(0,10) > subEnd);
+    if (lateIdx>=0) return toast(`⛔ Абонемент истёк ${subEnd} — оформите новый пакет или «В долг»`,'error');
+  }
   // Блокирующие события
   for (const d of dates) {
     const dt=new Date(d);
@@ -236,7 +242,7 @@ async function _doLogWorkoutInner() {
       cooldownMark(_ck);
       toast('✅ Замена записана — тренер получит уведомление для подтверждения','success');
       refreshTrainerScreen();
-    } catch(e) { toast('Ошибка','error'); console.error(e); }
+    } catch(e) { toast(/Абонемент истёк/.test(String(e?.message||''))?e.message:'Ошибка','error'); console.error(e); }
     return;
   }
   if (isDebt||isDropIn) {
@@ -436,7 +442,7 @@ async function doConfirmLogWorkout() {
       category: firstRow?.category_at_moment, is_drop_in: firstRow?.is_drop_in||false,
     }, firstRow?.branch);
   } catch(e) {
-    toast(String(e?.message||'').includes('Баланс исчерпан')?e.message:'Ошибка','error'); console.error(e);
+    toast(/Баланс исчерпан|Абонемент истёк/.test(String(e?.message||''))?e.message:'Ошибка','error'); console.error(e);
     if (btn) { btn.disabled=false; btn.textContent='✅ Списать'; }
   } finally {
     _pending.delete('confirmLog');

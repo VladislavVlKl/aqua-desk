@@ -292,7 +292,9 @@ Object.assign(DB, {
         .update({is_active:false, end_date:startDate, closing_note:'Истёк. Остаток сгорел.'})
         .eq('client_id',clientId).eq('is_active',true);
       // Обнулить баланс, установить новый, сбросить заморозку, обновить тип пакета
-      await sb().from('clients').update({balance:quantity, freeze_start:null, freeze_end:null, is_weekend:!!isWeekend}).eq('id',clientId);
+      // и срок абонемента (иначе в карточке остаются даты старого пакета → «истёк»).
+      await sb().from('clients').update({balance:quantity, freeze_start:null, freeze_end:null, is_weekend:!!isWeekend,
+        subscription_start:startDate, subscription_end:endDate}).eq('id',clientId);
       // Создать новый абонемент
       const {data,error} = await sb().from('subscriptions')
         .insert({client_id:clientId,trainer_id:trainerId,

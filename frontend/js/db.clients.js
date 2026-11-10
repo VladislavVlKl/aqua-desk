@@ -144,6 +144,17 @@ Object.assign(DB, {
     // филиалов из RECEPTION_ENABLED_BRANCHES (пофилиальный запуск). Иначе остаются
     // confirmed по DB DEFAULT — у тренеров нет «ожидающего баланса».
     const rows2 = rows.map(r => (receptionEnabledForBranch(r.branch) ? {reception_status:'pending', ...r} : r));
+    // Детский абонемент истёк → обычная ПТ (с баланса) запрещена; долг/разовое — можно.
+    // Сравниваем дату самой тренировки (по Ташкенту) с subscription_end (включительно).
+    const _paid = rows.filter(r=>!r.is_debt&&!r.is_drop_in);
+    if (_paid.length) {
+      const {data:cl} = await sb().from('clients').select('age,subscription_end').eq('id',rows[0].client_id).maybeSingle();
+      const end = cl?.subscription_end ? String(cl.subscription_end).slice(0,10) : null;
+      if (end && isChild(cl.age)) {
+        const late = _paid.find(r => new Date(new Date(r.workout_date).getTime()+5*3600000).toISOString().slice(0,10) > end);
+        if (late) throw new Error(`Абонемент истёк ${end} — оформите новый пакет или «В долг»`);
+      }
+    }
     if (useApi('clients')) {
       // Бэкенд делает всё в одной транзакции (вставка → списание с гардом → откат,
       // last_used, drop_in_used ребёнка). reception_status передаём вычисленным.
