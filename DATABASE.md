@@ -21,6 +21,7 @@
 | `month_adjustments.trainer_id` | profiles | корректировки ЗП |
 | `late_workout_requests.trainer_id` | profiles | поздние запросы |
 | `subscriptions.client_id` | clients | история абонементов клиента |
+| `package_purchases.client_id` | clients | журнал покупок пакетов клиента |
 | `client_transfers.client_id` | clients | переводы клиента |
 | `late_workout_requests.client_id` | clients | поздние запросы по клиенту |
 | `session_notes.workout_id` | workouts | конспекты тренировки |
@@ -46,6 +47,7 @@
 | `audit_log.actor_id` | profiles |
 | `notifications_queue.created_by` | profiles |
 | `tech_issues.equipment_id` | tech_equipment |
+| `package_purchases.trainer_id` | profiles |
 
 ### NO ACTION (удаление родителя упадёт с ошибкой, если есть дочерние)
 
@@ -71,9 +73,13 @@ schedule_slots → session_notes → workouts → client_transfers → training_
 | `increment_balance` | `client_id uuid, delta int` | void | атомарное изменение баланса; списание ниже нуля отклоняется (`INSUFFICIENT_BALANCE`), пополнение — всегда (миграция 20260704120000) |
 | `deduct_balance` | `client_id uuid, n int` | integer (новый остаток) | атомарное списание n ПТ с защитой от минуса, ВОЗВРАЩАЕТ новый остаток — для снимка `workouts.balance_after`. Используется в `logWorkouts`/`approveLateRequest`/`restoreRejectedWorkout` (миграция 20260818130000) |
 | `rename_branch` | `old_name text, new_name text` | void | переименование филиала во всех таблицах |
+| `buy_package` | `p_client_id uuid, p_trainer_id int, p_is_child bool, p_quantity int, p_start date, p_end date=NULL, p_is_weekend bool=false, p_force bool=false` | jsonb `{subscription, balance, balance_before}` | покупка пакета ОДНОЙ транзакцией (фронт `buyNewPackage`). Детский: старый абонемент закрывается (остаток сгорает), `clients.balance=qty` + даты, новая строка `subscriptions`. Взрослый: `balance += qty`, `initial_balance` активного абонемента суммируется. Advisory-lock на клиента + окно 3 мин: повтор → `DUPLICATE_PURCHASE:<сек>` (фронт переспрашивает «это второй пакет?» → `p_force=true`, сигнал координатору). Пишет `package_purchases` (миграция 20261110140000) |
 
 RLS включается автоматически на новых таблицах (event trigger `rls_auto_enable`).
 Все одноколоночные FK покрыты индексами `idx_<таблица>_<колонка>` (миграция 20260704130000).
+**Лимит строк REST:** `pgrst.db_max_rows = 10000` на роли `authenticator` (миграция 20261110120000).
+Раньше действовал дефолт Supabase 1000 — запросы молча обрезались (сводка ЗП «все филиалы»
+в июне–августе 2026 считалась по неполным ПТ). Запросы, которые могут вернуть >10000 строк, — пагинировать.
 JWT этап 2: у роли `authenticated` — зеркала всех anon-политик, `USING(true)`
 (миграция 20260704150000). Фронт откачен в `JWT_MODE='diagnostic'` (2026-07-06):
 работает под anon, JWT только запрашивается и логируется. Политики authenticated
@@ -117,6 +123,14 @@ is_active · closing_note · freeze_start/end
 is_weekend bool — пакет «Викенд» (детский: 5 ПТ на 1 месяц, занятия только сб/вс)
 ```
 
+**package_purchases** — журнал покупок пакетов (с 2026-11-10; у взрослых абонемент суммируется в одну строку `subscriptions`, отдельных покупок там не видно)
+```
+id bigserial PK · client_id → clients (CASCADE) · trainer_id → profiles (SET NULL) · quantity · is_child · is_weekend
+start_date · end_date (только детский) · subscription_id · balance_before / balance_after
+forced bool — оформлен как «второй пакет» в окне 3 мин · created_at
+```
+> Пишет только RPC `buy_package` (SECURITY DEFINER); RLS включён без политик — с фронта напрямую не читается.
+
 **workouts** — тренировки
 ```
 id uuid PK · trainer_id · client_id · category_at_moment · branch · workout_date
@@ -125,6 +139,8 @@ pending_confirmation · notes
 reception_status (pending|confirmed|rejected) · reception_reason · reception_by (profiles.id) · reception_at
 balance_before / balance_after (снимок остатка ПТ на момент списания — ресепшн показывает «−1 · остаток N» вместо реконструкции N/M; NULL у старых ПТ, миграция 20260818130000)
 ```
+> 🚫 **Дубли запрещены триггером** `trg_workouts_no_duplicate_time` (BEFORE INSERT / UPDATE OF client_id, workout_date; функция `workouts_block_duplicate_time`, SECURITY DEFINER, EXECUTE отозван): у клиента не может быть двух ПТ с одинаковым `workout_date` (дата+время), кроме отклонённых ресепшеном (`rejected`). Ловит все пути (форма, слот расписания, замена, поздняя ПТ), ошибка `DUPLICATE_WORKOUT_TIME` → фронт `_wkDupErr` (db.clients.js). Форма списания дополнительно переспрашивает, если у клиента уже есть ПТ в тот же день. Старые дубли не тронуты (миграция 20261110130000).
+> 🔔 **Сигнал «возможный дубль»:** AFTER INSERT триггер `trg_workouts_signal_same_day` (функция `workouts_signal_same_day`): если у клиента 2+ не отклонённые ПТ в один день (по Ташкенту) → пуш координатору по правилу `coordinator_duplicates` (один на клиента+день, дедуп `notif_dedup`). Любая ошибка внутри глушится — списание не ломает (миграция 20261110140000).
 > `pending_confirmation` — подтверждение ЗАМЕНЫ тренером-заменяемым (тренер→тренер, см. `logSubstituteWorkout`/`resolveSubstitute`). Не путать с ресепшеном.
 > `reception_status` — подтверждение списания РЕСЕПШЕНОМ (Шаг 1 интеграции с 1С). Новые ПТ создаются `pending`, ресепшн подтверждает (`confirmed`) или отклоняет (`rejected` + откат баланса). В ЗП тренера идёт только `confirmed`; `rejected` исключается. Замена попадает в очередь ресепшена только после подтверждения тренером Б (`pending_confirmation=false`). Индекс `idx_workouts_reception (branch, reception_status, workout_date)`.
 > ⚠️ **Гейт фичи — флаг `RECEPTION_SUBMIT_ENABLED` (config.js), не DB DEFAULT.** Колонка имеет `DEFAULT 'confirmed'`; статус `'pending'` ставит `db.js` (`logWorkouts`, `logSubstituteWorkout`, `approveLateRequest`, `addTrialSession`) **только при `RECEPTION_SUBMIT_ENABLED=true`**. Сейчас флаг `false`: панель ресепшена задеплоена, но новые ПТ остаются `confirmed` — у тренеров нет «ожидающего баланса». Активация = `RECEPTION_SUBMIT_ENABLED=true` + пуш, ручных операций с БД не требуется.
@@ -261,11 +277,12 @@ leader_name + leader_fee_percent · group_instance_id uuid · days_of_week text[
 > - `reception_backlog` — утро (окно 9–11): только неотмеченные за прошлые дни.
 > Дедуп на филиал+день+профиль в `notif_dedup`, доставка через `process-queue` (rule_key в вайтлисте). Считает ПТ (`workouts`, `pending_confirmation=false`) + пробные (`trial_sessions`). Старый фронт-триггер `maybeQueueReceptionEod` (app.exec.js) отключён — вечерний пуш теперь ставит pg_cron.
 >
-> **Координатор-пуши** (data-driven, `recipients` = id профилей; сейчас только Владислав id3; охват 3 филиала Sport/Light/Moms, миграция 20260920120000):
+> **Координатор-пуши** (data-driven, `recipients` = id профилей; сейчас только «Администратор» id1; охват 3 филиала Sport/Light/Moms, миграция 20260920120000):
 > - `coordinator_decisions` — вечер (окно 18–20, ежедневно): сводка нерешённых заявок (6 очередей: `delete_requests`/`workout_delete_requests`/`late_workout_requests`/`category_recalc_requests` pending, `pt_mismatch_flags` open, `group_substitutions` pending — последняя без branch, считается глобально) + акцент на висящих >24ч. Молчит, если пусто.
 > - `coordinator_analytics` — вторник (окно 9–11, `dow:[2]`): недельная сводка (ПТ 7дн, новые клиенты, зона риска ≤7дн, долги 3+дн, неактивные тренеры 5+дн).
 > - `coordinator_agents` — пн/ср/пт (окно 9–11, `dow:[1,3,5]`): дублирует ссылку на Claude Routine из `schedule.link` (обновлять при смене роутины). Путь A.
 > Дедуп на день+получатель в `notif_dedup`. Логика в `daily-reminder` + `remind.js` (синхронно).
+> - `coordinator_duplicates` — **сразу, триггерами БД** (не по расписанию): 2+ ПТ одному клиенту за день (`trg_workouts_signal_same_day`) и подтверждённая повторная покупка пакета за 3 мин (`buy_package` с `p_force`). Очередь ставит `notify_duplicate(key, text)` (SECURITY DEFINER, EXECUTE отозван): гейт `active`, получатели `recipients` (сейчас [1]), дедуп по ключу `coordinator_duplicates:pt:<клиент>:<дата>` / `:buy:<клиент>:<минута>` в `notif_dedup`. ⚠ id 1 заглушён (`push_muted`) → сигнал виден в колокольчике, в Telegram не уходит (миграция 20261110140000).
 >
 > **Напоминания тренерам по расписанию** (`schedule_reminder`, миграция 20261004120000) — отдельная Edge Function `schedule-reminder`, `pg_cron` job `schedule-reminder-15m` (каждые 15 мин). **Точечно:** только тренерам из `recipients` (список ведёт координатор через Claude; пусто = никому).
 > - Вечер (`schedule.evening_hour`, 20 по Ташкенту): расписание на завтра.

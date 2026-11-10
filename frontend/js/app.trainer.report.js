@@ -606,14 +606,39 @@ async function doBuyPackage(clientId, isChildClient) {
     : parseInt(selBtn?.dataset.qty||'10');
   if (!qty) return toast('Выберите пакет или введите количество','error');
   const start = document.getElementById('pkg-start')?.value||todayStr();
+  // Защита от двойного нажатия: 2–3 тапа подряд оформляли пакет 2–3 раза
+  // (у взрослых остаток вырастал на 20–30 вместо 10). Ключ — клиент.
+  const _pk = 'buyPkg:'+clientId;
+  if (_pending.has(_pk)) return;
+  _pending.add(_pk);
+  const _btn = document.querySelector('.modal-overlay button.btn-primary.btn-full');
+  if (_btn) { _btn.disabled = true; _btn.textContent = '⏳ Оформляем…'; }
   try {
-    await DB.buyNewPackage(clientId, STATE.profile.id, isChildClient, qty, start, isWeekend);
+    let forced = false;
+    try {
+      await DB.buyNewPackage(clientId, STATE.profile.id, isChildClient, qty, start, isWeekend);
+    } catch(e) {
+      // БД не дала оформить второй пакет тому же клиенту за 3 мин (двойной тап).
+      if (e?.code !== 'DUPLICATE_PURCHASE') throw e;
+      const ago = e.seconds < 60 ? `${e.seconds} сек` : `${Math.round(e.seconds/60)} мин`;
+      if (!confirm(`Этому клиенту уже оформлен пакет ${ago} назад.\n\nЭто действительно ВТОРОЙ пакет?\n«Отмена» — если нажали повторно по ошибке.`)) {
+        document.querySelector('.modal-overlay')?.remove();
+        toast('Повтор не оформлен — пакет уже есть','success');
+        renderClientProfile(clientId, STATE.currentTab||'clients');
+        return;
+      }
+      await DB.buyNewPackage(clientId, STATE.profile.id, isChildClient, qty, start, isWeekend, true);
+      forced = true;
+    }
     DB.auditLog('sub_buy', STATE.profile.id, STATE.profile.fio, clientId, 'subscription',
-      { qty, start, is_child: isChildClient, weekend: isWeekend }, STATE.profile.branches?.[0]);
+      { qty, start, is_child: isChildClient, weekend: isWeekend, ...(forced ? {forced:true} : {}) }, STATE.profile.branches?.[0]);
     document.querySelector('.modal-overlay')?.remove();
     toast(`✅ Пакет ${qty} ПТ оформлен`,'success');
     renderClientProfile(clientId, STATE.currentTab||'clients');
-  } catch(e) { toast('Ошибка','error'); console.error(e); }
+  } catch(e) {
+    toast('Ошибка: '+(e?.message||'не удалось оформить пакет'),'error'); console.error(e);
+    if (_btn) { _btn.disabled = false; _btn.textContent = 'Оформить'; }
+  } finally { _pending.delete(_pk); }
 }
 
 // Редактирование данных клиента

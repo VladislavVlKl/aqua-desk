@@ -27,6 +27,7 @@ const WHITELIST = new Set([
   "coordinator_decisions", // координатору: сводка нерешённого
   "coordinator_analytics", // координатору: недельная аналитика
   "coordinator_agents",    // координатору: ссылка на отчёты агентов
+  "coordinator_duplicates", // координатору: возможные дубли ПТ / повторная покупка (триггеры БД)
   "on_request",            // разовые ручные рассылки (queueBroadcast)
   "schedule_reminder",     // тренерам: расписание на завтра / скоро начало (schedule-reminder)
 ]);

@@ -13,6 +13,13 @@ function _apiWorkout(row) {
   if (!row) return row;
   return { ...row, clients: { fio: row.client_fio, category: row.client_category, age: row.client_age } };
 }
+// Триггер БД trg_workouts_no_duplicate_time (миграция 20261110130000) запрещает две ПТ
+// одному клиенту на одно и то же время — переводим его ошибку в человеческий текст.
+function _wkDupErr(err) {
+  if (String(err?.message||'').includes('DUPLICATE_WORKOUT_TIME'))
+    return new Error('Дубль: у клиента уже есть ПТ на это время — проверьте дату и время');
+  return err;
+}
 
 Object.assign(DB, {
   // ─── CLIENTS ─────────────────────────────────
@@ -170,7 +177,7 @@ Object.assign(DB, {
       return (data?.ids || []).map(id => ({ id }));
     }
     const {data,error} = await sb().from('workouts').insert(rows2).select();
-    if (error) throw error;
+    if (error) throw _wkDupErr(error);
     const cid = rows[0].client_id;
     const nonDebtNonDropin = rows.filter(r=>!r.is_debt&&!r.is_drop_in);
     let finalBal = null;                    // остаток ПОСЛЕ всех списаний — для снимка
@@ -241,6 +248,16 @@ Object.assign(DB, {
                balance_before:before, balance_after:after}).eq('id',workoutId);
     if (e1) throw e1;
     await sb().from('clients').update({balance:after}).eq('id',clientId);
+  },
+  // ПТ клиента за интервал — проверка дублей перед списанием (все тренеры, кроме
+  // отклонённых ресепшеном). В API-режиме дубли ловит только БД-триггер.
+  async getClientWorkoutsBetween(clientId, fromIso, toIso) {
+    if (useApi('clients')) return [];
+    const {data,error} = await sb().from('workouts')
+      .select('id,workout_date,trainer_id,reception_status')
+      .eq('client_id',clientId).gte('workout_date',fromIso).lt('workout_date',toIso);
+    if (error) throw error;
+    return (data||[]).filter(w=>w.reception_status!=='rejected');
   },
   async getTodayWorkouts(trainerId, dateStr) {
     if (useApi('clients')) {
@@ -449,7 +466,7 @@ Object.assign(DB, {
       // позднее списание тоже подтверждает ресепшн — если филиал включён
       ...(receptionEnabledForBranch(req.branch) ? {reception_status:'pending'} : {}),
     }).select().single();
-    if (we) throw we;
+    if (we) throw _wkDupErr(we);
     if (asDebt) {
       // Долг баланс не трогает — снимок «до = после» (как в logWorkouts)
       const {data:cl} = await sb().from('clients').select('balance').eq('id',req.client_id).single();

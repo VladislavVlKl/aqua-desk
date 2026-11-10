@@ -14,6 +14,7 @@ const WHITELIST = new Set([
   'client_transfer', 'cat_recalc_approved', 'cat_recalc_rejected',
   'reception_reject', 'reception_eod', 'reception_backlog', 'pt_mismatch',
   'coordinator_decisions', 'coordinator_analytics', 'coordinator_agents',
+  'coordinator_duplicates', // возможные дубли ПТ / повторная покупка (триггеры БД)
   'on_request',   // разовые ручные рассылки (queueBroadcast)
   'schedule_reminder', // тренерам: расписание на завтра / скоро начало (schedule-reminder)
 ]);

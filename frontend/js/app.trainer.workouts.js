@@ -210,6 +210,26 @@ async function _doLogWorkoutInner() {
     const lateIdx = dates.findIndex(v => v.slice(0,10) > subEnd);
     if (lateIdx>=0) return toast(`⛔ Абонемент истёк ${subEnd} — оформите новый пакет или «В долг»`,'error');
   }
+  // Дубли: две ПТ одному клиенту на одно и то же время — запрещено
+  // (то же стережёт БД-триггер trg_workouts_no_duplicate_time). Та же дата, другое время — переспрашиваем.
+  const _ms = dates.map(v=>new Date(v).getTime());
+  for (let i=0;i<_ms.length;i++) for (let j=i+1;j<_ms.length;j++)
+    if (_ms[i]===_ms[j]) return toast(`⛔ ПТ №${i+1} и №${j+1}: одинаковые дата и время — у каждой тренировки своё время`,'error');
+  {
+    const _dayStart = v => new Date(v.slice(0,10)+'T00:00:00+05:00').getTime();
+    const _from = new Date(Math.min(...dates.map(_dayStart))).toISOString();
+    const _to   = new Date(Math.max(...dates.map(_dayStart)) + 86400000).toISOString();
+    let existing = [];
+    try { existing = await DB.getClientWorkoutsBetween(clientId, _from, _to); } catch(e) { console.error(e); }
+    const exMs = new Set(existing.map(w=>new Date(w.workout_date).getTime()));
+    const dupIdx = _ms.findIndex(t=>exMs.has(t));
+    if (dupIdx>=0) return toast(`⛔ ПТ ${dates.length>1?`№${dupIdx+1} `:''}на ${fmtDT(dates[dupIdx])} уже внесена — дубль не списываем`,'error');
+    const _tashDay = iso => new Date(new Date(iso).getTime()+5*3600000).toISOString().slice(0,10);
+    const exDays = new Set(existing.map(w=>_tashDay(w.workout_date)));
+    const batchDays = dates.map(v=>v.slice(0,10));
+    const sameDay = [...new Set(batchDays.filter((d,i)=>exDays.has(d) || batchDays.indexOf(d)!==i))];
+    if (sameDay.length && !confirm(`⚠️ У клиента уже есть ПТ за ${sameDay.map(fmtDate).join(', ')}.\nТочно списать ещё одну в тот же день?`)) return;
+  }
   // Блокирующие события
   for (const d of dates) {
     const dt=new Date(d);
@@ -242,7 +262,7 @@ async function _doLogWorkoutInner() {
       cooldownMark(_ck);
       toast('✅ Замена записана — тренер получит уведомление для подтверждения','success');
       refreshTrainerScreen();
-    } catch(e) { toast(/Абонемент истёк/.test(String(e?.message||''))?e.message:'Ошибка','error'); console.error(e); }
+    } catch(e) { toast(/Абонемент истёк|Дубль/.test(String(e?.message||''))?e.message:'Ошибка','error'); console.error(e); }
     return;
   }
   if (isDebt||isDropIn) {
@@ -251,7 +271,7 @@ async function _doLogWorkoutInner() {
       cooldownMark(_ck);
       toast(isDebt?'✅ В долг':'✅ Разовое','success');
       refreshTrainerScreen();
-    } catch(e) { toast('Ошибка','error'); console.error(e); }
+    } catch(e) { toast(/Дубль/.test(String(e?.message||''))?e.message:'Ошибка','error'); console.error(e); }
     return;
   }
 
@@ -442,7 +462,7 @@ async function doConfirmLogWorkout() {
       category: firstRow?.category_at_moment, is_drop_in: firstRow?.is_drop_in||false,
     }, firstRow?.branch);
   } catch(e) {
-    toast(/Баланс исчерпан|Абонемент истёк/.test(String(e?.message||''))?e.message:'Ошибка','error'); console.error(e);
+    toast(/Баланс исчерпан|Абонемент истёк|Дубль/.test(String(e?.message||''))?e.message:'Ошибка','error'); console.error(e);
     if (btn) { btn.disabled=false; btn.textContent='✅ Списать'; }
   } finally {
     _pending.delete('confirmLog');

@@ -326,7 +326,7 @@ Object.assign(DB, {
       return await api('/workouts/substitute', { method:'POST', body: subRows });
     }
     const {data,error} = await sb().from('workouts').insert(subRows).select('*, clients(fio), a:profiles!substitute_for(fio)');
-    if (error) throw error;
+    if (error) throw _wkDupErr(error);
     const w0 = data?.[0];
     const cFio = w0?.clients?.fio || 'клиента';
     const aFio = w0?.a?.fio || 'Тренер';

@@ -1,3 +1,12 @@
+// «Прошлое прощаем» (беклог #25): просроченными считаем только ПТ с запуска
+// обязательного конспекта. Старые ПТ без конспекта больше не напоминаем.
+const NOTES_OVERDUE_SINCE = '2026-09-10T00:00:00+05:00';
+// Есть ли у ПТ конспект (эмбед session_notes: объект при 1:1 или массив).
+function _wkHasNote(w) {
+  const ns = Array.isArray(w.session_notes) ? w.session_notes : (w.session_notes ? [w.session_notes] : []);
+  return ns.some(n => n && n.accomplishments != null);
+}
+
 // Reshape слота: плоские client_*/gt_* → эмбеды clients{}/group_types{}.
 function _apiSlot(s) {
   if (!s) return s;
@@ -277,7 +286,7 @@ Object.assign(DB, {
   /** Купить новый пакет ПТ:
    *  - Ребёнок: закрывает старый (остаток сгорает), создаёт новый
    *  - Взрослый: добавляет ПТ к балансу, абонемент не закрывается */
-  async buyNewPackage(clientId, trainerId, isChild, quantity, startDate, isWeekend = false) {
+  async buyNewPackage(clientId, trainerId, isChild, quantity, startDate, isWeekend = false, force = false) {
     if (useApi('clients')) {
       // Бэкенд сам определяет ребёнок/взрослый по возрасту и делает всю логику
       // (закрыть старый + новый баланс/срок для ребёнка; суммировать для взрослого).
@@ -286,43 +295,21 @@ Object.assign(DB, {
       }});
     }
     const endDate = calcSubEnd(startDate, quantity, isWeekend);
-    if (isChild) {
-      // Закрыть старый (баланс сгорает)
-      await sb().from('subscriptions')
-        .update({is_active:false, end_date:startDate, closing_note:'Истёк. Остаток сгорел.'})
-        .eq('client_id',clientId).eq('is_active',true);
-      // Обнулить баланс, установить новый, сбросить заморозку, обновить тип пакета
-      // и срок абонемента (иначе в карточке остаются даты старого пакета → «истёк»).
-      await sb().from('clients').update({balance:quantity, freeze_start:null, freeze_end:null, is_weekend:!!isWeekend,
-        subscription_start:startDate, subscription_end:endDate}).eq('id',clientId);
-      // Создать новый абонемент
-      const {data,error} = await sb().from('subscriptions')
-        .insert({client_id:clientId,trainer_id:trainerId,
-                 start_date:startDate,end_date:endDate,initial_balance:quantity,is_active:true,
-                 is_weekend:!!isWeekend})
-        .select().single();
-      if (error) throw error; return data;
-    } else {
-      // Взрослый: просто добавить к балансу
-      const {data:cl} = await sb().from('clients').select('balance').eq('id',clientId).single();
-      const newBal = (cl?.balance||0) + quantity;
-      await sb().from('clients').update({balance:newBal, freeze_start:null, freeze_end:null}).eq('id',clientId);
-      // Если нет активного абонемента — создать
-      const {data:subs} = await sb().from('subscriptions')
-        .select('id').eq('client_id',clientId).eq('is_active',true).limit(1);
-      if (!subs?.length) {
-        await sb().from('subscriptions')
-          .insert({client_id:clientId,trainer_id:trainerId,
-                   start_date:startDate,initial_balance:quantity,is_active:true})
-          .select().single();
-      } else {
-        // Обновить initial_balance активного абонемента (суммируем пакеты)
-        await sb().from('subscriptions')
-          .update({initial_balance: (subs[0].initial_balance||0)+quantity})
-          .eq('id',subs[0].id);
-      }
-      return {balance:newBal};
+    // Вся покупка — одной транзакцией в БД (RPC buy_package, миграция 20261110140000):
+    // детский — закрыть старый абонемент, новый остаток и даты; взрослый — суммировать ПТ.
+    // Повтор тому же клиенту в течение 3 мин → DUPLICATE_PURCHASE (двойной тап / два
+    // устройства). Фронт переспрашивает и при «это второй пакет» зовёт с force=true.
+    const {data,error} = await sb().rpc('buy_package', {
+      p_client_id: clientId, p_trainer_id: trainerId, p_is_child: !!isChild,
+      p_quantity: quantity, p_start: startDate, p_end: isChild ? endDate : null,
+      p_is_weekend: !!isWeekend, p_force: !!force,
+    });
+    if (error) {
+      const m = String(error.message||'').match(/DUPLICATE_PURCHASE:(\d+)/);
+      if (m) { const e = new Error('DUPLICATE_PURCHASE'); e.code = 'DUPLICATE_PURCHASE'; e.seconds = +m[1]; throw e; }
+      throw error;
     }
+    return isChild ? data?.subscription : {balance: data?.balance ?? null};
   },
 
   // ─── TRAINING GOALS ──────────────────────────
@@ -369,16 +356,13 @@ Object.assign(DB, {
   async getOverdueNotes(clientId, trainerId) {
     if (useApi('clients')) return await api('/notes/overdue', { query: { client_id: clientId, trainer_id: trainerId } });
     const cutoff = new Date(Date.now()-48*3600000).toISOString();
-    const {data:workouts} = await sb().from('workouts')
-      .select('id,workout_date').eq('client_id',clientId).eq('trainer_id',trainerId)
+    // Конспект берём эмбедом — без огромного .in(id…) в URL (он падал 400 на длинных списках)
+    const {data:workouts, error} = await sb().from('workouts')
+      .select('id,workout_date,session_notes(accomplishments)').eq('client_id',clientId).eq('trainer_id',trainerId)
       .eq('is_drop_in',false).eq('is_debt',false)
-      .lt('workout_date',cutoff).order('workout_date',{ascending:false});
-    if (!workouts?.length) return [];
-    const ids = workouts.map(w=>w.id);
-    const {data:notes} = await sb().from('session_notes')
-      .select('workout_id').in('workout_id',ids).not('accomplishments','is',null);
-    const noted = new Set((notes||[]).map(n=>n.workout_id));
-    return workouts.filter(w=>!noted.has(w.id));
+      .gte('workout_date',NOTES_OVERDUE_SINCE).lt('workout_date',cutoff).order('workout_date',{ascending:false});
+    if (error) throw error;
+    return (workouts||[]).filter(w=>!_wkHasNote(w)).map(({session_notes, ...w})=>w);
   },
 
   // Батч-версия: все просроченные конспекты по тренеру за один запрос
@@ -388,18 +372,14 @@ Object.assign(DB, {
       const map = {}; (rows||[]).forEach(r => { map[r.client_id] = Number(r.count); }); return map;
     }
     const cutoff = new Date(Date.now()-48*3600000).toISOString();
-    const {data:workouts} = await sb().from('workouts')
-      .select('id,client_id,workout_date').eq('trainer_id',trainerId)
+    const {data:workouts, error} = await sb().from('workouts')
+      .select('id,client_id,workout_date,session_notes(accomplishments)').eq('trainer_id',trainerId)
       .eq('is_drop_in',false).eq('is_debt',false)
-      .lt('workout_date',cutoff);
-    if (!workouts?.length) return {};
-    const ids = workouts.map(w=>w.id);
-    const {data:notes} = await sb().from('session_notes')
-      .select('workout_id').in('workout_id',ids).not('accomplishments','is',null);
-    const noted = new Set((notes||[]).map(n=>n.workout_id));
+      .gte('workout_date',NOTES_OVERDUE_SINCE).lt('workout_date',cutoff);
+    if (error) throw error;
     // Возвращаем Map: client_id → count
     const result = {};
-    workouts.filter(w=>!noted.has(w.id)).forEach(w=>{
+    (workouts||[]).filter(w=>!_wkHasNote(w)).forEach(w=>{
       result[w.client_id] = (result[w.client_id]||0)+1;
     });
     return result;

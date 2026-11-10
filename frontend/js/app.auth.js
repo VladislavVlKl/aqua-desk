@@ -30,6 +30,18 @@ async function doRegister() {
   } catch(e) { renderRegister(); toast('Ошибка: '+(e?.message||String(e)),'error'); console.error('[doRegister]',e); }
 }
 
+// ── Временная блокировка доступа — экран «в разработке» ───────────
+// Показывается в init() до PIN для профилей из CONFIG.ACCESS_LOCKED_*.
+// Дальше окна пройти нельзя (PIN не запрашивается). Обратимо через config.js.
+function renderAccessLocked() {
+  setupBack(null);
+  setScreen(`<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:16px;padding:32px;text-align:center">
+    <div style="font-size:48px">🛠️</div>
+    <div style="font-size:18px;font-weight:700">Раздел в разработке</div>
+    <div style="font-size:14px;color:var(--hint);line-height:1.5">Доступ временно закрыт.<br>Мы обновляем приложение — загляните позже.</div>
+  </div>`);
+}
+
 // ── PIN — принудительная установка ───────────
 function renderForcePinSetup() {
   setupBack(null); window._newPin=''; window._newPin2=''; window._pinStep=1;

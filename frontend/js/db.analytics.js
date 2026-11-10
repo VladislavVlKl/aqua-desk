@@ -13,9 +13,10 @@ Object.assign(DB, {
         .gte('workout_date', from).lt('workout_date', to),
       // Дежурства за месяц
       sb().from('duties').select('trainer_id,start_time').gte('start_time',from).lt('start_time',to).is('rejected_at',null),
-      // Все тренировки старше 48ч без конспекта
-      sb().from('workouts').select('id,trainer_id,workout_date')
-        .eq('is_drop_in',false).eq('is_debt',false).lt('workout_date', cutoff48),
+      // Тренировки старше 48ч (с запуска обязательного конспекта) + сам конспект эмбедом
+      sb().from('workouts').select('id,trainer_id,workout_date,session_notes(accomplishments)')
+        .eq('is_drop_in',false).eq('is_debt',false)
+        .gte('workout_date', NOTES_OVERDUE_SINCE).lt('workout_date', cutoff48),
       // Последняя тренировка каждого тренера (вообще)
       sb().from('workouts').select('trainer_id,workout_date').order('workout_date',{ascending:false}),
     ]);
@@ -26,14 +27,8 @@ Object.assign(DB, {
     const allOld    = notesR.data||[];
     const allW      = workoutsAllR.data||[];
 
-    // Получаем id тренировок у которых есть конспект
-    const oldIds = allOld.map(w=>w.id);
-    let notedSet = new Set();
-    if (oldIds.length) {
-      const {data:notes} = await sb().from('session_notes')
-        .select('workout_id').in('workout_id', oldIds).not('accomplishments','is',null);
-      notedSet = new Set((notes||[]).map(n=>n.workout_id));
-    }
+    // Тренировки, у которых есть конспект (раньше — отдельный .in(тысячи id) → 400 по длине URL)
+    const notedSet = new Set(allOld.filter(_wkHasNote).map(w=>w.id));
 
     // Строим карту последних тренировок
     const lastWorkoutMap = {};
