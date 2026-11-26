@@ -463,7 +463,12 @@ function _devWrapDB() {
 // SECTION: CORE:INIT — init(), enterApp()
 // ============================================================
 async function init() {
-  if (window.Telegram?.WebApp) { Telegram.WebApp.ready(); Telegram.WebApp.expand(); }
+  if (window.Telegram?.WebApp) {
+    Telegram.WebApp.ready(); Telegram.WebApp.expand();
+    // Свайп вниз при прокрутке сворачивал/закрывал мини-апп. Отключаем вертикальные
+    // свайпы Telegram (Bot API 7.7+; закрыть можно шапкой/крестиком). На старых клиентах метода нет.
+    try { if (typeof Telegram.WebApp.disableVerticalSwipes === 'function') Telegram.WebApp.disableVerticalSwipes(); } catch(e){}
+  }
   _devWrapDB(); // SECTION: DEV — обернуть мутации DB для блокировки записи в дев-режиме
   const tgIdFromTelegram = window.Telegram?.WebApp?.initDataUnsafe?.user?.id;
   const tgIdFromUrl = new URLSearchParams(location.search).get('tgid');
